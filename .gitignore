@@ -1,5 +1,6 @@
 # 文档与测试属于源码，随项目版本管理
 *.log
+diagnostic-test-results.txt
 
 # 输出产物与临时文件
 output/
