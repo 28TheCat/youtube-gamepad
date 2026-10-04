@@ -1,0 +1,414 @@
+✔ real coordinator routes shortcuts and prevents an open menu from leaking actions (35.0834ms)
+✔ real policy keeps menu, native dialog and watch panel in separate input layers (15.7689ms)
+✔ injected UI action ports obey navigation locks and disabled settings (13.1802ms)
+✔ view commands share one lock before media, recommendation, settings or mode changes (13.8658ms)
+✔ global exit closes UI and blocks actions above menus, native layers and navigation (16.1891ms)
+✔ page Escape and B dispatch the same back action once without exiting (17.1076ms)
+✔ Escape dispatches once above search and watch shadow surfaces (11.123ms)
+✔ synthetic native Escape cannot recursively dispatch back (5.2612ms)
+✔ held Escape does not return through multiple layers or change input mode (6.2981ms)
+✔ prevented Escape and other keys do not dispatch back (5.9369ms)
+✔ search history treats page storage as bounded text, never HTML (287.6133ms)
+✔ malformed and oversized page search histories render empty history (622.647ms)
+✔ search from a quick menu returns to its entry even when the native search input exists (128.0224ms)
+✔ page search returns directly to its captured entry and restores it once (119.0873ms)
+✔ pinyin consumes one back before search, menu and the original recommendation (117.6055ms)
+✔ Y from a page preserves the actual origin rather than choosing the native search field (109.1707ms)
+✔ returning from native sidebar closes only a transient open drawer (11.7165ms)
+✔ shoulders activate adjacent categories, skip hidden chips, and stop at either end (7.0566ms)
+✔ category focus ring follows the visible chip face and its smaller corners (4.365ms)
+✔ TV account entry forwards to the native account target and rejects unavailable targets (2.9891ms)
+✔ controller entry and layout changes reveal the whole card below banners; wheel scrolling stays free (19.6099ms)
+✔ preload warms one native batch without scrolling the page, then stays stopped (9.6396ms)
+✔ missing or disabled comments stop after bounded retries; foreground loading remains available (3.2448ms)
+✔ navigation and disable clean up; a new video gets its own preload after player data updates (4.53ms)
+✔ missing player preserves native UI immediately and reports a timeout after five seconds (34.7561ms)
+✔ normal async loading takes over only once all essential capabilities arrive (18.8479ms)
+✔ losing the video after takeover closes custom layers and restores all native layout (12.3232ms)
+✔ fallback remains stable until a manual retry or a new video route (11.2126ms)
+✔ adapter exceptions and partial view renders preserve the CSS safety gate (11.9166ms)
+✔ failure while reading a view snapshot triggers fallback without escaping the port (12.5668ms)
+✔ optional metadata, subtitles, comments and finite duration are not required (8.4947ms)
+✔ a detached player or a preview video outside it cannot authorize takeover (11.9863ms)
+✔ disabling or leaving a failed watch route removes the notice and clears the failure latch (11.0097ms)
+✔ native play and settings buttons are optional and recover independently (19.2101ms)
+✖ optional reads and commands fail independently without exiting controls (11.6704ms)
+✔ search activation opens keyboard without clicking the underlying page (18.206ms)
+✔ browse chrome returns to the original card from either peripheral region (15.3096ms)
+✔ a closed menu returning pass cannot swallow page or playback actions (6.7227ms)
+✔ an open menu cannot leak input even if its handler returns pass (5.0912ms)
+✔ disabled and navigating input stop before consulting any layer (5.5724ms)
+✔ an empty native layer blocks confirm and every media or menu shortcut (6.919ms)
+✔ a site panel owns input even when it has no action to execute (6.2087ms)
+✔ only pass from a region reaches basic actions; blocked stops dispatch (6.6575ms)
+✔ search owner consumes editing shortcuts above both native and site panels (9.1729ms)
+✔ fallback help blocks confirm instead of pausing playback (6.5066ms)
+✔ opening dialog moves focus inside and closing restores outside selection (7.8046ms)
+✔ native dialog actions take priority over playback shortcuts (24.227ms)
+✔ a fading-in dialog owns B before it becomes opaque (5.9735ms)
+✔ nested dialogs restore the selected parent item and then the page focus (5.8581ms)
+✔ SPA return waits for saved video and restores its scroll position (4.6316ms)
+✔ YouTube adapter deduplicates targets inside one video card (5.4977ms)
+✔ sidebar confirmation and route change retain focus for the next direction (7.0018ms)
+✔ grid moves by rows, aligns the whole row and stays still at the end (7.105ms)
+✔ page input preserves row focus and the preferred column without scrolling visible cards (9.0313ms)
+✔ selection visibility follows the injected policy and keeps native dialogs visible (5.4801ms)
+✔ core works with an unnamed input owner without reading concrete application modules (6.9203ms)
+✔ native sliders require A and B ends adjustment before dismissing their dialog (4.7016ms)
+✔ window fullscreen survives document reload and worker restart; disconnect restores maximized (53.6948ms)
+✔ preexisting F11 fullscreen remains untouched on disconnect (2.2744ms)
+✔ manual exit is respected and disabling fullscreen restores only extension-owned windows (4.0935ms)
+✔ background ignores messages from other origins and inactive tabs (2.0208ms)
+✔ layout and automatic window fullscreen can be configured independently (2.5706ms)
+✔ settings entry opens options only for an active top-level YouTube tab (3.3007ms)
+✔ new document does not interpret an initial empty gamepad snapshot as disconnect (23.1808ms)
+✔ page Escape cannot report a false controller disconnect or exit fullscreen (4.2533ms)
+✔ bridge retries failed fullscreen requests and stops polling messages after acknowledgement (11.7304ms)
+✔ forced settings refresh failures also retry an already acknowledged connection (4.5674ms)
+✔ returning from settings rechecks fullscreen even when connection has not changed (4.0398ms)
+✔ disconnect still gets reported if the connection acknowledgement was lost (5.1583ms)
+✔ background marks an inactive connection for retry and applies it after activation (2.3267ms)
+✔ connection state is detected while disabled and only emits on changes (7.5234ms)
+✔ confirm fires once per press, then rearms on release (3.0416ms)
+✔ Y opens search once per press (2.2951ms)
+✔ deadzone and held direction repeat (2.7429ms)
+✔ disabled input emits no actions (2.0308ms)
+✔ nonstandard mapping is ignored (1.8433ms)
+✔ only controller activity enters gamepad mode; real mouse motion restores mouse mode (5.6831ms)
+✔ disable, disconnect, blur and hidden page restore the mouse (7.7045ms)
+✔ jitter does not accumulate into a switch; click, wheel and keyboard take ownership immediately (2.4435ms)
+✔ analog hysteresis filters threshold chatter and navigation resets require a neutral controller (3.5826ms)
+✔ disconnect event releases immediately even before the polling snapshot updates (2.4894ms)
+✔ search shortcuts and held deletion are scoped to the search keyboard (2.0973ms)
+✔ destroy cancels listeners, intervals, timeouts and frames, including queued callbacks (9.727ms)
+✔ completed work is released and observer disconnect/reobserve does not accumulate resources (2.7699ms)
+✔ replacing a scope disables its old callbacks and cleanup continues after one failure (2.5399ms)
+✔ route disposal preserves a later site wrapper and makes a retained wrapper inert (7.7339ms)
+✔ right selects same row instead of a nearer diagonal card (2.9749ms)
+✔ last card does not wrap right into the next row (0.5069ms)
+✔ content stays in its section until its left boundary (0.8215ms)
+✔ sidebar right exits to content while up moves within sidebar (0.4914ms)
+✔ top row can exit to header (0.5591ms)
+✔ TV header moves down into categories without moving sideways into a different row (0.6755ms)
+✔ overlay cannot escape to background content (0.4821ms)
+✔ down moves to the adjacent row before a farther aligned column (0.5604ms)
+✔ vertical grid navigation keeps the column within the adjacent row (0.6455ms)
+✔ row alignment keeps full rows below pinned bars and avoids unnecessary movement (0.7625ms)
+✔ oversized row aligns to the safe top and does not keep scrolling (0.3146ms)
+✔ each video row restores its last selected card after horizontal movement in another row (1.0743ms)
+✔ a short row does not erase the preferred column when entering an unvisited row (0.8273ms)
+✔ replaced cards restore by key and a removed selection falls back to the preferred column (4.1558ms)
+✔ explicit horizontal rows tolerate different card heights and vertical positions (0.4345ms)
+✔ legacy combined preference initializes independent fullscreen without changing layout (11.9367ms)
+✔ existing fullscreen preference survives opening options and other field writes (3.5484ms)
+✔ invalid fields are not persisted; external enabled changes update the settings page (3.4623ms)
+✔ long-list actions share reads but remeasure after the next DOM update (41.8919ms)
+✔ player animation does no recovery work while mixed page mutations still coalesce (20.2124ms)
+✔ YouTube filters animated player subtrees while keeping native settings changes (4.1556ms)
+✔ dictionary shards stay lazy and learned rankings invalidate cached results (199.2543ms)
+✔ full pinyin words and ü normalization work offline (35.7897ms)
+✔ unlisted sentences can commit a word prefix and leave the rest composing (7.3024ms)
+✔ theater layout follows controller connection and respects manual settings (28.6065ms)
+✔ playback left and right show controls without changing the playback position (19.6813ms)
+✔ playback confirm pauses and up enters controls without opening the quick menu (10.9593ms)
+✔ SPA route switches mode; volume and captions work through menu actions (11.809ms)
+✔ watch navigation excludes the masthead and moves up to the preceding recommendation (13.2531ms)
+✔ confirming a video enters fullscreen layout and B returns to its source list (12.0248ms)
+✔ only controller activation prepares playback and canceled navigation restores browsing (10.7341ms)
+✔ B on a directly opened video returns to home (9.4278ms)
+✔ safe viewport accounts for stacked fixed masthead and sticky category bar (8.9384ms)
+✔ leaving after playing recommendations returns across the video chain to the source list (15.5483ms)
+✔ control buttons navigate without seeking; the progress bar consumes left and right (9.2207ms)
+✔ B dismisses controls before leaving the video (11.8108ms)
+✔ native settings B returns from a submenu, then closes settings (8.8167ms)
+✔ B recognizes the current YouTube settings header back button (11.3205ms)
+✔ progress navigation returns to the native control row (13.9362ms)
+✔ duplicate navigation notifications neither increase depth nor dismiss controls (10.8361ms)
+✔ canceled and same-video navigation do not add depth (10.5121ms)
+✔ unconfirmed pushes, replaced routes and traversal return safely to the source (67.4007ms)
+✔ page return remains locked through popstate until navigation finishes (9.9866ms)
+✔ disable during navigation cleans interaction state and preserves the return lock (9.5495ms)
+✔ release inventory detects changed scripts and rejects unlisted debug data (169.2388ms)
+✔ release rejects missing dependencies and paths outside the package (32.4355ms)
+✔ reordered recommendations restore by video ID exactly once (7.7169ms)
+✔ deleted target selects its surviving neighbor before the index fallback (2.7177ms)
+✔ empty recommendation region returns to controls (2.3428ms)
+✔ route changes discard old watch target and use the active page rule (2.3815ms)
+✔ closing a lower native scope cannot steal focus from the menu above it (2.4008ms)
+✔ closing a layer restores its parent without applying a background refresh (2.3747ms)
+✔ priority layers suspend late native scopes and release them before restoration (3.0326ms)
+✔ priority focus protection preserves an existing inert attribute (5.7372ms)
+✔ page bridge publishes only allowed settings with validated values (11.5158ms)
+✔ forged page messages cannot persist settings or trigger extension operations (2.8692ms)
+✔ ready resends are origin filtered and limited even for same-page spoofing (3.0306ms)
+✔ settings entry forwards only a fixed request, with origin and rate limits (3.087ms)
+✔ connection status responds only to this extension (2.9644ms)
+✔ pinyin rankings reject invalid scores and dictionary keys, keeping valid hints (171.8985ms)
+✔ malformed or oversized rankings fall back to defaults without blocking learning (279.6342ms)
+✔ transitions are deterministic, replayable and leave frozen previous states untouched (6.6137ms)
+✔ all layer combinations resolve exactly one owner and native shortcuts never fall through (1.1185ms)
+✔ search over recommendations unwinds language, composition, search and menu one layer at a time (1.1943ms)
+✔ page search closes directly and editing shortcuts cannot generate playback effects (0.806ms)
+✔ panel scroll observations keep the selected comment until its body is visible (0.7882ms)
+✔ verified history chains return once; traversal and duplicate finishes cannot increase depth (1.3664ms)
+✔ uncertain or canceled history uses the source URL without guessing a jump (0.4501ms)
+✔ navigation blocks every interactive slice, including menus, until completion (0.5054ms)
+✔ auto-hide requires playing idle controls with no layer, recommendation focus or navigation (0.7726ms)
+✔ slider B unwinds adjustment, progress focus, controls and playback separately (4.2425ms)
+✔ current YouTube theme wins over remembered and system themes (12.5914ms)
+✔ unavailable tab uses remembered theme, then system for missing or invalid values (6.6218ms)
+✔ YouTube changes update an open UI while system changes cannot override its theme (7.3034ms)
+✔ system fallback follows system changes (3.3706ms)
+✔ late responses from an older refresh cannot undo the latest theme (3.1327ms)
+✔ menu renders and switches views when HTML string assignments are blocked (309.6467ms)
+✖ recommendation thumbnails recover from unloaded, placeholder and srcset images (74.5546ms)
+✖ failed card images retry once and preserve their thumbnail container (11.6269ms)
+✔ watch shell uses safe DOM construction and restores the normal page when disabled (13.1151ms)
+✔ progress requires A to adjust and A ends adjustment without hiding controls (12.6329ms)
+✖ recommendation B returns to controls before returning to pure playback (11.6285ms)
+✖ description closes back to its original button and missing recommendations recover focus (11.7621ms)
+✖ recommendations activate the source anchor and native settings remain delegated (15.0923ms)
+✔ comments panel closes to the comments button and cleans up when disabled (13.8488ms)
+✔ returning from recommendations and progress preserves the chosen control (10.6236ms)
+✖ recommendations discard external URLs and detached anchors (14.9682ms)
+✔ loaded comments remain text and activate the original reply control (13.1183ms)
+✖ coordinator connects the real watch and site through playback, controls and channel navigation (33.448ms)
+✔ coordinator synchronizes settings and SPA changes with the watch surface (15.972ms)
+✔ closing native settings restores watch controls through the coordinator policy (17.2701ms)
+✖ auto-hide requires idle controls, playing video and no temporary layer or navigation (46.5311ms)
+✔ closing a native layer grants a fresh idle window (17.4302ms)
+✔ recommendation refresh does not steal native dialog focus (13.8754ms)
+✖ stale view sync cannot overwrite coordinator mode or enablement (13.8738ms)
+✔ global exit restores the native watch page and clears an open comments panel (13.6957ms)
+✔ watch renders and operates through injected snapshots without native DOM access (12.8644ms)
+✖ adapter snapshots do not expose native media or recommendation nodes (17.3866ms)
+✔ adapter clears stale recommendations while the player belongs to the previous route (9.6045ms)
+✔ left and right in playback reveal controls and move focus without seeking (25.1815ms)
+ℹ tests 186
+ℹ suites 0
+ℹ pass 175
+ℹ fail 11
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1643.1297
+
+✖ failing tests:
+
+test at tests\fallback.test.mjs:158:2
+✖ optional reads and commands fail independently without exiting controls (11.6704ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'fallback'
+  - 'ready'
+  
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/fallback.test.mjs:173:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'fallback',
+    expected: 'ready',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\watch.test.mjs:99:1
+✖ recommendation thumbnails recover from unloaded, placeholder and srcset images (74.5546ms)
+  TypeError: Cannot read properties of undefined (reading 'thumbnail')
+      at read (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:101:63)
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:104:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.start (node:internal/test_runner/test:1191:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17)
+
+test at tests\watch.test.mjs:115:1
+✖ failed card images retry once and preserve their thumbnail container (11.6269ms)
+  TypeError: Cannot read properties of undefined (reading 'tagName')
+      at find (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:119:36)
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:121:17)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3)
+
+test at tests\watch.test.mjs:155:1
+✖ recommendation B returns to controls before returning to pure playback (11.6285ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:157:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\watch.test.mjs:163:1
+✖ description closes back to its original button and missing recommendations recover focus (11.7621ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 4
+  
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:169:55)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 4,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\watch.test.mjs:172:1
+✖ recommendations activate the source anchor and native settings remain delegated (15.0923ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   'playPause'
+  -   '/watch?v=next',
+  -   'navigate'
+    ]
+  
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:174:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'playPause' ],
+    expected: [ '/watch?v=next', 'navigate' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests\watch.test.mjs:202:1
+✖ recommendations discard external URLs and detached anchors (14.9682ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   'playPause'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:206:37)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'playPause' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests\watch.test.mjs:230:1
+✖ coordinator connects the real watch and site through playback, controls and channel navigation (33.448ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'controls'
+  - 'recommendations'
+  
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:240:45)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'controls',
+    expected: 'recommendations',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\watch.test.mjs:280:1
+✖ auto-hide requires idle controls, playing video and no temporary layer or navigation (46.5311ms)
+  AssertionError [ERR_ASSERTION]: recommendations
+  + actual - expected
+  
+  + 'playback'
+  - 'controls'
+  
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:295:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'playback',
+    expected: 'controls',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\watch.test.mjs:318:1
+✖ stale view sync cannot overwrite coordinator mode or enablement (13.8738ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'controls'
+  - 'recommendations'
+  
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:324:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'controls',
+    expected: 'recommendations',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\watch.test.mjs:379:1
+✖ adapter snapshots do not expose native media or recommendation nodes (17.3866ms)
+  TypeError: Cannot read properties of undefined (reading 'key')
+      at TestContext.<anonymous> (file:///C:/Users/26076/Desktop/youtube-gamepad/tests/watch.test.mjs:383:40)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7)

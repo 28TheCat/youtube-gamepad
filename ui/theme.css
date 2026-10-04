@@ -1,0 +1,77 @@
+/* Shared visual tokens. Page and Shadow DOM UI inherit these from html.
+   Keep YouTube theme selectors here; playback uses explicit overlay tokens. */
+:root {
+  --ytg-font-family: Roboto, Arial, "Microsoft YaHei", sans-serif;
+  --ytg-focus-color: #60a5fa;
+  --ytg-adjusting-color: #fbbf24;
+  --ytg-focus-width: 3px;
+  --ytg-focus-offset: 3px;
+  --ytg-focus-duration: 120ms;
+  --ytg-focus-easing: cubic-bezier(.26,.86,.44,.985);
+  --ytg-pill-radius: 999px;
+  --ytg-chip-radius: 8px;
+  --ytg-button-radius: 10px;
+  --ytg-card-radius: 14px;
+  --ytg-panel-radius: 24px;
+  --ytg-background: #fff;
+  --ytg-text: #171717;
+  --ytg-muted: #555;
+  --ytg-sidebar-text: var(--ytg-muted);
+  --ytg-surface: #f3f4f6;
+  --ytg-border: #d1d5db;
+  --ytg-current-background: var(--ytg-surface);
+  --ytg-current-text: var(--ytg-text);
+  --ytg-selected-background: var(--ytg-text);
+  --ytg-selected-text: var(--ytg-background);
+  --ytg-overlay-backdrop: #0009;
+  --ytg-overlay-panel: #181818ed;
+  --ytg-overlay-surface: #222;
+  --ytg-overlay-button: #ffffff20;
+  --ytg-overlay-subtle: #ffffff0d;
+  --ytg-overlay-border: #ffffff55;
+  --ytg-overlay-text: #fff;
+  --ytg-overlay-muted: #ccc;
+  --ytg-overlay-selected-text: #111;
+  --ytg-overlay-gradient: linear-gradient(180deg,rgba(0,0,0,.55),transparent 30%,rgba(0,0,0,.12) 45%,rgba(0,0,0,.85));
+  --ytg-panel-shadow: 0 24px 80px #0008;
+  --ytg-text-shadow: 0 2px 8px #0008;
+  --ytg-rail-shadow: 24px 0 40px #0002;
+  --ytg-rail-width: 88px;
+  --ytg-rail-expanded-width: 248px;
+  --ytg-top-height: 72px;
+  --ytg-chips-height: 64px;
+  --ytg-brand-color: #ff0033;
+  --ytg-space-half: 2px;
+  --ytg-space-small: 6px;
+  --ytg-space-between: 10px;
+  --ytg-space-wide: 18px;
+  --ytg-space-inset: 22px;
+  --ytg-space-1: 4px;
+  --ytg-space-2: 8px;
+  --ytg-space-3: 12px;
+  --ytg-space-4: 16px;
+  --ytg-space-5: 20px;
+  --ytg-space-6: 24px;
+  --ytg-space-7: 28px;
+  --ytg-space-8: 32px;
+}
+html[dark] {
+  color-scheme: dark;
+  --ytg-background: #0f0f0f;
+  --ytg-text: #f1f1f1;
+  --ytg-muted: #aaa;
+  --ytg-surface: #272727;
+  --ytg-border: #454545;
+}
+html:not([dark]) { color-scheme: light; }
+/* The extension popup has no YouTube document; use its system preference. */
+@media (prefers-color-scheme: dark) {
+  html[data-ytg-popup]:not([data-ytg-theme-synced]) {
+    color-scheme: dark;
+    --ytg-background: #0f0f0f;
+    --ytg-text: #f1f1f1;
+    --ytg-muted: #aaa;
+    --ytg-surface: #272727;
+    --ytg-border: #454545;
+  }
+}

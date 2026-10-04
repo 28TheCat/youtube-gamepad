@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN" data-ytg-popup>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YouTube Gamepad · 完整设置</title><link rel="stylesheet" href="ui/theme.css"><link rel="stylesheet" href="options.css"></head>
+<body><main>
+<header><p class="eyebrow">YouTube Gamepad</p><h1>完整设置</h1><p>管理插件行为，修改后自动保存。</p></header>
+<nav aria-label="设置分组"><a href="#general">常用</a><a href="#display">显示</a><a href="#gamepad">手柄</a><a href="#diagnostics">诊断</a></nav>
+<form><fieldset disabled>
+<section id="general" aria-labelledby="generalTitle">
+<div class="section-heading"><h2 id="generalTitle">常用</h2><p>控制手柄操作的启用状态。</p></div>
+<div class="setting-row">
+<div class="setting-copy"><label for="enabled">启用手柄操作</label><p id="enabledHelp">使用手柄浏览视频、控制播放和打开快捷菜单。</p></div>
+<input class="toggle" id="enabled" type="checkbox" aria-describedby="enabledHelp">
+</div>
+<details class="help"><summary>查看操作说明</summary><div class="help-content"><p>关闭手柄操作后恢复 YouTube 原有界面。</p><p>播放时按 Start 打开快捷菜单，可搜索视频、切换字幕、调整音量或进入完整设置。</p></div></details>
+</section>
+<section id="display" aria-labelledby="displayTitle">
+<div class="section-heading"><h2 id="displayTitle">显示</h2><p>调整远距离浏览体验，两项可分别开启。</p></div>
+<div class="setting-row">
+<div class="setting-copy"><label for="theater">大屏布局</label><p id="layoutHelp">检测到手柄时使用电视式顶栏和播放控件，侧栏与视频列表保留原生布局。</p></div>
+<input class="toggle" id="theater" type="checkbox" aria-describedby="layoutHelp">
+</div>
+<div class="setting-row">
+<div class="setting-copy"><label for="autoFullscreen">检测到手柄时自动全屏</label><p id="fullscreenHelp">浏览器窗口进入全屏，隐藏标签栏和地址栏。</p></div>
+<input class="toggle" id="autoFullscreen" type="checkbox" aria-describedby="fullscreenHelp fullscreenDetails">
+</div>
+<details class="help"><summary>了解布局与全屏的区别</summary><div class="help-content" id="fullscreenDetails"><p>大屏布局只调整 YouTube 页面，不会让浏览器进入全屏。自动全屏作用于当前 YouTube 标签所在的浏览器窗口，类似按 F11。</p><p>断开手柄、关闭自动全屏或停用插件后，恢复原窗口状态；手动进入的全屏保持不变。</p><p>视频播放时铺满页面的布局，也与浏览器窗口全屏分开处理。</p></div></details>
+</section>
+<section id="gamepad" aria-labelledby="gamepadTitle">
+<div class="section-heading"><h2 id="gamepadTitle">手柄</h2><p>连接后即可使用，需要时再调整操作灵敏度。</p></div>
+<details class="advanced">
+<summary><span>进阶参数<span class="summary-hint">摇杆死区与长按速度</span></span></summary>
+<div class="advanced-content">
+<div class="setting-row parameter-row">
+<div class="setting-copy"><label for="deadzone">摇杆死区</label><p id="deadzoneHelp">数值越大，需要推动越远，可减少漂移误操作。</p></div>
+<div class="range-control"><output id="deadzoneValue" for="deadzone"></output><input id="deadzone" type="range" min="0.15" max="0.75" step="0.05" aria-describedby="deadzoneHelp"></div>
+</div>
+<div class="setting-row parameter-row">
+<div class="setting-copy"><label for="repeatDelay">长按首次重复延迟</label><p id="delayHelp">按住方向后，开始连续移动前的等待时间。</p><span class="constraint" id="delayRange">范围：150–1000 毫秒</span></div>
+<div class="number-control"><input id="repeatDelay" type="number" min="150" max="1000" step="10" required aria-describedby="delayHelp delayRange"><span aria-hidden="true">毫秒</span></div>
+</div>
+<div class="setting-row parameter-row">
+<div class="setting-copy"><label for="repeatInterval">连续移动间隔</label><p id="intervalHelp">每一步的间隔，数值越小移动越快。</p><span class="constraint" id="intervalRange">范围：80–500 毫秒</span></div>
+<div class="number-control"><input id="repeatInterval" type="number" min="80" max="500" step="10" required aria-describedby="intervalHelp intervalRange"><span aria-hidden="true">毫秒</span></div>
+</div>
+</div></details>
+<details class="help"><summary>连接与按键说明</summary><div class="help-content"><p>连接标准布局手柄后，先点击 YouTube 页面，再按一次手柄按键。</p><p>方向键 / 左摇杆选择，A 确认，B 返回，Start 打开快捷菜单。</p></div></details>
+</section>
+</fieldset></form>
+<section id="diagnostics" aria-labelledby="diagnosticsTitle">
+<div class="section-heading"><h2 id="diagnosticsTitle">本地诊断</h2><p>保留最近的故障记录，最多 100 条、32,768 个字符；超出后移除最早记录。仅保存在本机，导出后可自行查看或分享。</p></div>
+<p>记录包含时间、插件版本、故障模块、错误原因、堆栈和界面状态，不记录视频标题、评论或完整页面地址。错误文本中的网址会被隐藏。</p>
+<div class="diagnostic-actions"><button id="exportDiagnostics" type="button">导出诊断 JSON</button><button id="clearDiagnostics" type="button">清空诊断记录</button></div>
+<output id="diagnosticStatus" role="status" aria-live="polite"></output>
+</section>
+<output id="status" role="status" aria-live="polite"></output>
+</main><script src="ui/theme-sync.js"></script><script src="options.js"></script><script src="diagnostics-store.js"></script><script src="diagnostics-options.js"></script></body></html>

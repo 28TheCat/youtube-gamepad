@@ -1,0 +1,61 @@
+
+    :host{position:fixed;inset:0;z-index:2147483647;display:none;background:var(--ytg-overlay-backdrop);align-items:center;justify-content:center;color:var(--ytg-text);font:18px/1.5 var(--ytg-font-family)}
+    :host-context(html.ytg-gamepad-input),:host-context(html.ytg-gamepad-input) *{cursor:none!important}
+    :host-context(html[data-ytg-input-mode="mouse"]) button:focus{outline:none!important;border-color:transparent!important;background:var(--ytg-surface);color:var(--ytg-text)}
+    :host-context(html[data-ytg-input-mode="mouse"]) .search-panel button:focus{background:var(--ytg-surface)!important;color:var(--ytg-text)!important}
+    section{width:min(620px,85vw);max-height:85vh;overflow:auto;background:var(--ytg-background);border:1px solid var(--ytg-border);border-radius:var(--ytg-panel-radius);padding:var(--ytg-space-7);box-shadow:var(--ytg-panel-shadow)}
+    h2{margin:0 0 var(--ytg-space-4)}button{background:var(--ytg-surface);color:var(--ytg-text);border:2px solid transparent;border-radius:var(--ytg-button-radius);padding:var(--ytg-space-3);text-align:left;font:inherit;cursor:pointer}
+    button:focus{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset);border-color:transparent;background:var(--ytg-selected-background);color:var(--ytg-selected-text)}#items,#keys{display:grid;gap:var(--ytg-space-between)}
+    #keys button{text-align:center;min-width:0}#recent{display:flex;flex-direction:column;gap:var(--ytg-space-2)}
+    #recent button{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+    input{width:100%;box-sizing:border-box;font:inherit}p{color:var(--ytg-muted);font-size:14px}#message{min-height:24px}
+  
+      :host([data-search]){background:var(--ytg-background);display:block;pointer-events:auto;font-family:var(--ytg-font-family);color:var(--ytg-text);overflow:auto}
+      :host([data-search]) section.search-panel{box-sizing:border-box;width:min(1180px,100%);max-height:none;margin:0 auto;padding:clamp(var(--ytg-space-6),5vh,60px) clamp(var(--ytg-space-5),5vw,64px);background:transparent;border:0;border-radius:0;box-shadow:none;overflow:visible}
+      .search-panel input{display:block;background:var(--ytg-surface);color:inherit;border:2px solid var(--ytg-border);border-radius:var(--ytg-pill-radius);font-size:clamp(20px,2.3vw,30px);font-weight:500;padding:var(--ytg-space-3) var(--ytg-space-6);margin-bottom:var(--ytg-space-7)}
+      .search-panel input::placeholder{color:var(--ytg-muted);opacity:1}
+      .search-panel input:focus{border-color:var(--ytg-focus-color);outline:none}
+      .search-panel .search-layout{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.2fr);gap:clamp(var(--ytg-space-6),5vw,72px);margin-top:0;align-items:start}
+      .search-panel #keys{gap:var(--ytg-space-2)}
+      .search-panel .key-row{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:var(--ytg-space-small)}
+      .search-panel .key-row button{color:var(--ytg-text);font-size:clamp(24px,2.2vw,30px);font-weight:500;padding:var(--ytg-space-small) 0;min-height:44px;background:transparent;border:0;border-radius:var(--ytg-chip-radius);line-height:1.3}
+      .search-panel .key-row button:focus{color:var(--ytg-background);background:var(--ytg-text)}
+      .search-panel .key-row svg{width:24px;height:24px;vertical-align:middle}
+      .search-panel .key-row.languages{grid-template-columns:repeat(3,minmax(0,1fr));padding:0}.search-panel .key-row.languages button{font-size:20px;background:var(--ytg-surface);color:var(--ytg-text);min-height:56px;padding:var(--ytg-space-between) var(--ytg-space-3);border:1px solid var(--ytg-border)}.search-panel .key-row.languages button:focus{background:var(--ytg-text);color:var(--ytg-background);outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset)}
+      .search-panel .key-row:last-child:not(.languages){grid-template-columns:repeat(3,minmax(0,1fr));margin-top:var(--ytg-space-2);padding-right:12.5%}
+      .search-panel .key-row:last-child:not(.languages) button{background:var(--ytg-surface);color:var(--ytg-text);font-size:18px;padding:var(--ytg-space-2)}
+      .search-panel .key-row:last-child:not(.languages) button:focus{background:var(--ytg-text);color:var(--ytg-background)}
+      .search-panel #recent{gap:var(--ytg-space-2)}
+      .search-panel #recent button{color:inherit;font-size:clamp(16px,1.8vw,23px);font-weight:600;padding:var(--ytg-space-between) var(--ytg-space-3);background:transparent;border:0;border-radius:var(--ytg-chip-radius)}
+      .search-panel #recent button{color:var(--ytg-text)}
+      .search-panel #recent button:focus{color:var(--ytg-background);background:var(--ytg-text)}
+      .search-panel p{color:var(--ytg-muted);font-size:16px;margin:var(--ytg-space-4) 0}
+      .search-panel #recent>p:first-child{margin-top:0;font-size:16px}
+      .search-panel #message:empty{display:none}
+      .search-panel .controls{margin-top:var(--ytg-space-8);font-size:16px;line-height:1.8}
+      .search-panel .controls{display:flex;flex-wrap:wrap;gap:12px 24px;border-top:1px solid var(--ytg-surface);padding-top:20px;font-size:14px;line-height:1.5}
+      .shortcut-item{display:inline-flex;align-items:center;gap:8px}
+      .shortcut-button{display:inline-flex;align-items:center;justify-content:center;min-width:24px;padding:2px 7px;border:1px solid var(--ytg-border);border-radius:6px;color:var(--ytg-text);font-size:12px;font-weight:600;white-space:nowrap}
+      .search-panel .key-row button.has-controller-badge{position:relative;min-height:68px;padding-bottom:24px}
+      .search-panel .key-row:last-child button.has-controller-badge{padding-bottom:26px}
+      .search-panel .key-row .key-controller-badge{position:absolute;right:5px;bottom:5px;display:inline-flex;align-items:center;gap:3px;white-space:nowrap;font-size:10px;font-weight:600;line-height:1.2;opacity:.8;pointer-events:none}
+      .search-panel .key-row .key-controller-badge svg{width:13px;height:13px}
+      #composition{box-sizing:border-box;min-width:0}
+      #composition p{height:28px;line-height:28px;margin:0 0 var(--ytg-space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .candidate-row{display:grid;grid-template-columns:1fr;gap:var(--ytg-space-2);margin-bottom:0;max-height:390px;overflow-y:auto;padding:var(--ytg-space-half) var(--ytg-space-1) var(--ytg-space-2)}
+      .candidate-row button{flex:none;max-width:min(300px,65vw);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--ytg-surface);color:inherit;font-size:20px;padding:var(--ytg-space-2) var(--ytg-space-3)}
+      .candidate-row button:focus{background:var(--ytg-text);color:var(--ytg-background)}
+      #composition[hidden],#recent [hidden]{display:none}
+      @media(max-width:650px){.search-panel .search-layout{grid-template-columns:1fr}.search-panel #recent{order:2;max-height:none}.search-panel .key-row button{font-size:20px}.search-panel .controls{line-height:1.8}}
+      .search-panel .key-row button:is([data-action="NUMBER_LAYOUT"],[data-action="LETTER_LAYOUT"]){box-sizing:border-box;font-size:clamp(14px,1.4vw,18px);font-weight:500;white-space:nowrap;letter-spacing:0;line-height:1;padding:var(--ytg-space-2) var(--ytg-space-half);border:2px solid transparent}
+      .search-panel .key-row button:is([data-action="NUMBER_LAYOUT"],[data-action="LETTER_LAYOUT"]):focus{background:var(--ytg-surface);color:var(--ytg-text);border-color:var(--ytg-text)}
+    
+@media(prefers-reduced-motion:no-preference){button{transition:background var(--ytg-focus-duration) var(--ytg-focus-easing),color var(--ytg-focus-duration) var(--ytg-focus-easing)}}
+
+/* Controller focus remains visible on filled and transparent keys. */
+:host-context(html:not([data-ytg-input-mode="mouse"])) button:focus{outline:var(--ytg-focus-width) solid var(--ytg-focus-color)!important;outline-offset:var(--ytg-focus-offset)}
+section{scroll-padding-block:12px}
+#items button{min-height:52px;padding:12px 18px}
+#items{padding:calc(var(--ytg-focus-width) + var(--ytg-focus-offset))}
+#shortcuts{line-height:1.8;border-top:1px solid var(--ytg-border);padding-top:16px;margin-bottom:0}
+@media(hover:hover){button:hover:not(:focus){background:var(--ytg-current-background)}}

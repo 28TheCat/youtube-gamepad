@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Gamepad",
+  "version": "0.2.0",
+  "description": "使用手柄浏览 YouTube 并控制视频播放。",
+  "permissions": [
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "css": [
+        "ui/theme.css",
+        "browse.css",
+        "theater.css"
+      ],
+      "js": [
+        "runtime.js",
+        "diagnostics.js",
+        "app/route-state.js",
+        "state-machine.js",
+        "gamepad.js",
+        "navigation.js",
+        "focus.js",
+        "core.js",
+        "keyboard.js",
+        "pinyin-data.js",
+        "pinyin.js",
+        "ui/styles.js",
+        "search.js",
+        "menu.js",
+        "ui/watch-view.js",
+        "ui/watch-panels.js",
+        "watch.js",
+        "browse.js",
+        "sites/youtube.js",
+        "app/route-controller.js",
+        "coordinator.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "runtime.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

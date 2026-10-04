@@ -1,0 +1,48 @@
+/* Native page layout, input effects and playback overrides. */
+html.ytg-gamepad-input,html.ytg-gamepad-input *{cursor:none!important}
+html.ytg-gamepad-input :is(ytd-rich-item-renderer,ytd-rich-grid-media,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model){background-color:transparent!important;box-shadow:none!important}
+html.ytg-gamepad-input :is(ytd-video-preview,ytd-moving-thumbnail-renderer,yt-video-preview-view-model,#inline-preview-player){display:none!important}
+html.ytg-theater:not([data-ytg-native]) .ytp-button{transform:scale(1.12)}
+/* The overlay supplies the selection ring around the thumbnail only. */
+/* Suppress native card focus paint so metadata does not look selected. */
+:is(ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model).ytg-selected,
+.ytg-selected :is(ytd-rich-grid-media,yt-lockup-view-model,.yt-lockup-view-model__content-container,.yt-lockup-view-model__metadata){background-color:transparent!important;box-shadow:none!important}
+html.ytg-gamepad-input .ytg-selected :is(a#video-title,a#video-title-link,a#thumbnail,yt-lockup-view-model a):is(:focus,:focus-visible){outline:none!important;box-shadow:none!important}
+
+
+
+/* Playback fills the page even when Edge requires a trusted gesture for native fullscreen. */
+html.ytg-playback:not([data-ytg-native]),html.ytg-playback:not([data-ytg-native]) body{overflow:hidden!important}
+html.ytg-playback:not([data-ytg-native]) ytd-masthead,html.ytg-playback:not([data-ytg-native]) #secondary,html.ytg-playback:not([data-ytg-native]) #below,html.ytg-playback:not([data-ytg-native]) ytd-guide-renderer,html.ytg-playback:not([data-ytg-native]) ytd-mini-guide-renderer{display:none!important}
+html.ytg-playback:not([data-ytg-native]) #movie_player{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;z-index:2147483645!important;background:#000!important}
+html.ytg-playback:not([data-ytg-native]) #movie_player .html5-video-container{width:100%!important;height:100%!important}
+html.ytg-playback:not([data-ytg-native]) #movie_player video.html5-main-video{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:contain!important}
+html.ytg-playback:not([data-ytg-native]) #movie_player .ytp-chrome-bottom{width:calc(100% - 48px)!important;left:24px!important}
+/* Keep native controls visible while the gamepad owns their focus. */
+html.ytg-controls:not([data-ytg-native]) #movie_player .ytp-chrome-bottom{opacity:1!important;visibility:visible!important;display:block!important;pointer-events:auto!important}
+html.ytg-controls:not([data-ytg-native]) #movie_player .ytp-chrome-controls{opacity:1!important;visibility:visible!important}
+
+/* The watch surface replaces desktop chrome, while media, captions and ads stay native. */
+html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-bottom,
+html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-top{display:none!important}
+html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-settings-menu{z-index:2147483647!important;bottom:160px!important;right:4vw!important;max-width:90vw;font-size:20px!important}
+html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-panel-menu{max-height:65vh!important}
+html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-menuitem{height:56px!important;font-size:20px!important}
+html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-panel-header{font-size:20px!important;min-height:56px}
+/* A settings panel must sit above our dimming layer without raising the entire player. */
+html.ytg-watch-active:not([data-ytg-native]).ytg-settings-open #ytg-watch{visibility:hidden}
+/* Account prompts, subscription menus and playlist choosers stay interactive. */
+html.ytg-watch-active:not([data-ytg-native]) ytd-popup-container{position:relative;z-index:2147483647!important}
+html.ytg-watch-active:not([data-ytg-native]) :is(tp-yt-paper-dialog,ytd-menu-popup-renderer){z-index:2147483647!important}
+/* Keep native comments measurable for lazy loading, but never paint the native
+   metadata/comments over the player. Opacity preserves intersection geometry. */
+html.ytg-playback.ytg-comments-preload:not([data-ytg-native]) #below,
+html.ytg-comments:not([data-ytg-native]) #below{opacity:0!important;pointer-events:none!important}
+html.ytg-playback.ytg-comments-preload:not([data-ytg-native]):not(.ytg-comments) #below{display:block!important;position:fixed!important;inset:0 0 0 auto!important;width:clamp(320px,36vw,680px)!important;height:100vh!important;overflow:auto!important;z-index:0!important;pointer-events:none!important}
+html.ytg-comments:not([data-ytg-native]) #below{display:block!important;position:fixed!important;inset:0 0 0 auto!important;width:clamp(320px,36vw,680px)!important;height:100vh!important;overflow:auto!important;z-index:0!important}
+html.ytg-comments:not([data-ytg-native]) #movie_player{width:calc(100vw - clamp(320px,36vw,680px))!important;right:auto!important}
+html.ytg-watch-active:not([data-ytg-native]).ytg-controls:not(.ytg-comments) #movie_player .caption-window.ytp-caption-window-bottom{bottom:46vh!important}
+html.ytg-watch-active:not([data-ytg-native]).ytg-recommendations:not(.ytg-comments) #movie_player .caption-window.ytp-caption-window-bottom{bottom:68vh!important}
+
+/* A coordinator safety gate also protects against partially failed renders. */
+html[data-ytg-native] #ytg-watch{display:none!important}
