@@ -1,12 +1,16 @@
 (() => {
-  if (window.YTGamepad) return;
-  const lifecycle = window.YTGamepadRuntime.scope('core');
+  window.YTGamepadCoreModule = {
+    /** @param {import('./types/ports.js').CoreDependencies} dependencies */
+    create({ runtime, navigation, focusManager, interaction, controllerStyle }) {
+  const lifecycle = runtime.scope('core');
   let config = {}, current = null, enabled = true, helpVisible = false, observer, navigating = false;
   let activeScope = document, route = location.pathname + location.search, restoring = false;
   const memories = new Map();
+  let restoreTimer, restoreDeadline = 0, browseRestore = {};
   let contentReturn = null, adjustingTarget = null;
+  let controllerCardFocus = null;
   function endAdjustment() { adjustingTarget?.classList?.remove('ytg-adjusting'); adjustingTarget = null; }
-  const rowFocus = window.YTGamepadNavigation?.createRowFocus?.();
+  const rowFocus = navigation?.createRowFocus?.();
   function returnToContent(list) {
     if (contentReturn?.route !== route) return null;
     return list.find(el => el === contentReturn.el || (config.getSection?.(el) === 'content' && config.getKey?.(el) === contentReturn.key));
@@ -31,19 +35,22 @@
   }
   const host = document.createElement('div');
   host.id = 'yt-gamepad-overlay';
+  host.setAttribute('lang', 'en');
   host.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647';
   const shadow = host.attachShadow({ mode: 'open' });
+  lifecycle.cleanup(controllerStyle.register(shadow));
   const style = document.createElement('style');
   style.textContent = `
     #ring{position:fixed;left:0;top:0;border:var(--ytg-focus-width,3px) solid var(--ytg-focus-color,#f1f1f1);border-radius:var(--ytg-card-radius,14px);box-sizing:border-box;display:none}
     /* Finish before the default 140ms held-direction repeat. Scroll updates snap. */
     @media(prefers-reduced-motion:no-preference){#ring{transition:transform var(--ytg-focus-duration,120ms) var(--ytg-focus-easing,cubic-bezier(.26,.86,.44,.985)),width var(--ytg-focus-duration,120ms) var(--ytg-focus-easing,cubic-bezier(.26,.86,.44,.985)),height var(--ytg-focus-duration,120ms) var(--ytg-focus-easing,cubic-bezier(.26,.86,.44,.985))}}
-    #help{position:fixed;bottom:var(--ytg-space-6);left:var(--ytg-space-6);background:var(--ytg-overlay-panel);color:var(--ytg-overlay-text);padding:var(--ytg-space-4) var(--ytg-space-5);border-radius:var(--ytg-button-radius);font:14px/1.8 var(--ytg-font-family);display:none;max-width:360px}
+    #help{position:fixed;bottom:var(--ytg-space-6);left:var(--ytg-space-6);background:var(--ytg-overlay-panel);color:var(--ytg-overlay-text);padding:var(--ytg-space-4) var(--ytg-space-5);border-radius:var(--ytg-button-radius);font:var(--ytg-font-small)/1.8 var(--ytg-font-family);display:none;max-width:360px}
   `;
+  style.textContent += controllerStyle.css;
   const ring = document.createElement('div'), help = document.createElement('div');
   ring.id = 'ring'; help.id = 'help';
   help.style.whiteSpace = 'pre-line';
-  help.textContent = 'YouTube Gamepad\n方向键 / 左摇杆：选择　A：打开\n播放时上键：控制栏　B：逐层返回\nX：播放暂停　Y：搜索\nLB / RB：浏览时切换分类，播放时后退 / 前进 10 秒\nLT / RT：音量减 / 加　Start：快捷菜单';
+  controllerStyle.hint(help, 'YouTube Gamepad\nD-pad / left stick: Select · A: Open\nDuring playback, ↑: Controls · B: Back\nX: Play / pause · Y: Search\nLB / RB: Browse categories, or rewind / forward 10 seconds during playback\nLT / RT: Volume down / up · Start: Quick menu');
   shadow.append(style, ring, help);
   document.documentElement.append(host);
   function visible(el, allowTransparent = false) {
@@ -52,7 +59,7 @@
     // by the covering layer, so it must not look like a dismissed dialog.
     const inert = el.closest('[inert]');
     return el.isConnected && r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && (allowTransparent || s.opacity !== '0') &&
-      !el.closest('[hidden],[aria-hidden="true"]') && (!inert || window.YTGamepadFocus?.isSuspendedScope(inert));
+      !el.closest('[hidden],[aria-hidden="true"]') && (!inert || focusManager?.isSuspendedScope(inert));
   }
   function scope() {
     if (reads?.scope) return reads.scope;
@@ -69,8 +76,10 @@
     return result;
   }
   function remember() {
-    if (!current || !current.isConnected || activeScope !== document || restoring) return;
-    memories.set(route, { key: config.getKey?.(current), section: config.getSection?.(current), x: scrollX, y: scrollY });
+    if (!current || !current.isConnected || activeScope !== document || restoring || navigating || route !== location.pathname + location.search) return;
+    memories.set(route, { key: config.getKey?.(current), section: config.getSection?.(current), x: scrollX, y: scrollY,
+      keys: candidates().filter(el => config.getSection?.(el) === config.getSection?.(current)).map(el => config.getKey?.(el)),
+      browse: config.captureBrowseState?.() });
     if (memories.size > 30) memories.delete(memories.keys().next().value);
   }
   function initial(list) {
@@ -93,10 +102,10 @@
       activeScope = next;
       const closing = scopeLayers.splice(parent + 1).reverse();
       // Restore once, after the entire closed branch has been removed.
-      closing.forEach((layer, index) => window.YTGamepadFocus?.close(layer, index === closing.length - 1));
+      closing.forEach((layer, index) => focusManager?.close(layer, index === closing.length - 1));
     } else {
       const owner = previous === document ? (config.getFocusOwner?.() || 'core') : 'core';
-      window.YTGamepadFocus?.open(next, owner);
+      focusManager?.open(next, owner);
       scopeLayers.push(next);
       activeScope = next;
       if (!config.getPriorityLayer?.()) select(candidates(next)[0], false);
@@ -110,16 +119,40 @@
     reads.candidates.clear();
     reads.rects = new WeakMap();
     reads.styles = new WeakMap();
-    if (!enabled) return;
+    if (!enabled || navigating || config.isNavigating?.() || route !== location.pathname + location.search) return;
     syncScope();
-    if (restoring && !window.YTGamepadFocus?.suspended) {
-      const saved = memories.get(route), list = candidates();
-      const found = saved?.key && list.find(el => config.getKey?.(el) === saved.key && config.getSection?.(el) === saved.section);
-      if (found) {
-        restoring = false;
+    if (restoring) {
+      lifecycle.clearTimeout(restoreTimer);
+      const saved = memories.get(route), expired = Date.now() >= restoreDeadline;
+      const ready = !focusManager?.suspended && activeScope === document && !config.getPriorityLayer?.() && !config.isFocusOwned?.();
+      const browseReady = ready && (config.restoreBrowseState?.(saved?.browse, browseRestore) !== false);
+      if (browseReady || (ready && expired)) {
+        const list = candidates().filter(el => config.getSection?.(el) === saved?.section);
+        let found = saved?.key && list.find(el => config.getKey?.(el) === saved.key);
         window.scrollTo({ left: saved.x, top: saved.y, behavior: 'instant' });
         reads.rects = new WeakMap();
-        select(found, false);
+        if (!found && expired) {
+          const keys = saved.keys || [], position = keys.indexOf(saved.key);
+          for (let distance = 1; !found && position >= 0 && distance < keys.length; distance++) {
+            for (const key of [keys[position + distance], keys[position - distance]]) {
+              found = list.find(el => key != null && config.getKey?.(el) === key);
+              if (found) break;
+            }
+          }
+          found ||= initial(candidates());
+        }
+        const page = document.scrollingElement;
+        const scrollReady = !page || (page.scrollHeight - innerHeight >= saved.y - 1 && page.scrollWidth - innerWidth >= saved.x - 1);
+        if (found && (expired || scrollReady)) {
+          restoring = false;
+          select(found, false);
+          update(); return;
+        }
+      }
+      if (ready && expired) restoring = false;
+      else {
+        restoreTimer = lifecycle.timeout(() => recover(), 100);
+        update(); return;
       }
     }
     if (!config.getPriorityLayer?.() && !(activeScope === document && config.isFocusOwned?.()) && current && (!visible(current) || !scope().contains(current))) select(initial(candidates()));
@@ -159,7 +192,7 @@
     const items = measure(candidates()), from = items.find(item => item.el === el);
     if (!from) return;
     const viewport = config.getViewport?.() || { top: 16, bottom: innerHeight - 16 };
-    const delta = window.YTGamepadNavigation.rowScroll(from, items, viewport);
+    const delta = navigation.rowScroll(from, items, viewport);
     if (Math.abs(delta) > 1) {
       window.scrollTo({ left: scrollX, top: Math.max(0, scrollY + delta), behavior: 'instant' });
       if (reads) reads.rects = new WeakMap();
@@ -182,6 +215,12 @@
       contentReturn = { route, el: current, key: config.getKey?.(current) };
     config.onSelectionChange?.(current, activeScope);
     el?.focus({ preventScroll: true });
+    // Track focus we put on a card, so pointer takeover can release it without
+    // blurring keyboard targets, text fields or native dialog controls.
+    const container = config.getContainer?.(el);
+    controllerCardFocus = activeScope === document && el && container && container !== el &&
+      document.documentElement.classList.contains('ytg-gamepad-input') &&
+      document.activeElement === el ? el : null;
     // Re-read the selected target after class/focus writes, not the whole list.
     if (current) {
       reads.rects.delete(current);
@@ -202,7 +241,7 @@
     }
     const items = measure(list);
     const from = items.find(item => item.el === current);
-    let best = window.YTGamepadNavigation.choose(from, items, direction, activeScope === document ? config.sections : { overlay: {} }, rowFocus);
+    let best = navigation.choose(from, items, direction, activeScope === document ? config.sections : { overlay: {} }, rowFocus);
     if (activeScope === document && config.rememberRegionReturn?.() &&
       ((from.section === 'sidebar' && direction === 'right') || (from.section === 'header' && direction === 'down'))) {
       const saved = returnToContent(list);
@@ -245,7 +284,7 @@
     if (lifecycle.destroyed) return 'blocked';
     if (!reads) return withReads(() => act(action));
     const priority = config.getPriorityLayer?.();
-    const result = window.YTGamepadInteraction.dispatch({ type: 'INPUT_OWNER', action,
+    const result = interaction.dispatch({ type: 'INPUT_OWNER', action,
       enabled, navigating: navigating || config.isNavigating?.(), menu: !!priority,
       native: scope() !== document, panel: !!config.getInputLayer?.(), help: helpVisible });
     if (result.disposition === 'blocked') return 'blocked';
@@ -286,6 +325,7 @@
     navigate, act,
     focus(el) { if (el && candidates().includes(el)) select(el, false); },
     resetContentFocus() {
+      restoring = false; lifecycle.clearTimeout(restoreTimer);
       rowFocus?.reset();
       contentReturn = null; memories.delete(route);
       select(candidates().find(el => config.getSection?.(el) === 'content'));
@@ -293,9 +333,10 @@
     refresh: recover,
     get hasTemporaryLayer() { return helpVisible || scope() !== document; },
     get hasOverlay() { return activeScope !== document; },
-    get current() { return current; }, get section() { return config.getSection?.(current); }
+    get current() { return current; }, get section() { return config.getSection?.(current); },
+    get restoring() { return restoring; }
   };
-  const unregisterFocus = window.YTGamepadFocus?.register('core', {
+  const unregisterFocus = focusManager?.register('core', {
     active: () => enabled && (activeScope !== document || !config.isFocusOwned?.()),
     capture() {
       const list = candidates(activeScope);
@@ -317,7 +358,8 @@
   lifecycle.listen(document, 'focusin', e => withReads(() => { if (enabled && current !== e.target && candidates().includes(e.target)) select(e.target, false); }));
   lifecycle.listen(document, 'yt-navigate-start', () => { remember(); navigating = true; });
   for (const event of ['yt-navigate-finish', 'yt-navigate-cancel', 'yt-navigate-error']) lifecycle.listen(document, event, () => { navigating = false; });
-  function routeChanged() {
+  function routeChanged(event) {
+    if (!event || event.type === 'yt-navigate-finish') navigating = false;
     const next = location.pathname + location.search;
     if (next === route) { recover(); return; }
     const focused = current || document.activeElement;
@@ -326,12 +368,13 @@
     endAdjustment();
     route = next; current = null; contentReturn = null; activeScope = document;
     rowFocus?.reset();
-    scopeLayers.splice(0).forEach(layer => window.YTGamepadFocus?.close(layer, false));
+    scopeLayers.splice(0).forEach(layer => focusManager?.close(layer, false));
     if (sidebarKey && !config.rememberRegionReturn?.()) current = candidates().find(el => config.getSection?.(el) === 'sidebar' && config.getKey?.(el) === sidebarKey) || null;
     const restoreExpected = memories.has(route);
     restoring = restoreExpected;
+    lifecycle.clearTimeout(restoreTimer); restoreDeadline = Date.now() + 5000; browseRestore = {};
     recover();
-    if (!restoreExpected && config.rememberRegionReturn?.()) window.YTGamepad.resetContentFocus();
+    if (enabled && !restoreExpected && !config.getPriorityLayer?.() && !config.isFocusOwned?.() && config.rememberRegionReturn?.()) published.resetContentFocus();
   }
   lifecycle.listen(document, 'yt-navigate-finish', routeChanged);
   lifecycle.listen(window, 'popstate', routeChanged);
@@ -349,7 +392,17 @@
   }
   lifecycle.listen(window, 'scroll', () => { scheduleRecover(); remember(); }, true);
   lifecycle.listen(window, 'resize', () => scheduleRecover(true));
-  lifecycle.listen(window, 'yt-gamepad-input-mode', event => scheduleRecover(event.detail?.mode === 'gamepad'));
+  lifecycle.listen(window, 'yt-gamepad-input-mode', event => {
+    const mode = event.detail?.mode;
+    if (mode !== 'gamepad') {
+      const target = controllerCardFocus;
+      controllerCardFocus = null;
+      // The native focus ring is no longer suppressed in mouse mode. Remove
+      // only our own lingering DOM focus; keep current for controller return.
+      if (mode === 'mouse' && target && document.activeElement === target) target.blur();
+    }
+    scheduleRecover(mode === 'gamepad');
+  });
   lifecycle.listen(document, 'visibilitychange', () => { if (!document.hidden) scheduleRecover(); });
   observer = lifecycle.observer(records => {
     if (!enabled || document.hidden || pending || records.every(record => host.contains(record.target) ||
@@ -366,7 +419,9 @@
   lifecycle.cleanup(() => {
     endAdjustment();
     enabled = false; (config.getContainer?.(current) || current)?.classList?.remove('ytg-selected');
-    scopeLayers.splice(0).forEach(layer => window.YTGamepadFocus?.close(layer, false));
+    scopeLayers.splice(0).forEach(layer => focusManager?.close(layer, false));
     current = null; memories.clear(); contentReturn = null; host.remove?.();
   });
+  return published;
+  } };
 })();

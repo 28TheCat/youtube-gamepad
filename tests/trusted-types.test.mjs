@@ -16,6 +16,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
       append(...items) { this.children.push(...items); },
       replaceChildren(...items) { this.children = items; },
       setAttribute(name, value) { this.attributes[name] = value; },
+      getAttribute(name) { return this.attributes[name] ?? null; },
       addEventListener(name, fn) { this[name] = fn; },
       focus() { root.activeElement = this; this.focusHandler?.(); }, scrollIntoView() {},
       click() { this.clickHandler?.(); },
@@ -57,11 +58,11 @@ test('menu renders and switches views when HTML string assignments are blocked',
   assert.equal(window.YTGamepadMenu.handle('playPause'), 'blocked');
   assert.equal(window.YTGamepadMenu.opened, true);
   assert.equal(root.querySelectorAll('button').length, 7);
-  assert.equal(root.querySelectorAll('button').some(button => button.textContent === '完整设置'), true);
-  assert.equal(root.querySelectorAll('button').some(button => button.textContent === '手柄设置'), false);
+  assert.equal(root.querySelectorAll('button').some(button => button.textContent === 'All settings'), true);
+  assert.equal(root.querySelectorAll('button').some(button => button.textContent === 'Gamepad settings'), false);
   assert.equal(window.YTGamepadMenu.handle('search'), 'handled');
   assert.equal(window.YTGamepadMenu.handle('unmapped'), 'blocked');
-  assert.equal(root.querySelector('#query').attributes['aria-label'], '搜索内容');
+  assert.equal(root.querySelector('#query').attributes['aria-label'], 'Search query');
   assert.equal(root.querySelectorAll('button').length, 34);
   const input = root.querySelector('#query');
   const press = label => root.querySelectorAll('button').find(button => (button.attributes['aria-label'] || button.textContent) === label).click();
@@ -73,7 +74,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
   assert.equal(input.value, 'a c');
   window.YTGamepadMenu.handle('volumeDown'); press('Q');
   assert.equal(input.value, 'a Qc');
-  press('符号'); press('?'); press('ABC');
+  press('Symbols'); press('?'); press('ABC');
   assert.equal(input.value, 'a Q?c');
   const keysInRow = row => root.querySelectorAll('button').filter(button => button.dataset.row === String(row)).map(button => button.textContent);
   assert.deepEqual(keysInRow(0), ['A', 'B', 'C', 'D', 'E', 'F', 'G', '⌫']);
@@ -85,7 +86,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
   assert.deepEqual(keysInRow(2), ['7', '8', '9', '.', '-', '_', '"']);
   assert.deepEqual(keysInRow(3), ['0', '/', '$', '%', '+', '[', ']']);
   window.YTGamepadMenu.handle('confirm');
-  press('切换语言');
+  press('Switch input language');
   assert.equal(root.activeElement.dataset.action, 'ENGLISH');
   window.YTGamepadMenu.handle('back');
   assert.equal(root.activeElement.dataset.action, 'SWITCH_LANGUAGE');
@@ -99,15 +100,15 @@ test('menu renders and switches views when HTML string assignments are blocked',
   window.YTGamepadMenu.handle('right');
   assert.equal(root.activeElement.dataset.column, '7');
   window.YTGamepadMenu.handle('down');
-  assert.equal(root.activeElement.attributes['aria-label'], '符号');
+  assert.equal(root.activeElement.attributes['aria-label'], 'Symbols');
   window.YTGamepadMenu.handle('back');
   assert.equal(root.querySelectorAll('button').length, 7);
-  assert.equal(root.querySelectorAll('button').some(button => button.textContent === '完整设置'), true);
-  assert.equal(root.querySelectorAll('button').some(button => button.textContent === '手柄设置'), false);
+  assert.equal(root.querySelectorAll('button').some(button => button.textContent === 'All settings'), true);
+  assert.equal(root.querySelectorAll('button').some(button => button.textContent === 'Gamepad settings'), false);
   window.YTGamepadMenu.handle('help');
   assert.equal(window.YTGamepadMenu.opened, false);
   let restored = false, restoreRequests = 0;
-  window.YTGamepadFocus = { open() {}, close() { restoreRequests++; } };
+  window.YTGamepadFocus.close = () => { restoreRequests++; };
   let updates = 0;
   const target = { value: 'existing query', isConnected: true, focus() { restored = true; }, setSelectionRange() {}, dispatchEvent() { updates++; } };
   document.activeElement = target;
@@ -130,7 +131,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
   assert.equal(window.YTGamepadMenu.opened, false);
   target.value = '';
   window.YTGamepadMenu.openSearch(target);
-  press('切换语言'); press('中文（拼音）');
+  press('Switch input language'); press('Chinese (Pinyin)');
   for (const letter of 'NIHAO') press(letter);
   assert.equal(root.querySelector('#query').value, '');
   assert.ok(root.querySelector('#composition').children[0].textContent.includes('nihao'));
@@ -160,7 +161,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
   window.YTGamepadMenu.handle('search');
   assert.equal(target.value, '你好中国');
   press('N'); press('I'); window.YTGamepadMenu.handle('playPause');
-  assert.ok(root.querySelector('#composition').children[0].textContent.includes('拼音：n'));
+  assert.ok(root.querySelector('#composition').children[0].textContent.includes('Pinyin: n'));
   window.YTGamepadMenu.handle('back');
   assert.equal(window.YTGamepadMenu.opened, true);
   assert.equal(target.value, '你好中国');

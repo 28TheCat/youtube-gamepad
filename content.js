@@ -1,15 +1,54 @@
 (() => {
-  const lifecycle = window.YTGamepadRuntime.scope('bridge');
-  const defaults = { enabled: true, theater: true, deadzone: 0.35, repeatDelay: 350, repeatInterval: 140 };
+  // This ISOLATED bridge must boot without globals from other scripts/worlds.
+  const bridgeKey = Symbol.for('yt-gamepad.bridge.dispose');
+  window[bridgeKey]?.();
+  const resources = new Set();
+  let destroyed = false;
+  const lifecycle = {
+    get destroyed() { return destroyed; },
+    cleanup(dispose) {
+      if (destroyed) { dispose(); return; }
+      resources.add(dispose);
+    },
+    listen(target, type, listener) {
+      if (!target?.addEventListener) return;
+      const guarded = (...args) => { if (!destroyed) listener(...args); };
+      target.addEventListener(type, guarded);
+      this.cleanup(() => target.removeEventListener?.(type, guarded));
+    },
+    interval(callback, delay) {
+      if (typeof setInterval !== 'function') return;
+      const id = setInterval(() => { if (!destroyed) callback(); }, delay);
+      this.cleanup(() => { if (typeof clearInterval === 'function') clearInterval(id); });
+    },
+    observer(callback) {
+      const observer = new MutationObserver((...args) => { if (!destroyed) callback(...args); });
+      this.cleanup(() => observer.disconnect());
+      return observer;
+    },
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      for (const dispose of [...resources].reverse()) {
+        try { dispose(); } catch (error) { console.warn('YouTube Gamepad bridge cleanup:', error); }
+      }
+      resources.clear();
+      if (window[bridgeKey] === lifecycle.destroy) delete window[bridgeKey];
+    }
+  };
+  window[bridgeKey] = lifecycle.destroy;
+  const defaults = { enabled: true, theater: true, deadzone: 0.35, repeatDelay: 350, repeatInterval: 140, bindings: {}, bindingLayouts: null };
   // MAIN shares the site's environment. Publish only these non-secret settings;
   // never send an arbitrary extension-storage snapshot across this boundary.
   const send = raw => {
     if (lifecycle.destroyed) return;
-    const values = { ...defaults };
+    const { bindingLayouts: _layouts, ...values } = defaults;
     for (const key of ['enabled', 'theater']) if (typeof raw?.[key] === 'boolean') values[key] = raw[key];
     for (const [key, min, max] of [['deadzone', .15, .75], ['repeatDelay', 150, 1000], ['repeatInterval', 80, 500]]) {
       if (typeof raw?.[key] === 'number' && Number.isFinite(raw[key])) values[key] = Math.min(max, Math.max(min, raw[key]));
     }
+    values.bindings = window.YTGamepadBindings.normalize(raw?.bindings);
+    if (raw?.bindingLayouts) values.bindingLayouts = window.YTGamepadBindings.normalizeLayouts(raw.bindingLayouts, raw.bindings);
     window.postMessage({ source: 'yt-gamepad-settings', values }, location.origin);
   };
   let lastConnection;
@@ -44,6 +83,18 @@
   lifecycle.listen(document, 'visibilitychange', () => reportConnection(true));
   lifecycle.listen(window, 'focus', () => reportConnection(true));
   reportConnection();
+  lifecycle.listen(window, 'yt-gamepad-escape-request', event => {
+    const key = event.detail;
+    // Page-created requests cannot manufacture a trusted keyboard event.
+    if (!key?.isTrusted || key.key !== 'Escape' || key.repeat) return;
+    event.preventDefault();
+    const back = () => {
+      if (!lifecycle.destroyed) window.postMessage({ source: 'yt-gamepad-escape-back' }, location.origin);
+    };
+    chrome.runtime.sendMessage({ type: 'ytg-exit-fullscreen' }).then(result => {
+      if (!result?.exited) back();
+    }).catch(error => { console.warn('YouTube Gamepad fullscreen:', error.message); back(); });
+  });
   chrome.storage.local.get(defaults, send);
   // Only a bounded appearance value is persisted; page messages cannot write it.
   if (document.documentElement?.hasAttribute && chrome.runtime.onMessage?.addListener) {
@@ -78,10 +129,19 @@
   lifecycle.cleanup(() => chrome.storage.onChanged.removeListener?.(onStorageChanged));
   let lastReady = -Infinity;
   let lastSettingsOpen = -Infinity;
+  let disposeSettings;
+  let settingsContainer;
+  lifecycle.cleanup(() => disposeSettings?.());
   let diagnosticWindow = 0, diagnosticCount = 0;
   const onExtensionMessage = (message, sender, reply) => {
+    if (sender.id === chrome.runtime.id && message?.type === 'ytg-open-inline-settings') {
+      window.postMessage({ source: 'yt-gamepad-show-settings' }, location.origin);
+      reply({ ok: true }); return;
+    }
     if (sender.id !== chrome.runtime.id || message?.type !== 'ytg-connection-status') return;
-    reply({ connected: Array.from(navigator.getGamepads?.() || []).some(p => p?.connected && p.mapping === 'standard') });
+    const pads = Array.from(navigator.getGamepads?.() || []).filter(p => p?.connected && p.mapping === 'standard');
+    const pad = pads.find(p => p.buttons?.some(button => button.pressed) || p.axes?.some(axis => Math.abs(axis) > .35)) || pads[0];
+    reply({ connected: Boolean(pad), ...(typeof pad?.id === 'string' ? { controllerId: pad.id.slice(0, 256) } : {}) });
   };
   chrome.runtime.onMessage.addListener(onExtensionMessage);
   lifecycle.cleanup(() => chrome.runtime.onMessage.removeListener?.(onExtensionMessage));
@@ -108,8 +168,19 @@
       } }).catch(() => {});
       return;
     }
-    // Fixed destination only; this request cannot write settings or supply a URL.
+    if (e.data?.source === 'yt-gamepad-close-settings') {
+      disposeSettings?.(); disposeSettings = undefined; settingsContainer = undefined; return;
+    }
+    // UI handlers in the isolated world own storage writes. The page can only
+    // request this fixed panel, never supply settings values or storage keys.
     if (e.data?.source === 'yt-gamepad-open-settings') {
+      const root = document.getElementById?.('yt-gamepad-menu')?.shadowRoot;
+      const container = root?.querySelector('#inline-settings');
+      if (container && window.YTGamepadInlineSettings) {
+        if (container === settingsContainer && disposeSettings) return;
+        disposeSettings?.(); settingsContainer = container;
+        disposeSettings = window.YTGamepadInlineSettings.mount(root, container); return;
+      }
       if (Date.now() - lastSettingsOpen < 1000) return;
       lastSettingsOpen = Date.now();
       chrome.runtime.sendMessage({ type: 'ytg-open-settings' }).catch(error => console.warn('YouTube Gamepad settings:', error.message));

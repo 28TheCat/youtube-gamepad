@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 const dir = new URL('../output/performance/', import.meta.url);
 mkdirSync(dir, { recursive: true });
-const sources = ['navigation.js', 'core.js', 'sites/youtube.js', 'pinyin-data.js', 'pinyin.js']
+const sources = ['actions.js', 'bindings.js', 'runtime.js', 'ui/styles.js', 'controller-style.js', 'navigation.js', 'core.js', 'sites/youtube.js', 'pinyin-data.js', 'pinyin.js']
   .map(file => readFileSync(new URL('../' + file, import.meta.url), 'utf8').replace(/<\/script/gi, '<\\/script'));
 writeFileSync(new URL('fixture.html', dir), `<!doctype html><meta charset="utf-8"><title>Gamepad performance fixture</title>
 <style>body{margin:0}#cards{display:grid;grid-template-columns:repeat(5,180px);gap:20px;padding:20px}#cards button{height:80px}</style>
@@ -49,11 +49,13 @@ window.runPerformance = async () => {
     for(let i=0;i<60;i++) animated.style.width=(i%100)+'%';
     if(batch%60===59) await waitFrame();
   }
-  if (globalThis.gc) { globalThis.gc(); await waitFrame(); }
+  const forcedGC = typeof globalThis.gc === 'function';
+  if (forcedGC) { globalThis.gc(); await waitFrame(); }
   const heapAfterHour = heap();
   results.push({scenario:'216000 player style changes, 1h event-rate simulation',...perfCounts,
     heapBefore:heapBeforeHour,heapAfter:heapAfterHour,
     retainedHeapDeltaMB:heapBeforeHour && heapAfterHour ? +(heapAfterHour.usedHeapMB-heapBeforeHour.usedHeapMB).toFixed(2) : null,
+    forcedGC,
     note:'accelerated local fixture; this does not represent one wall-clock hour or YouTube video decoding'});
   const start=performance.now();const candidate=YTGamepadPinyin.lookup('nihao')[0];
   results.push({scenario:'cold pinyin nihao',ms:+(performance.now()-start).toFixed(2),text:candidate.text});

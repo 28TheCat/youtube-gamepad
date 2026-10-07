@@ -9,9 +9,9 @@ export function coreFixture(size = 1000) {
   const counts = { rects: 0, styles: 0, queries: 0, frames: 0 };
   const events = {}, frames = [], observers = [];
   const node = (index = -1) => ({
-    isConnected: true, style: {}, classList: { add() {}, remove() {}, contains() { return false; } },
-    append() {}, attachShadow() { return node(); }, contains(el) { return el === this; },
-    closest() { return null; }, getAttribute() { return null; },
+    isConnected: true, style: {}, dataset: {}, attributes: {}, classList: { add() {}, remove() {}, contains() { return false; } },
+    append() {}, replaceChildren(...children) { this.children = children; }, attachShadow() { return node(); }, contains(el) { return el === this; },
+    closest() { return null; }, getAttribute(name) { return this.attributes[name] ?? null; }, setAttribute(name, value) { this.attributes[name] = value; },
     focus() { document.activeElement = this; events.focusin?.({ target: this }); },
     scrollIntoView() {},
     getBoundingClientRect() {

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve, sep } from 'node:path';
 
@@ -32,7 +32,7 @@ const fixture = `<!doctype html><html><head><style>
   <ytd-masthead><input id="search"><button id="search-icon-legacy">Search</button></ytd-masthead>
   </body></html>`;
 
-async function setup(t, pathname = '/') {
+async function setup(t, pathname = '/', connected = true) {
   const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -45,7 +45,9 @@ async function setup(t, pathname = '/') {
   if (pathname.startsWith('/watch')) await page.evaluate(() => {
     const player = document.createElement('div'); player.id = 'movie_player';
     player.getPlayerResponse = () => ({ videoDetails: { videoId: 'current', title: 'Current video' } });
-    player.append(document.createElement('video'));
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'duration', { configurable: true, value: 300 });
+    player.append(video);
     for (const name of ['ytp-play-button', 'ytp-settings-button']) {
       const button = document.createElement('button'); button.className = name; player.append(button);
     }
@@ -57,17 +59,200 @@ async function setup(t, pathname = '/') {
       anchor.append(title); card.append(anchor); document.body.append(card);
     }
   });
+  // UI scenarios explicitly start with a connected, idle standard controller.
+  await page.evaluate(connected => Object.defineProperty(navigator, 'getGamepads', {
+    configurable: true, value: () => connected ? [{ index: 0, connected: true, mapping: 'standard',
+      axes: [0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })) }]
+      : []
+  }), connected);
   for (const path of entry.css) await page.addStyleTag({ path: fileURLToPath(new URL(path, root)) });
   for (const path of entry.js) await page.addScriptTag({ path: fileURLToPath(new URL(path, root)) });
   // Only the extension-side storage/connection bridge is absent. All MAIN modules
   // including gamepad, core, views, site adapter and coordinator are real.
+  if (connected) await page.waitForFunction(() => window.YTGamepadCoordinator.state.enabled);
   await page.evaluate(() => {
     window.focusLog = [];
     document.addEventListener('focusin', event => window.focusLog.push(event.target.id || event.target.getAttribute('href')));
-    window.YTGamepad.focus(document.querySelector('a[href="/watch?v=b"]'));
+    if (window.YTGamepadCoordinator.state.enabled) window.YTGamepad.focus(document.querySelector('a[href="/watch?v=b"]'));
   });
   return page;
 }
+
+test('home return restores native category, rebuilt grid, scroll and original card focus', { skip: !chromium }, async t => {
+  const page = await setup(t);
+  await page.evaluate(() => {
+    const manager = document.createElement('ytd-page-manager');
+    manager.style.cssText = 'display:block;padding-top:850px;min-height:3000px';
+    const grid = document.createElement('div'); grid.id = 'return-grid';
+    for (const card of document.querySelectorAll('ytd-rich-item-renderer')) grid.append(card);
+    manager.append(grid); document.body.append(manager);
+    const bar = document.createElement('ytd-feed-filter-chip-bar-renderer');
+    bar.style.cssText = 'position:fixed;top:0;left:300px';
+    for (const label of ['All', 'Music']) {
+      const chip = document.createElement('yt-chip-cloud-chip-renderer');
+      const button = document.createElement('button'); button.textContent = label; chip.append(button);
+      chip.setAttribute('selected', String(label === 'Music'));
+      button.addEventListener('click', () => {
+        for (const item of bar.children) item.setAttribute('selected', String(item === chip));
+        if (label === 'Music') setTimeout(() => {
+          grid.replaceChildren(...window.returnCards.map(card => card.cloneNode(true)));
+        }, 200);
+      });
+      bar.append(chip);
+    }
+    document.body.append(bar);
+    window.returnCards = Array.from(grid.children);
+    scrollTo(0, 700);
+    window.YTGamepad.focus(grid.querySelector('a[href="/watch?v=b"]'));
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.pushState({}, '', '/watch?v=b'); manager.hidden = true; bar.hidden = true;
+    scrollTo(0, 0); document.dispatchEvent(new Event('yt-navigate-finish'));
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.replaceState({}, '', '/'); manager.hidden = false; bar.hidden = false;
+    for (const chip of bar.children) chip.setAttribute('selected', String(chip.textContent === 'All'));
+    const other = window.returnCards[0].cloneNode(true); other.querySelector('a').href = '/watch?v=other';
+    grid.replaceChildren(other);
+    scrollTo(0, 0); document.dispatchEvent(new Event('yt-navigate-finish'));
+  });
+  await page.waitForFunction(() => !window.YTGamepad.restoring && window.YTGamepad.current?.getAttribute('href') === '/watch?v=b');
+  assert.deepEqual(await page.evaluate(() => ({
+    category: document.querySelector('yt-chip-cloud-chip-renderer[selected="true"]').textContent,
+    links: Array.from(document.querySelectorAll('#return-grid a')).map(link => link.getAttribute('href')),
+    current: window.YTGamepad.current.getAttribute('href'),
+    active: document.activeElement.getAttribute('href'), scroll: scrollY
+  })), { category: 'Music', links: ['/watch?v=a', '/watch?v=b', '/watch?v=c'], current: '/watch?v=b', active: '/watch?v=b', scroll: 700 });
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => scrollY), 700, 'category watcher cannot reset the restored grid focus');
+});
+
+test('without a controller the native page keeps focus, Escape and layout through SPA navigation', { skip: !chromium }, async t => {
+  const page = await setup(t, '/watch?v=current', false);
+  await page.locator('input#search').focus();
+  await page.evaluate(() => {
+    window.nativeEscape = false;
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') window.nativeEscape = !event.defaultPrevented;
+    });
+    window.postMessage({ source: 'yt-gamepad-settings', values: { enabled: true } }, location.origin);
+    history.pushState({}, '', '/watch?v=next');
+    document.dispatchEvent(new Event('yt-navigate-finish'));
+  });
+  await page.keyboard.press('Escape');
+  assert.deepEqual(await page.evaluate(() => ({
+    enabled: window.YTGamepadCoordinator.state.enabled,
+    adaptation: window.YTGamepadCoordinator.adaptation.status,
+    nativeEscape: window.nativeEscape, focus: document.activeElement.id,
+    selected: document.querySelectorAll('.ytg-selected').length,
+    layout: ['ytg-theater', 'ytg-playback', 'ytg-controls', 'ytg-watch-active', 'ytg-browse']
+      .some(name => document.documentElement.classList.contains(name)),
+    loading: !!document.querySelector('#ytg-watch-loading'),
+    ring: document.querySelector('#yt-gamepad-overlay').shadowRoot.querySelector('#ring').style.display
+  })), { enabled: false, adaptation: 'inactive', nativeEscape: true, focus: 'search',
+    selected: 0, layout: false, loading: false, ring: 'none' });
+});
+
+test('browse shoulders reach inner category buttons and update the native selected state', { skip: !chromium }, async t => {
+  const page = await setup(t);
+  await page.evaluate(() => {
+    const bar = document.createElement('ytd-feed-filter-chip-bar-renderer');
+    for (const [index, label] of ['全部', '音乐', '播客'].entries()) {
+      const chip = document.createElement('yt-chip-cloud-chip-renderer');
+      chip.style.display = 'inline-block';
+      const button = document.createElement('button'); button.textContent = label;
+      if (index === 0) button.classList.add('ytChipShapeActive');
+      button.addEventListener('click', () => {
+        bar.querySelector('.ytChipShapeActive')?.classList.remove('ytChipShapeActive');
+        button.classList.add('ytChipShapeActive');
+      });
+      chip.append(button); bar.append(chip);
+    }
+    document.body.prepend(bar);
+  });
+  const press = action => page.evaluate(action => window.YTGamepad.act(action), action);
+  const selected = () => page.locator('.ytChipShapeActive').textContent();
+  assert.equal(await press('seekForward'), 'handled');
+  assert.equal(await selected(), '音乐');
+  assert.equal(await press('seekForward'), 'handled');
+  assert.equal(await selected(), '播客');
+  assert.equal(await press('seekForward'), 'blocked');
+  assert.equal(await press('seekBack'), 'handled');
+  assert.equal(await selected(), '音乐');
+});
+
+test('watch loading leaves native media visible and applies player layout before navigation finishes', { skip: !chromium }, async t => {
+  const page = await setup(t);
+  await page.evaluate(() => {
+    const anchor = document.querySelector('a[href="/watch?v=b"]');
+    anchor.addEventListener('click', event => {
+      event.preventDefault();
+      window.loadingBeforeNavigation = document.elementFromPoint(640, 450)?.id === 'ytg-watch-loading';
+      document.dispatchEvent(new Event('yt-navigate-start'));
+      const player = document.createElement('div'); player.id = 'movie_player';
+      player.getPlayerResponse = () => ({ videoDetails: { videoId: 'old' } });
+      const video = document.createElement('video'); video.className = 'html5-main-video';
+      const container = document.createElement('div'); container.className = 'html5-video-container';
+      container.append(video); player.append(container); document.body.append(player);
+      history.pushState({}, '', anchor.href);
+      window.playerAtRouteChange = player.getBoundingClientRect().toJSON();
+      const below = document.createElement('div'); below.id = 'below'; below.textContent = 'Desktop details';
+      const secondary = document.createElement('div'); secondary.id = 'secondary'; secondary.textContent = 'Desktop recommendations';
+      document.body.append(below, secondary);
+      document.dispatchEvent(new Event('yt-navigate-finish'));
+    });
+    window.YTGamepad.act('confirm');
+  });
+  assert.equal(await page.evaluate(() => window.loadingBeforeNavigation), false);
+  assert.equal(await page.evaluate(() => document.elementFromPoint(640, 450)?.closest('#movie_player')?.id), 'movie_player');
+  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 48, width: 1280, height: 852 });
+  assert.deepEqual(await page.evaluate(() => {
+    const { x, y, width, height } = window.playerAtRouteChange; return { x, y, width, height };
+  }), { x: 0, y: 48, width: 1280, height: 852 }, 'layout changes synchronously with the URL, before SPA finish');
+  const banner = await page.locator('#ytg-watch-loading').boundingBox();
+  assert.equal(banner.y + banner.height, 48, 'status strip ends where the player begins');
+  assert.equal(await page.locator('#movie_player video').isVisible(), true);
+  assert.equal(await page.locator('#movie_player video').evaluate(video => video.muted), false, 'loading does not alter native audio');
+  assert.equal(await page.locator('#ytg-watch-loading').textContent(), 'Loading video…');
+  assert.equal(await page.evaluate(() => window.YTGamepadCoordinator.adaptation.status), 'waiting');
+  await page.evaluate(() => {
+    const player = document.querySelector('#movie_player');
+    player.getPlayerResponse = () => ({ videoDetails: { videoId: 'b', title: 'Video B' } });
+    player.querySelector('video').dispatchEvent(new Event('playing'));
+  });
+  await page.waitForFunction(() => window.YTGamepadCoordinator.adaptation.status === 'ready');
+  assert.equal(await page.locator('#ytg-watch-loading').isVisible(), false);
+  assert.equal(await page.locator('#below').evaluate(node => {
+    const style = getComputedStyle(node);
+    return style.display === 'none' || style.opacity === '0';
+  }), true, 'desktop details remain unpainted even during comment preloading');
+  assert.equal(await page.locator('#secondary').isVisible(), false);
+  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 0, width: 1280, height: 900 });
+});
+
+test('playing destination is visible while YouTube detail navigation is still pending', { skip: !chromium }, async t => {
+  const page = await setup(t, '/watch?v=current');
+  await page.evaluate(() => {
+    window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.pushState({}, '', '/watch?v=next');
+    const video = document.querySelector('#movie_player video');
+    Object.defineProperties(video, { readyState: { value: 3, configurable: true }, videoWidth: { value: 1280, configurable: true } });
+    video.dispatchEvent(new Event('playing'));
+  });
+  assert.equal(await page.locator('#ytg-watch-loading').isVisible(), true, 'status remains while destination identity is pending');
+  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 48, width: 1280, height: 852 });
+  assert.equal(await page.locator('#movie_player video').isVisible(), true, 'player stays visible before destination readiness');
+  await page.evaluate(() => {
+    document.querySelector('#movie_player').getPlayerResponse = () => ({ videoDetails: { videoId: 'next' } });
+    document.querySelector('#movie_player video').dispatchEvent(new Event('playing'));
+  });
+  assert.equal(await page.locator('#ytg-watch-loading').isVisible(), false, 'playing event reveals picture without waiting for page completion or polling');
+  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 0, width: 1280, height: 900 });
+  assert.equal(await page.locator('#movie_player video').isVisible(), true);
+  assert.equal(await page.evaluate(() => window.YTGamepadCoordinator.navigating), true);
+  await page.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));
+  assert.equal(await page.evaluate(() => window.YTGamepadCoordinator.navigating), false);
+  assert.equal(await page.locator('#ytg-watch-loading').isVisible(), false);
+});
 
 async function nativeDialog(page) {
   await page.evaluate(() => {
@@ -92,7 +277,469 @@ const snapshot = page => page.evaluate(() => ({
 }));
 const options = { skip: !chromium && 'Requires playwright (install it or set NODE_PATH)' };
 
-test('TV header preserves native sidebar and feed geometry across widths and guide states', options, async t => {
+test('media feedback stays visible over pure playback, reuses volume UI and clears without owning focus', options, async t => {
+  const page = await setup(t, '/watch?v=current');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.evaluate(() => { document.querySelector('video').volume = .5; });
+  await press(page, 'seekForward');
+  assert.deepEqual(await page.evaluate(() => {
+    const host = document.querySelector('#ytg-watch'), status = host.shadowRoot.querySelector('.status');
+    return { hidden: host.hidden, display: getComputedStyle(host).display, text: status.textContent, focus: window.YTGamepadWatch.ownsFocus };
+  }), { hidden: true, display: 'block', text: '+10 seconds', focus: false });
+  await press(page, 'volumeUp');
+  await page.evaluate(() => { window.feedbackTrack = document.querySelector('#ytg-watch').shadowRoot.querySelector('.feedback-track'); });
+  await press(page, 'volumeUp');
+  assert.deepEqual(await page.evaluate(() => {
+    const root = document.querySelector('#ytg-watch').shadowRoot;
+    return { same: window.feedbackTrack === root.querySelector('.feedback-track'), text: root.querySelector('.status').textContent, width: root.querySelector('.feedback-level').style.width };
+  }), { same: true, text: 'Volume 60%', width: '60%' });
+  await page.waitForFunction(() => !document.querySelector('#ytg-watch').hasAttribute('data-feedback'));
+  await page.evaluate(() => {
+    const video = document.querySelector('video');
+    Object.defineProperty(video, 'paused', { configurable: true, get: () => false });
+  });
+  await press(page, 'playPause');
+  await page.waitForFunction(() => document.querySelector('#ytg-watch').getAttribute('data-feedback') === 'playPause');
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.querySelector('.status svg') !== null), true);
+  await page.evaluate(() => {
+    history.pushState({}, '', '/'); document.dispatchEvent(new Event('yt-navigate-finish'));
+  });
+  await page.waitForFunction(() => !document.querySelector('#ytg-watch').hasAttribute('data-feedback'));
+});
+
+test('seek feedback never reveals the controls surface while buffering or fading out', options, async t => {
+  const page = await setup(t, '/watch?v=current');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.evaluate(() => {
+    const video = document.querySelector('video');
+    Object.defineProperty(video, 'paused', { configurable: true, get: () => false });
+    video.dispatchEvent(new Event('waiting'));
+    window.seekSurfaceFrames = [];
+    window.seekSurfaceSampling = true;
+    const sample = () => {
+      const host = document.querySelector('#ytg-watch');
+      if (host.hidden && getComputedStyle(host).display !== 'none') {
+        window.seekSurfaceFrames.push(getComputedStyle(host.shadowRoot.querySelector('.surface')).display);
+      }
+      if (window.seekSurfaceSampling) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await press(page, 'seekForward');
+  await page.waitForFunction(() => !document.querySelector('#ytg-watch').hasAttribute('data-feedback'));
+  await page.waitForTimeout(250);
+  const frames = await page.evaluate(() => {
+    window.seekSurfaceSampling = false;
+    document.querySelector('video').dispatchEvent(new Event('playing'));
+    return window.seekSurfaceFrames;
+  });
+  assert.ok(frames.length > 0, 'sampled the feedback and its closing transition');
+  assert.ok(frames.every(display => display === 'none'), 'controls and recommendation cards stay hidden on every frame');
+  await press(page, 'up');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#ytg-watch').shadowRoot.querySelector('.surface')).display), 'flex');
+});
+
+test('media feedback respects reduced motion and failed media commands do not show success', options, async t => {
+  const page = await setup(t, '/watch?v=current');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await press(page, 'volumeDown');
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.querySelector('.status').getAnimations().length), 0);
+  await page.waitForFunction(() => !document.querySelector('#ytg-watch').hasAttribute('data-feedback'));
+  await page.evaluate(() => document.querySelector('video').remove());
+  await press(page, 'seekForward');
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').hasAttribute('data-feedback')), false);
+});
+
+test('watch recommendations page four cards at a time and append native continuation without losing focus', options, async t => {
+  const page = await setup(t, '/watch?v=current');
+  await page.evaluate(() => {
+    document.documentElement.dataset.ytgInputMode = 'gamepad';
+    const secondary = document.createElement('div'); secondary.id = 'secondary';
+    const list = document.createElement('ytd-watch-next-secondary-results-renderer');
+    list.append(...document.querySelectorAll('ytd-compact-video-renderer'));
+    const append = (start, end) => {
+      for (let i = start; i <= end; i++) {
+        const card = document.createElement('ytd-compact-video-renderer');
+        const link = document.createElement('a'); link.href = '/watch?v=r' + i;
+        const title = document.createElement('span'); title.id = 'video-title'; title.textContent = '推荐 ' + i;
+        const channel = document.createElement('span'); channel.id = 'channel-name'; channel.textContent = '示例频道';
+        const metadata = document.createElement('span'); metadata.id = 'metadata-line'; metadata.textContent = '1万次观看 · 1年前';
+        const duration = document.createElement('ytd-thumbnail-overlay-time-status-renderer'); duration.textContent = '11:53';
+        link.append(title, channel, metadata, duration); card.append(link); list.append(card);
+      }
+    };
+    append(4, 16);
+    const continuation = document.createElement('ytd-continuation-item-renderer');
+    const button = document.createElement('button'); button.textContent = '加载更多';
+    window.recommendationLoads = 0;
+    button.onclick = () => { window.recommendationLoads++; append(17, 20); continuation.remove(); };
+    continuation.append(button); list.append(continuation); secondary.append(list); document.body.append(secondary);
+    window.YTGamepadWatch.refresh(); window.YTGamepadWatch.show();
+  });
+  const visible = () => page.locator('#ytg-watch').evaluate(host => [...host.shadowRoot.querySelectorAll('.card')]
+    .filter(card => !card.hidden).map(card => card.dataset.videoId));
+  await press(page, 'down');
+  assert.deepEqual(await visible(), ['r1', 'r2', 'r3', 'r4']);
+  await press(page, 'right');
+  await press(page, 'down');
+  assert.deepEqual(await visible(), ['r5', 'r6', 'r7', 'r8']);
+  assert.equal(await page.evaluate(() => YTGamepadWatch.state.index), 5, 'paging keeps the selected column');
+  const card = await page.locator('#ytg-watch').evaluate(host => {
+    const root = host.shadowRoot, card = root.querySelector('.card.selected');
+    const visible = [...root.querySelectorAll('.card')].filter(card => !card.hidden);
+    return { duration: card.querySelector('.card-duration').textContent,
+      metadata: [...card.querySelectorAll('.card-meta')].map(node => node.textContent),
+      rows: new Set(visible.map(node => Math.round(node.getBoundingClientRect().top))).size,
+      outline: getComputedStyle(card.querySelector('.card-thumbnail')).outlineStyle };
+  });
+  assert.equal(card.duration, '11:53');
+  assert.deepEqual(card.metadata, ['示例频道', '1万次观看 · 1年前']);
+  assert.equal(card.rows, 1); assert.equal(card.outline, 'solid');
+  await press(page, 'down');
+  await page.waitForFunction(() => YTGamepadWatch.state.recommendations === 20);
+  assert.equal(await page.evaluate(() => recommendationLoads), 1);
+  assert.equal(await page.evaluate(() => YTGamepadWatch.state.index), 9, 'appending recommendations preserves selection');
+  await press(page, 'down'); await press(page, 'down');
+  assert.deepEqual(await visible(), ['r17', 'r18', 'r19', 'r20']);
+  await press(page, 'down');
+  assert.equal(await page.evaluate(() => YTGamepadWatch.state.index), 17, 'end of recommendations cannot select a missing item');
+  await press(page, 'up'); assert.deepEqual(await visible(), ['r13', 'r14', 'r15', 'r16']);
+  await press(page, 'back'); assert.equal(await page.evaluate(() => YTGamepadWatch.state.row), 'controls');
+  await press(page, 'down'); assert.deepEqual(await visible(), ['r13', 'r14', 'r15', 'r16']);
+});
+
+test('live DVR controls support pointer seeking, gamepad return and unavailable windows', options, async t => {
+  const page = await setup(t, '/watch?v=current');
+  await page.evaluate(() => {
+    const video = document.querySelector('video');
+    window.dvrRanges = [[100, 200]];
+    Object.defineProperty(video, 'duration', { configurable: true, value: Infinity });
+    Object.defineProperty(video, 'seekable', { configurable: true, get: () => ({
+      length: window.dvrRanges.length, start: i => window.dvrRanges[i][0], end: i => window.dvrRanges[i][1]
+    }) });
+    video.currentTime = 150;
+    window.YTGamepadWatch.show();
+  });
+  const progress = page.locator('#ytg-watch').locator('.progress');
+  await progress.click({ position: { x: 10, y: 12 } });
+  assert.ok(await page.evaluate(() => document.querySelector('video').currentTime >= 100));
+  await page.evaluate(() => {
+    window.dvrRanges = [[120, 240]];
+    const watch = window.YTGamepadWatch;
+    watch.show();
+    for (let i = 0; i < 20; i++) watch.handle('right');
+    watch.handle('confirm');
+  });
+  assert.equal(await page.evaluate(() => document.querySelector('video').currentTime), 240);
+  await page.evaluate(() => { window.dvrRanges = []; window.YTGamepadWatch.refresh(); });
+  assert.equal(await progress.isDisabled(), true);
+  await page.evaluate(() => window.YTGamepadWatch.handle('up'));
+  assert.equal(await page.evaluate(() => window.YTGamepadWatch.state.row), 'controls');
+});
+
+test('controller hints switch in open search and watch UI without disturbing input or focus', options, async t => {
+  const page = await setup(t, '/watch?v=current');
+  const directory = resolve(fileURLToPath(repository), 'output/playwright');
+  mkdirSync(directory, { recursive: true });
+  await page.evaluate(() => {
+    window.testController = { id: '', connected: true, mapping: 'standard', index: 0,
+      buttons: Array.from({ length: 16 }, () => ({ pressed: false })), axes: [0, 0] };
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [window.testController] });
+    window.YTGamepadWatch.show(); window.YTGamepadMenu.openSearch();
+    const root = document.querySelector('#yt-gamepad-menu').shadowRoot;
+    const input = root.querySelector('#query'); input.value = 'controller test'; input.setSelectionRange(3, 7);
+    root.querySelector('[data-action="BACKSPACE"]').focus();
+    window.controllerFocus = root.activeElement;
+  });
+  for (const [id, family, confirm, remove, search, back] of [
+    ['Xbox Wireless Controller', 'xbox', 'A', 'X', 'RT', 'B'],
+    ['DualSense Wireless Controller', 'playstation', '×', '□', 'R2', '○'],
+    ['Switch Pro Controller', 'switch', 'B', 'Y', 'ZR', 'A']
+  ]) {
+    await page.evaluate(id => { window.testController.id = id; }, id);
+    await page.waitForFunction(family => document.documentElement.dataset.ytgController === family, family);
+    const result = await page.evaluate(() => {
+      const root = document.querySelector('#yt-gamepad-menu').shadowRoot;
+      const input = root.querySelector('#query');
+      const badge = key => root.querySelector('#shortcuts [data-ytg-key="' + key + '"]').textContent;
+      const watch = document.querySelector('#ytg-watch').shadowRoot;
+      return { confirm: badge('A'), remove: badge('X'), search: badge('RT'), back: badge('B'),
+        watchConfirm: watch.querySelector('.hint [data-ytg-key="A"]').textContent,
+        watchLabel: watch.querySelector('.progress').getAttribute('aria-label'),
+        title: root.querySelector('[data-action="BACKSPACE"]').title,
+        count: root.querySelectorAll('.shortcut-item').length,
+        query: input.value, cursor: [input.selectionStart, input.selectionEnd], focus: root.activeElement === window.controllerFocus,
+        icon: getComputedStyle(root.querySelector('#shortcuts [data-ytg-key="A"]')).backgroundImage,
+        aria: root.querySelector('#shortcuts [data-ytg-key="A"]').getAttribute('aria-label'),
+        fontSize: getComputedStyle(root.querySelector('#shortcuts [data-ytg-key="A"]')).fontSize };
+    });
+    assert.equal(result.confirm, confirm); assert.equal(result.remove, remove); assert.equal(result.search, search); assert.equal(result.back, back);
+    assert.equal(result.watchConfirm, confirm); assert.ok(result.watchLabel.includes(confirm + ' to start adjusting'));
+    assert.equal(result.title, remove + ' Delete (hold to repeat)'); assert.equal(result.count, 11);
+    assert.equal(result.query, 'controller test'); assert.deepEqual(result.cursor, [3, 7]); assert.equal(result.focus, true);
+    const assets = JSON.parse(readFileSync(new URL('assets/controller/kenney.json', root), 'utf8'));
+    const original = readFileSync(new URL(assets.profiles[family].A, root)).toString('base64');
+    assert.equal(result.icon, `url("data:image/svg+xml;base64,${original}")`);
+    assert.equal(result.aria, confirm); assert.equal(result.fontSize, '0px');
+    assert.deepEqual(await page.evaluate(async data => {
+      const image = new Image(); image.src = data; await image.decode();
+      return [image.naturalWidth, image.naturalHeight];
+    }, 'data:image/svg+xml;base64,' + original), [64, 64]);
+    await page.screenshot({ path: resolve(directory, 'controller-' + family + '.png'), fullPage: true });
+    await page.evaluate(() => document.documentElement.setAttribute('dark', ''));
+    await page.waitForTimeout(180); // Allow the existing theme transition to finish before visual QA.
+    await page.screenshot({ path: resolve(directory, 'controller-' + family + '-dark.png'), fullPage: true });
+    await page.evaluate(() => document.documentElement.removeAttribute('dark'));
+    await page.waitForTimeout(180);
+  }
+  await press(page, 'back');
+  await press(page, 'help');
+  assert.match(await page.locator('#yt-gamepad-menu').evaluate(host => host.shadowRoot.querySelector('#shortcuts').textContent), /B Confirm · A Back · \+ Close/);
+  assert.deepEqual(await page.locator('#yt-gamepad-menu').evaluate(host => [...host.shadowRoot.querySelectorAll('#shortcuts [data-ytg-icon="true"]')].map(node => node.textContent)), ['B', 'A', '+']);
+  assert.equal(await page.locator('#yt-gamepad-overlay').evaluate(host => host.shadowRoot.querySelectorAll('#help [data-ytg-icon="true"]').length), 10);
+  await press(page, 'help');
+  await page.evaluate(() => window.YTGamepadWatch.handle('up'));
+  const combined = await page.locator('#ytg-watch').evaluate(host => {
+    const node = host.shadowRoot.querySelector('[data-ytg-key="↓ / B"]');
+    return { text: node.textContent, images: getComputedStyle(node).backgroundImage, icon: node.getAttribute('data-ytg-icon'),
+      adjustLabel: host.shadowRoot.querySelector('.hint-item [data-ytg-hint]').textContent,
+      language: host.getAttribute('lang') };
+  });
+  assert.equal(combined.text, '↓ / A'); assert.equal(combined.icon, 'true');
+  assert.equal(combined.images.split('url(').length - 1, 2);
+  assert.equal(combined.adjustLabel, 'Adjust position', 'English instructions must not mistake the verb Start for a controller button');
+  assert.equal(combined.language, 'en');
+});
+
+test('extension popup and settings reuse controller artwork in their instructions', options, async t => {
+  const page = await setup(t);
+  for (const filename of ['popup.html', 'options.html']) {
+    await page.goto('https://www.youtube.com/prompt-fixture');
+    const html = readFileSync(new URL(filename, root), 'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '');
+    await page.setContent(html);
+    await page.evaluate(() => {
+      window.chrome = {
+        tabs: { query: async () => [{ id: 1 }], sendMessage: async () => ({ connected: true, controllerId: 'DualSense Wireless Controller' }) },
+        storage: { local: { get: async () => ({ bindings: { confirm: 1, back: 0 } }) }, onChanged: { addListener() {}, removeListener() {} } }
+      };
+    });
+    for (const path of ['ui/theme.css', filename.replace('.html', '.css')]) await page.addStyleTag({ path: fileURLToPath(new URL(path, root)) });
+    for (const path of ['actions.js', 'bindings.js', 'runtime.js', 'ui/styles.js', 'controller-style.js', 'ui/controller-sync.js']) await page.addScriptTag({ path: fileURLToPath(new URL(path, root)) });
+    await page.waitForFunction(() => document.documentElement.dataset.ytgController === 'playstation');
+    const hints = await page.locator('[data-ytg-hint]').evaluateAll(nodes => nodes.map(node => ({
+      text: node.textContent, icons: [...node.querySelectorAll('[data-ytg-icon="true"]')].map(icon => ({ key: icon.textContent, image: getComputedStyle(icon).backgroundImage }))
+    })));
+    assert.ok(hints.every(hint => hint.icons.length > 0));
+    assert.ok(hints.some(hint => hint.icons.some(icon => icon.key === '×')));
+    assert.ok(hints.every(hint => hint.icons.every(icon => icon.image.startsWith('url("data:image/svg+xml;base64,'))));
+    assert.ok(hints.every(hint => !hint.text.includes('Start')));
+    assert.ok(hints.some(hint => hint.text.includes('○ Confirm')));
+    await page.evaluate(() => window.YTGamepadRuntime.destroy());
+  }
+});
+
+test('quick menu settings save inline, recover failures and return one level at a time', options, async t => {
+  const page = await setup(t);
+  await page.evaluate(() => {
+    window.inlineSaved = { enabled: true, theater: true, autoFullscreen: false };
+    window.inlineListeners = new Set(); window.inlineFailure = false;
+    window.chrome = { storage: { local: {
+      async get(defaults) { return { ...defaults, ...window.inlineSaved }; },
+      async set(next) {
+        if (window.inlineFailure) throw new Error('save failed');
+        Object.assign(window.inlineSaved, next);
+        const changes = Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue }]));
+        for (const listener of window.inlineListeners) listener(changes, 'local');
+        window.postMessage({ source: 'yt-gamepad-settings', values: window.inlineSaved }, location.origin);
+      }
+    }, onChanged: { addListener: fn => window.inlineListeners.add(fn), removeListener: fn => window.inlineListeners.delete(fn) } } };
+    let dispose;
+    window.addEventListener('message', event => {
+      if (event.data.source === 'yt-gamepad-close-settings') { dispose?.(); dispose = undefined; }
+      if (event.data.source !== 'yt-gamepad-open-settings') return;
+      const root = document.querySelector('#yt-gamepad-menu').shadowRoot;
+      dispose?.(); dispose = window.YTGamepadInlineSettings.mount(root, root.querySelector('#inline-settings'));
+    });
+  });
+  await page.addScriptTag({ path: fileURLToPath(new URL('inline-settings.js', root)) });
+  const menu = page.locator('#yt-gamepad-menu');
+  await page.evaluate(() => window.YTGamepadMenu.handle('help'));
+  await menu.getByRole('button', { name: 'All settings', exact: true }).click();
+  await menu.getByRole('button', { name: 'Display & layout', exact: true }).click();
+  await menu.locator('[data-setting="theater"]').click();
+  await menu.locator('[data-setting="theater"][aria-pressed="false"]:not(:disabled)').waitFor();
+  assert.equal(await page.evaluate(() => window.inlineSaved.theater), false);
+  await page.evaluate(() => { window.inlineFailure = true; });
+  await menu.locator('[data-setting="theater"]').click();
+  await menu.locator('#message').filter({ hasText: 'Could not save settings' }).waitFor();
+  assert.equal(await menu.locator('[data-setting="theater"]').getAttribute('aria-pressed'), 'false');
+  await page.evaluate(() => { window.inlineFailure = false; window.YTGamepadMenu.handle('back'); });
+  await menu.getByRole('button', { name: 'Gamepad & buttons', exact: true }).click();
+  await menu.locator('[data-setting="confirm"]').click();
+  await menu.locator('[data-setting="1"]').click();
+  await menu.locator('[data-setting="1"][aria-pressed="true"]:not(:disabled)').waitFor();
+  assert.deepEqual(await page.evaluate(() => {
+    const bindings = window.inlineSaved.bindingLayouts?.browse || window.inlineSaved.bindings;
+    return [bindings.confirm, bindings.back];
+  }), [1, 0]);
+  assert.equal(await menu.locator('[data-setting="1"] [data-inline-key]').getAttribute('data-ytg-first-key'), 'B');
+  assert.match(await menu.locator('[data-setting="1"] [data-inline-key]').evaluate(node => getComputedStyle(node).backgroundImage), /data:image\/svg\+xml;base64/);
+  await page.evaluate(() => {
+    const pad = navigator.getGamepads()[0];
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [{ ...pad, id: 'DualSense' }] });
+  });
+  await menu.locator('[data-setting="1"] [data-inline-key][data-ytg-family="playstation"]').waitFor();
+  assert.equal(await menu.locator('[data-setting="1"] [data-inline-key]').getAttribute('data-ytg-first-key'), 'B');
+  await page.screenshot({ path: 'output/playwright/inline-settings-buttons.png' });
+  await page.evaluate(() => window.YTGamepadMenu.handle('back'));
+  await menu.locator('[data-setting="resetBindings"]').click();
+  await menu.locator('[data-setting="resetBindings"]:not(:disabled)').waitFor();
+  assert.equal(await page.evaluate(() => (window.inlineSaved.bindingLayouts?.browse || window.inlineSaved.bindings).confirm), 0);
+  await menu.locator('[data-setting="repeatDelay-+"]').click();
+  await menu.locator('[data-setting="repeatDelay-+"]:not(:disabled)').waitFor();
+  assert.equal(await page.evaluate(() => window.inlineSaved.repeatDelay), 360);
+  await page.evaluate(() => window.YTGamepadMenu.handle('back'));
+  await page.screenshot({ path: 'output/playwright/inline-settings.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: 'output/playwright/inline-settings-mobile.png' });
+  assert.equal(await menu.locator('section').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+  await page.evaluate(() => window.YTGamepadMenu.handle('back'));
+  await menu.getByRole('button', { name: 'All settings', exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.YTGamepadMenu.opened), true);
+  await page.waitForFunction(() => window.inlineListeners.size === 0);
+  await page.evaluate(() => window.YTGamepadMenu.handle('back'));
+  assert.equal(await page.evaluate(() => window.YTGamepadMenu.opened), false);
+});
+
+test('settings shortcuts persist swaps, recover failed writes and fit mobile screens', options, async t => {
+  const page = await setup(t);
+  await page.route('https://www.youtube.com/assets/controller/*.svg', route => {
+    const name = new URL(route.request().url()).pathname.split('/').pop();
+    return route.fulfill({ contentType: 'image/svg+xml', body: readFileSync(new URL(`assets/controller/${name}`, root)) });
+  });
+  await page.goto('https://www.youtube.com/settings-fixture');
+  const html = readFileSync(new URL('options.html', root), 'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '');
+  await page.setContent(html);
+  await page.evaluate(() => {
+    window.storedSettings = { autoFullscreen: true };
+    window.storageListeners = []; window.failSave = false;
+    window.chrome = { storage: { local: {
+      get: async defaults => ({ ...defaults, ...window.storedSettings }),
+      set: async values => {
+        if (window.failSave) throw new Error('storage unavailable');
+        Object.assign(window.storedSettings, values);
+        const changes = Object.fromEntries(Object.entries(values).map(([key, newValue]) => [key, { newValue }]));
+        for (const listener of window.storageListeners) listener(changes, 'local');
+      }
+    }, onChanged: { addListener: listener => window.storageListeners.push(listener) } } };
+  });
+  for (const path of ['ui/theme.css', 'options.css']) await page.addStyleTag({ path: fileURLToPath(new URL(path, root)) });
+  for (const path of ['actions.js', 'bindings.js', 'runtime.js', 'ui/styles.js', 'controller-style.js', 'options.js', 'options-bindings.js']) await page.addScriptTag({ path: fileURLToPath(new URL(path, root)) });
+  await page.waitForFunction(() => !document.getElementById('binding-confirm').disabled);
+  await page.locator('[data-category-link="controller"]').click();
+  await page.waitForFunction(() => !document.querySelector('#shortcuts').hidden);
+  assert.equal(await page.locator('#shortcuts').isVisible(), true);
+  await page.waitForFunction(() => [...document.querySelectorAll('#binding-confirm selectedcontent img')].every(image => image.complete && image.naturalWidth > 0));
+  assert.equal(await page.locator('#binding-confirm selectedcontent img').count(), 2);
+  await page.locator('#binding-confirm').click();
+  assert.equal(await page.locator('#binding-confirm option[value="1"] img').first().isVisible(), true);
+  await page.keyboard.press('Escape');
+  // Native keyboard selection still saves and swaps the physical buttons.
+  await page.locator('#binding-confirm').focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.storedSettings.bindings?.confirm === 1);
+  assert.match(await page.locator('#binding-confirm selectedcontent img').first().getAttribute('src'), /xbox_button_color_b\.svg$/);
+  assert.match(await page.locator('#binding-back selectedcontent img').first().getAttribute('src'), /xbox_button_color_a\.svg$/);
+  await page.locator('#binding-confirm').selectOption('1');
+  assert.equal(await page.locator('#binding-back').inputValue(), '0');
+  assert.equal(await page.evaluate(() => window.storedSettings.bindings.confirm), 1);
+  await page.evaluate(() => { window.failSave = true; });
+  await page.locator('#binding-search').selectOption('8');
+  await page.waitForFunction(() => document.querySelector('#status').textContent.includes('Could not save'));
+  await page.waitForTimeout(2200);
+  assert.equal(await page.locator('#status').isVisible(), true, 'save failures remain visible');
+  assert.equal(await page.locator('#binding-search').inputValue(), '3');
+  await page.evaluate(() => { window.failSave = false; });
+  await page.locator('#resetBindings').click();
+  assert.equal(await page.locator('#binding-confirm').inputValue(), '0');
+  assert.equal(await page.locator('#binding-back').inputValue(), '1');
+  await page.waitForFunction(() => document.querySelector('#status').hidden);
+  await page.waitForTimeout(160);
+  assert.equal(await page.locator('#status').isVisible(), false, 'success feedback fades away');
+  // Each page owns a separate layout; swapping and reset cannot change the other.
+  await page.locator('[data-binding-layout="browse"]').click();
+  await page.locator('#binding-confirm').selectOption('1');
+  await page.waitForFunction(() => window.storedSettings.bindingLayouts?.browse.confirm === 1 && !document.querySelector('#binding-confirm').disabled);
+  assert.equal(await page.evaluate(() => window.storedSettings.bindingLayouts.watch.confirm), 0);
+  await page.locator('[data-binding-layout="watch"]').click();
+  assert.equal(await page.locator('#binding-confirm').inputValue(), '0');
+  await page.locator('#binding-search').selectOption('8');
+  await page.waitForFunction(() => window.storedSettings.bindingLayouts.watch.search === 8 && !document.querySelector('#binding-search').disabled);
+  await page.locator('[data-binding-layout="browse"]').click();
+  assert.equal(await page.locator('#binding-confirm').inputValue(), '1');
+  assert.equal(await page.locator('#binding-search').inputValue(), '3');
+  await page.locator('#resetBindings').click();
+  await page.waitForFunction(() => window.storedSettings.bindingLayouts.browse.confirm === 0 && !document.querySelector('#resetBindings').disabled);
+  assert.equal(await page.evaluate(() => window.storedSettings.bindingLayouts.watch.search), 8);
+  await page.locator('[data-binding-layout="watch"]').click();
+  await page.locator('#resetBindings').click();
+  await page.waitForFunction(() => !document.querySelector('#resetBindings').disabled);
+  await page.locator('.controller-hotspot[data-key="A"]').click();
+  assert.equal(await page.locator('#binding-confirm option[value="1"] img').first().isVisible(), true);
+  await page.keyboard.press('Escape');
+  const directory = fileURLToPath(new URL('output/playwright/settings/', repository));
+  mkdirSync(directory, { recursive: true });
+  await page.evaluate(() => scrollTo(0, 0));
+  await page.screenshot({ path: resolve(directory, 'desktop.png'), fullPage: true });
+  await page.evaluate(() => document.documentElement.setAttribute('dark', ''));
+  await page.screenshot({ path: resolve(directory, 'desktop-dark.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.screenshot({ path: resolve(directory, 'mobile.png'), fullPage: true });
+});
+
+test('mouse takeover releases controller card focus without losing selection or keyboard focus', options, async t => {
+  const page = await setup(t);
+  await page.evaluate(() => {
+    const card = document.querySelector('ytd-rich-item-renderer');
+    const title = document.createElement('a');
+    title.id = 'video-title-link'; title.href = '/watch?v=a'; title.textContent = 'Video title';
+    card.prepend(title);
+    window.testPad = { index: 0, connected: true, mapping: 'standard', axes: [0, 0],
+      buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 })) };
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [window.testPad] });
+  });
+  await page.keyboard.press('Tab');
+  await page.waitForFunction(() => window.YTGamepadInput.connected);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.evaluate(() => { window.testPad.axes[0] = .8; });
+  await page.waitForFunction(() => window.YTGamepadInput.mode === 'gamepad');
+  await page.evaluate(() => {
+    window.testPad.axes[0] = 0;
+    // A controller may restore the title link as its card target.
+    window.YTGamepad.focus(document.querySelector('#video-title-link'));
+  });
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'video-title-link');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#video-title-link')).outlineStyle), 'none');
+  await page.mouse.move(700, 700);
+  await page.mouse.move(720, 700);
+  await page.waitForFunction(() => window.YTGamepadInput.mode === 'mouse');
+  assert.equal(await page.evaluate(() => document.activeElement.id === 'video-title-link'), false,
+    'controller focus must not reveal a native title outline when its CSS suppression is removed');
+  assert.equal(await page.evaluate(() => window.YTGamepad.current.id), 'video-title-link',
+    'the remembered controller selection survives mouse takeover');
+  await page.locator('#video-title-link').hover();
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#video-title-link')).outlineStyle), 'none');
+  await page.keyboard.press('Tab');
+  await page.evaluate(() => window.YTGamepad.focus(document.querySelector('#video-title-link')));
+  await page.mouse.move(740, 700);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'video-title-link',
+    'mouse movement must not discard a keyboard-owned focus');
+});
+
+test('native header preserves sidebar and feed geometry across widths and guide states', options, async t => {
   const page = await setup(t);
   await page.addStyleTag({ content: `
     body{padding:0} ytd-app,ytd-page-manager,ytd-rich-grid-renderer{display:block}
@@ -148,17 +795,29 @@ test('TV header preserves native sidebar and feed geometry across widths and gui
       const native = await measure();
       await page.evaluate(() => document.documentElement.classList.add('ytg-theater'));
       await page.waitForFunction(() => document.documentElement.classList.contains('ytg-browse'));
-      assert.deepEqual(await measure(),native,'header activation leaves native widths, columns and metadata intact');
+      const adapted = { ...native, title: '18px' };
+      assert.deepEqual(await measure(),adapted,'shared title typography preserves native widths, columns and metadata');
       const sidebar = expanded ? 'ytd-guide-renderer a' : 'ytd-mini-guide-renderer a';
       await page.evaluate(selector => window.YTGamepad.focus(document.querySelector(selector)),sidebar);
       assert.equal(await page.evaluate(selector => window.YTGamepad.current === document.querySelector(selector),sidebar),true,'native sidebar is a focus candidate');
-      assert.deepEqual(await measure(),native,'focusing the sidebar does not resize the feed');
+      assert.deepEqual(await measure(),adapted,'focusing the sidebar does not resize the feed');
     }
   }
   assert.equal(await page.locator('#ytg-browse-sidebar').count(),0);
+  assert.equal(await page.locator('#ytg-browse-top').count(),0);
+  await page.locator('ytd-masthead input#search').fill('existing query');
+  await page.evaluate(() => window.YTGamepad.focus(document.querySelector('input#search')));
+  assert.equal((await snapshot(page)).current, 'search', 'native search remains a focus candidate in browse mode');
+  await press(page, 'confirm');
+  assert.equal((await snapshot(page)).menu, true, 'A opens the existing gamepad keyboard');
+  assert.equal(await page.locator('#yt-gamepad-menu').evaluate(host => host.shadowRoot.querySelector('#query').value), 'existing query');
+  await press(page, 'back');
+  assert.equal((await snapshot(page)).menu, false);
+  assert.equal((await snapshot(page)).current, 'search', 'closing search restores its native entry');
   const expanded = await page.locator('ytd-app').getAttribute('expanded');
-  await page.locator('#ytg-browse-top [data-browse-action="guide"]').click();
-  assert.notEqual(await page.locator('ytd-app').getAttribute('expanded'),expanded,'header forwards the native guide toggle');
+  await page.evaluate(() => window.YTGamepad.focus(document.querySelector('ytd-masthead #guide-button')));
+  await press(page, 'confirm');
+  assert.notEqual(await page.locator('ytd-app').getAttribute('expanded'),expanded,'native guide remains usable with gamepad');
   await page.evaluate(() => {
     const card=document.querySelector('a#thumbnail');window.YTGamepad.focus(card);window.YTGamepad.act('left');
   });
@@ -551,6 +1210,86 @@ test('native range adjustment consumes A and one B before closing and restoring 
 });
 
 
+test('search highlight follows mouse and controller ownership without leaving a second key highlighted', options, async t => {
+  const page = await setup(t);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.evaluate(() => {
+    window.testPad = { index: 0, connected: true, mapping: 'standard', axes: [0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })) };
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [window.testPad] });
+    window.YTGamepadMenu.openSearch();
+  });
+  const paint = () => page.evaluate(() => {
+    const root = document.querySelector('#yt-gamepad-menu').shadowRoot;
+    const keys = [...root.querySelectorAll('#keys button')];
+    const resting = keys.find(button => button.textContent === 'Z');
+    const hovered = keys.find(button => button.textContent === 'R');
+    const focused = root.activeElement;
+    return { mode: window.YTGamepadInput.mode,
+      focusedBackground: getComputedStyle(focused).backgroundColor,
+      focusedOutline: getComputedStyle(focused).outlineStyle,
+      restingBackground: getComputedStyle(resting).backgroundColor,
+      hoveredBackground: getComputedStyle(hovered).backgroundColor,
+      hovered: hovered.matches(':hover') };
+  });
+  let state = await paint();
+  assert.equal(state.mode, 'mouse');
+  assert.equal(state.focusedBackground, state.restingBackground, 'initial programmatic focus does not paint a mouse-mode key');
+  await page.locator('#keys button').filter({ hasText: /^R$/ }).hover();
+  state = await paint();
+  assert.equal(state.hovered, true);
+  assert.notEqual(state.hoveredBackground, state.restingBackground);
+  await page.evaluate(() => { window.testPad.buttons[13].pressed = true; });
+  await page.waitForFunction(() => window.YTGamepadInput.mode === 'gamepad');
+  await page.evaluate(() => { window.testPad.buttons[13].pressed = false; });
+  state = await paint();
+  assert.equal(state.hovered, true, 'pointer stays over R during controller input');
+  assert.equal(state.hoveredBackground, state.restingBackground, 'controller input suppresses the parked pointer highlight');
+  assert.equal(state.focusedOutline, 'solid');
+  assert.notEqual(state.focusedBackground, state.restingBackground);
+  await page.mouse.move(1250, 880);
+  state = await paint();
+  assert.equal(state.mode, 'mouse');
+  assert.equal(state.focusedOutline, 'none');
+  assert.equal(state.focusedBackground, state.restingBackground, 'mouse takeover removes the controller key fill');
+});
+
+test('menu motion permits immediate reopen and repeated input, and respects reduced motion', options, async t => {
+  const page = await setup(t);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.evaluate(() => window.YTGamepadMenu.handle('help'));
+  await page.waitForFunction(() => {
+    const host = document.querySelector('#yt-gamepad-menu');
+    return getComputedStyle(host).opacity === '1';
+  });
+  const reopened = await page.evaluate(() => {
+    const menu = window.YTGamepadMenu;
+    menu.close(); menu.handle('help');
+    const host = document.querySelector('#yt-gamepad-menu');
+    return { opened: menu.opened, closing: host.hasAttribute('data-closing'),
+      focusInside: host.shadowRoot.activeElement?.tagName === 'BUTTON' };
+  });
+  assert.deepEqual(reopened, { opened: true, closing: false, focusInside: true });
+  await page.evaluate(() => window.YTGamepadMenu.openSearch());
+  const pressTwice = () => page.evaluate(() => {
+    const root = document.querySelector('#yt-gamepad-menu').shadowRoot;
+    const button = root.querySelector('#keys button');
+    const before = root.querySelector('#query').value;
+    button.click(); button.click();
+    return { before, after: root.querySelector('#query').value,
+      animations: button.getAnimations().filter(animation => animation.id === 'ytg-press').length };
+  });
+  let result = await pressTwice();
+  assert.equal(result.after.length, result.before.length + 2, 'both inputs commit synchronously');
+  assert.equal(result.animations, 1, 'repeated presses replace the previous feedback');
+  await page.waitForFunction(() => !document.querySelector('#yt-gamepad-menu').shadowRoot
+    .querySelector('#keys button').getAnimations().some(animation => animation.id === 'ytg-press'));
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  result = await pressTwice();
+  assert.equal(result.after.length, result.before.length + 2);
+  assert.equal(result.animations, 0);
+});
+
 test('current-page fill survives controller focus and enabled controls keep their checkmark', options, async t => {
   const page = await setup(t);
   const nav = await page.evaluate(() => {
@@ -567,6 +1306,9 @@ test('current-page fill survives controller focus and enabled controls keep thei
   const watchPage = await setup(t, '/watch?v=current');
   const control = await watchPage.evaluate(() => {
     document.documentElement.classList.add('ytg-gamepad-input');
+    const captions = document.createElement('button');
+    captions.className = 'ytp-subtitles-button'; captions.setAttribute('aria-pressed', 'true');
+    document.querySelector('#movie_player').append(captions);
     window.YTGamepadWatch.show();
     for (let i = 0; i < 6; i++) window.YTGamepadWatch.handle('right');
     const node = document.querySelector('#ytg-watch').shadowRoot.querySelector('[data-action="captions"]');

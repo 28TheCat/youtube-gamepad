@@ -9,12 +9,12 @@ import { runInNewContext } from 'node:vm';
 function setup() {
   const commands = [], listeners = new Map();
   let overlay = null, watchPort, menuPort;
-  const node = () => ({ isConnected: true, style: {}, dataset: {},
+  const node = () => ({ isConnected: true, style: {}, dataset: {}, attributes: {},
     classList: { toggle() {}, remove() {}, add() {}, contains: () => false },
     contains: () => false, closest: () => null,
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }),
-    getAttribute: () => null, focus() {}, scrollIntoView() {},
-    append() {}, attachShadow: () => ({ append() {} }) });
+    getAttribute(name) { return this.attributes[name] ?? null; }, setAttribute(name, value) { this.attributes[name] = value; }, focus() {}, scrollIntoView() {},
+    append() {}, replaceChildren(...children) { this.children = children; }, attachShadow: () => ({ append() {} }) });
   const addEventListener = (name, callback) => {
     if (!listeners.has(name)) listeners.set(name, []);
     listeners.get(name).push(callback);
@@ -49,7 +49,7 @@ function setup() {
     },
     handleInput(action) { return this.handle(action) ? 'handled' : 'blocked'; } };
   const window = { addEventListener, postMessage() {}, YTGamepadMenu: menu, YTGamepadWatch: watch,
-    YTGamepadInput: { configure() {}, connected: false } };
+    YTGamepadInput: { configure() {}, connected: true } };
   const location = { pathname: '/watch', search: '?v=current', origin: 'https://www.youtube.com', assign(path) { commands.push('navigate:' + path); } };
   const context = { window, document, location, URL, URLSearchParams, history: { back() {}, go() {} },
     getComputedStyle: () => ({ visibility: 'visible', display: 'block', opacity: '1' }),
@@ -137,4 +137,21 @@ test('global exit closes UI and blocks actions above menus, native layers and na
   assert.equal(s.watch.state.mode, 'playback');
   assert.equal(s.act('back'), 'handled');
   assert.ok(s.commands.includes('native:back'));
+});
+
+test('assembled modules retain injected collaborators when global dependency reads are forbidden', () => {
+  const s = setup();
+  for (const name of ['YTGamepadRuntime', 'YTGamepadInteraction', 'YTGamepadFocus',
+    'YTGamepadNavigation', 'YTGamepadControllerStyle', 'YTGamepadDiagnostics',
+    'YTGamepadMenu', 'YTGamepadSite', 'YTGamepadWatch', 'YTGamepadInput', 'YTGamepadRouteController']) {
+    Object.defineProperty(s.window, name, { configurable: true, get() { throw new Error('Unexpected global read: ' + name); } });
+  }
+  assert.equal(s.act('search'), 'handled');
+  assert.equal(s.act('confirm'), 'blocked');
+  assert.equal(s.act('back'), 'handled');
+  assert.equal(s.act('confirm'), 'handled');
+  assert.equal(s.video.paused, true);
+  assert.equal(s.watchPort.readRoute().isWatch, true);
+  assert.equal(s.watchPort.request('seek', 45), true);
+  assert.equal(s.video.currentTime, 45);
 });

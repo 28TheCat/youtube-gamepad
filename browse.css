@@ -1,95 +1,6 @@
-/* Only the TV header replaces native chrome. YouTube owns sidebar/feed layout. */
-#ytg-browse-top { display:none }
-html.ytg-browse ytd-app { --ytd-masthead-height:var(--ytg-top-height)!important }
-html.ytg-browse ytd-masthead {
-  height:var(--ytg-top-height)!important;
-  visibility:hidden!important;
-  pointer-events:none!important;
-}
-html.ytg-browse #ytg-browse-top {
-  position:fixed;
-  inset:0 0 auto 0;
-  height:var(--ytg-top-height);
-  padding:0 var(--ytg-space-7) 0 var(--ytg-space-4);
-  box-sizing:border-box;
-  display:flex;
-  align-items:center;
-  gap:var(--ytg-space-4);
-  background:var(--ytg-background);
-  color:var(--ytg-text);
-  z-index:2300;
-}
-.ytg-nav-icon { width:28px;height:28px;flex-shrink:0;fill:currentColor }
-#ytg-browse-top .ytg-top-guide {
-  display:flex;align-items:center;justify-content:center;
-  width:48px;height:48px;padding:0;flex-shrink:0;
-  border:0;border-radius:var(--ytg-pill-radius);
-  background:transparent;color:inherit;cursor:pointer;
-}
-#ytg-browse-top .ytg-top-guide .ytg-nav-label { display:none }
-#ytg-browse-top .ytg-top-brand { margin-left:auto }
-#ytg-browse-top button:is(.ytg-selected,:focus-visible) {
-  background:var(--ytg-selected-background);
-  color:var(--ytg-selected-text);
-  outline:none;
-}
-/* Keep native category geometry; reserve only the new header height. */
-html.ytg-browse ytd-feed-filter-chip-bar-renderer {
-  --ytd-rich-grid-chips-bar-top:var(--ytg-top-height)!important;
-}
-html.ytg-browse ytd-feed-filter-chip-bar-renderer:not([not-sticky]) #chips-wrapper {
-  top:var(--ytg-top-height)!important;
-}
-#ytg-browse-top .ytg-top-search{
-  display:flex;
-  align-items:center;
-  gap:var(--ytg-space-4);
-  width:min(52vw,640px);
-  min-width:160px;
-  height:48px;
-  padding:0 var(--ytg-space-inset);
-  border:0;
-  border-radius:var(--ytg-pill-radius);
-  background:var(--ytg-surface);
-  color:var(--ytg-muted);
-  cursor:pointer;
-  text-align:left;
-  font:600 22px/1.2 var(--ytg-font-family)}
-
-  #ytg-browse-top .ytg-nav-label{
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap}
-
-#ytg-browse-top .ytg-top-brand{
-  display:flex;
-  align-items:center;
-  gap:var(--ytg-space-small);
-  flex-shrink:0;
-  font:700 27px/1 var(--ytg-font-family);
-  letter-spacing:-1.5px}
-
-#ytg-browse-top .ytg-brand-mark{
-  display:block;
-  position:relative;
-  width:38px;
-  height:26px;
-  border-radius:var(--ytg-chip-radius);
-  background:var(--ytg-brand-color)}
-
-#ytg-browse-top .ytg-brand-mark::after{
-  content:'';
-  position:absolute;
-  top:7px;
-  left:16px;
-  border-top:6px solid transparent;
-  border-bottom:6px solid transparent;
-  border-left:10px solid var(--ytg-overlay-text)}
-
-
-/* Gamepad category focus replaces the native outline with one inverted surface. */
-yt-chip-cloud-chip-renderer.ytg-selected:is(:focus,:focus-visible),
-yt-chip-cloud-chip-renderer.ytg-selected button:is(:focus,:focus-visible) {
+/* The category surface owns its ring, avoiding a second native button ring. */
+html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected:has(.ytChipShapeChip,#chip-shape-container):is(:focus,:focus-visible),
+html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected button:not(.ytChipShapeChip):not(#chip-shape-container):is(:focus,:focus-visible) {
   outline:none!important;box-shadow:none!important;
 }
 /* A video card's DOM focus can land on its title link while the overlay
@@ -100,18 +11,41 @@ html.ytg-gamepad-input :is(ytd-rich-item-renderer,ytd-video-renderer,ytd-compact
   box-shadow:none!important;
 }
 
-/* Navigation and category focus share an inverted surface, without a second ring. */
-yt-chip-cloud-chip-renderer.ytg-selected .ytChipShapeChip,
-yt-chip-cloud-chip-renderer.ytg-selected #chip-shape-container {
+/* Categories use the same focus ring and inverted surface as menu buttons. */
+html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected .ytChipShapeChip,
+html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected #chip-shape-container:not(:has(.ytChipShapeChip)),
+html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected:not(:has(.ytChipShapeChip,#chip-shape-container)) {
   background:var(--ytg-selected-background)!important;
   color:var(--ytg-selected-text)!important;
   border-radius:var(--ytg-chip-radius);
+  outline:var(--ytg-focus-width) solid var(--ytg-focus-color)!important;
+  outline-offset:var(--ytg-focus-offset);
 }
-yt-chip-cloud-chip-renderer.ytg-selected .ytSpecTouchFeedbackShapeStroke,
-yt-chip-cloud-chip-renderer.ytg-selected .ytSpecTouchFeedbackShapeFill { display:none!important }
+html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected .ytSpecTouchFeedbackShapeStroke,
+html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected .ytSpecTouchFeedbackShapeFill { display:none!important }
 
-@media(max-width:600px) {
-  html.ytg-browse #ytg-browse-top { gap:var(--ytg-space-2);padding-right:var(--ytg-space-4) }
-  #ytg-browse-top .ytg-top-brand { font-size:20px }
-  #ytg-browse-top .ytg-top-search { min-width:0;font-size:18px;padding:0 14px;flex:1 }
+/* Apply shared typography and thumbnail shape only while adaptation is active. */
+html.ytg-browse:not([data-ytg-native]) :is(#video-title,#video-title-link){
+  font-family:var(--ytg-font-family)!important;
+  font-size:var(--ytg-font-action)!important;
+  font-weight:var(--ytg-weight-body)!important;
+  line-height:var(--ytg-line-heading)!important;
+}
+html.ytg-browse:not([data-ytg-native]) yt-chip-cloud-chip-renderer{
+  font-family:var(--ytg-font-family);
+  font-size:var(--ytg-font-small);
+  font-weight:var(--ytg-weight-body);
+}
+html.ytg-browse:not([data-ytg-native]) :is(a#thumbnail,.yt-lockup-view-model__content-image){
+  border-radius:var(--ytg-card-radius)!important;
+}
+
+/* Emphasize the thumbnail without moving the native navigation geometry. */
+html.ytg-browse.ytg-gamepad-input:not([data-ytg-native]) .ytg-selected :is(a#thumbnail,.yt-lockup-view-model__content-image){
+  box-shadow:var(--ytg-shadow-focus);
+}
+@media(prefers-reduced-motion:no-preference){
+  html.ytg-browse:not([data-ytg-native]) :is(a#thumbnail,.yt-lockup-view-model__content-image){transition:box-shadow var(--ytg-focus-duration) var(--ytg-focus-easing)}
+  html.ytg-browse:not([data-ytg-native]) yt-chip-cloud-chip-renderer{transition:filter var(--ytg-focus-duration) ease}
+  html.ytg-browse.ytg-gamepad-input:not([data-ytg-native]) yt-chip-cloud-chip-renderer.ytg-selected{filter:drop-shadow(0 3px 6px #0002)}
 }

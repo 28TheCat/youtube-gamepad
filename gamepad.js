@@ -1,6 +1,7 @@
 (() => {
-  if (window.YTGamepadInput) return;
-  const lifecycle = window.YTGamepadRuntime.scope('input');
+  /** @param {import('./types/ports.js').InputDependencies} dependencies */
+  function create({ runtime, controllerStyle, isSearchOpen }) {
+  const lifecycle = runtime.scope('input');
   const defaults = { enabled: true, deadzone: 0.35, repeatDelay: 350, repeatInterval: 140 };
   let settings = { ...defaults }, previous = new Set(), heldDirection = '', nextRepeat = 0, index = null;
   let inputMode = 'mouse', mousePosition = null, mouseTravel = { x: 0, y: 0, time: 0 }, waitForNeutral = false, suspended = false;
@@ -26,7 +27,11 @@
   const heldButtons = new Map();
   let connected = false;
   const detect = () => {
-    const pad = Array.from(navigator.getGamepads?.() || []).find(p => p?.connected && p.mapping === 'standard');
+    const pads = Array.from(navigator.getGamepads?.() || []).filter(p => p?.connected && p.mapping === 'standard');
+    const active = p => p.buttons.some(b => b.pressed) || p.axes.some(axis => Math.abs(axis) > settings.deadzone);
+    const current = pads.find(p => p.index === index);
+    const pad = (current && active(current) ? current : pads.find(active)) || current || pads[0];
+    controllerStyle.use(pad);
     const next = Boolean(pad);
     if (next !== connected) {
       connected = next;
@@ -41,11 +46,25 @@
     release();
     window.dispatchEvent(new CustomEvent('yt-gamepad-exit', { detail: { reason } }));
   }
-  window.YTGamepadInput = { get connected() { return connected; }, get mode() { return inputMode; }, configure(values) { settings = { ...defaults, ...values }; reset(); if (!settings.enabled) release(); } };
+  window.YTGamepadInput = { get connected() { return connected; }, get mode() { return inputMode; }, configure(values) { settings = { ...defaults, ...values }; layouts = window.YTGamepadBindings.normalizeLayouts(values.bindingLayouts, values.bindings); updateBindings(layouts[activeLayout]); reset(); waitForNeutral = true; if (!settings.enabled) release(); } };
   document.documentElement.dataset.ytgInputMode = inputMode;
-  const buttons = { 0: 'confirm', 1: 'back', 2: 'playPause', 3: 'search', 4: 'seekBack', 5: 'seekForward', 9: 'help' };
+  let bindings = window.YTGamepadBindings.normalize();
+  let layouts = window.YTGamepadBindings.normalizeLayouts(), activeLayout = '';
+  const layoutNow = () => globalThis.location?.pathname === '/watch' ? 'watch' : 'browse';
+  activeLayout = layoutNow();
+  let buttons = {};
+  const updateBindings = raw => {
+    bindings = window.YTGamepadBindings.normalize(raw);
+    buttons = Object.fromEntries(Object.entries(bindings).filter(([action]) => !action.startsWith('keyboard')).map(([action, button]) => [button, action]));
+    controllerStyle.configureBindings?.(bindings);
+  };
+  updateBindings();
   function poll(time) {
     lifecycle.frame(poll);
+    const layout = layoutNow();
+    if (layout !== activeLayout) {
+      activeLayout = layout; updateBindings(layouts[layout]); reset(); waitForNeutral = true;
+    }
     const pad = detect();
     if (!settings.enabled || document.hidden || !document.hasFocus()) { reset(); return; }
     if (!pad) { reset(); return; }
@@ -58,12 +77,12 @@
       waitForNeutral = false;
       reset(); index = pad.index;
     }
-    const searchOpen = window.YTGamepadMenu?.opened && window.YTGamepadMenu.state.view === 'search';
-    const mapping = searchOpen ? { ...buttons, 10: 'keyboardSymbols', 11: 'keyboardCandidates' } : buttons;
+    const searchOpen = isSearchOpen();
+    const mapping = searchOpen ? { ...buttons, [bindings.keyboardSymbols]: 'keyboardSymbols', [bindings.keyboardCandidates]: 'keyboardCandidates' } : buttons;
     for (const [button, action] of Object.entries(mapping)) {
       if (pressed.has(Number(button)) && !previous.has(Number(button))) emit(action);
     }
-    for (const button of [2, 4, 5]) {
+    for (const button of [bindings.playPause, bindings.seekBack, bindings.seekForward]) {
       if (!searchOpen || !pressed.has(button)) { heldButtons.delete(button); continue; }
       if (!previous.has(button) || !heldButtons.has(button)) heldButtons.set(button, time + settings.repeatDelay);
       else if (time >= heldButtons.get(button)) { emit(buttons[button]); heldButtons.set(button, time + settings.repeatInterval); }
@@ -79,8 +98,6 @@
     } else if (direction && time >= nextRepeat) {
       emit(direction); nextRepeat = time + settings.repeatInterval;
     }
-    if (pressed.has(7) && !previous.has(7)) emit('volumeUp');
-    if (pressed.has(6) && !previous.has(6)) emit('volumeDown');
     previous = pressed;
   }
   lifecycle.listen(document, 'mousemove', e => {
@@ -100,10 +117,17 @@
   // Escape uses the same owner and navigation guards as controller B.
   // Capture once above native and shadow handlers; synthetic close events bypass it.
   lifecycle.listen(window, 'keydown', e => {
-    if (!e.isTrusted || e.key !== 'Escape' || e.defaultPrevented || !settings.enabled || suspended) return;
+    if (!e.isTrusted || e.key !== 'Escape' || e.defaultPrevented || !settings.enabled || !detect() || suspended) return;
     e.preventDefault(); e.stopImmediatePropagation();
-    if (!e.repeat) window.dispatchEvent(new CustomEvent('yt-gamepad-action', { detail: { action: 'back' } }));
+    if (e.repeat) return;
+    // The isolated bridge checks browser fullscreen before falling back to back.
+    if (window.dispatchEvent(new CustomEvent('yt-gamepad-escape-request', { detail: e, cancelable: true })) === false) return;
+    window.dispatchEvent(new CustomEvent('yt-gamepad-action', { detail: { action: 'back' } }));
   }, true);
+  lifecycle.listen(window, 'message', e => {
+    if (e.source !== window || e.origin !== location.origin || e.data?.source !== 'yt-gamepad-escape-back') return;
+    if (settings.enabled && detect() && !suspended) window.dispatchEvent(new CustomEvent('yt-gamepad-action', { detail: { action: 'back' } }));
+  });
   lifecycle.listen(document, 'visibilitychange', () => { if (document.hidden) release(); });
   lifecycle.listen(document, 'yt-navigate-start', release);
   lifecycle.listen(document, 'yt-navigate-finish', release);
@@ -120,4 +144,7 @@
   published.destroy = lifecycle.destroy;
   lifecycle.cleanup(() => { if (window.YTGamepadInput === published) delete window.YTGamepadInput; });
   lifecycle.cleanup(() => { settings.enabled = false; reset(); setMode('mouse'); });
+  return published;
+  }
+  window.YTGamepadInputModule = { create };
 })();

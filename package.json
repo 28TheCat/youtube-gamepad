@@ -3,7 +3,9 @@
   "version": "0.2.0",
   "private": true,
   "description": "Gamepad navigation and playback controls for YouTube",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "styles": "node scripts/build-styles.mjs",
     "check": "node scripts/check.mjs",
@@ -15,5 +17,8 @@
     "build": "node scripts/build-release.mjs",
     "check:release": "node scripts/check-release.mjs"
   },
-  "devDependencies": { "playwright": "1.62.1" }
+  "devDependencies": {
+    "playwright": "1.62.1",
+    "typescript": "7.0.2"
+  }
 }

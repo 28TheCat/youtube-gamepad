@@ -1,5 +1,7 @@
 (() => {
-  const lifecycle = window.YTGamepadRuntime.scope('site');
+  /** @param {import('../types/ports.js').SiteDependencies} dependencies */
+  function create({ runtime, diagnostics, focusManager }) {
+  const lifecycle = runtime.scope('site');
   const getVideo = () => document.querySelector('video.html5-main-video') || document.querySelector('video');
   const progressSelector = '.ytp-progress-bar';
   // Keep preview handling in the site adapter: never pause the main watch player.
@@ -57,7 +59,7 @@
     const video = getVideo();
     if (!video) return false;
     if (action === 'pause') video.pause();
-    else if (action === 'playPause') { if (video.paused) video.play().catch(() => {}); else video.pause(); }
+    else if (action === 'playPause') { if (video.paused) return Promise.resolve(video.play()).then(() => true); else video.pause(); }
     else if (action === 'captions') {
       const button = document.querySelector('.ytp-subtitles-button');
       if (!button || button.getAttribute('aria-disabled') === 'true' || getComputedStyle(button).display === 'none') return false;
@@ -65,16 +67,23 @@
     }
     else if (action === 'mute') video.muted = !video.muted;
     else if (action === 'seekBack' || action === 'seekForward') {
-      if (!Number.isFinite(video.duration)) return false;
-      video.currentTime = Math.min(video.duration, Math.max(0, video.currentTime + (action === 'seekBack' ? -10 : 10)));
+      const step = window.YTGamepadActions.get(action).parameter.default;
+      return seekTo(video.currentTime + (action === 'seekBack' ? -step : step));
     }
-    else if (action === 'volumeUp' || action === 'volumeDown') video.volume = Math.min(1, Math.max(0, video.volume + (action === 'volumeUp' ? .05 : -.05)));
+    else if (action === 'goLive') {
+      const timeline = readTimeline(video);
+      return timeline.isLive && timeline.canSeek && seekTo(timeline.end);
+    }
+    else if (action === 'volumeUp' || action === 'volumeDown') {
+      const step = window.YTGamepadActions.get(action).parameter.default / 100;
+      video.volume = Math.min(1, Math.max(0, video.volume + (action === 'volumeUp' ? step : -step)));
+    }
     else return false;
     return true;
   }
   function switchBrowseCategory(direction) {
     // Include horizontally clipped chips, but exclude hidden SPA pages and dialogs.
-    const chips = Array.from(document.querySelectorAll('ytd-page-manager yt-chip-cloud-chip-renderer')).filter(chip => {
+    const chips = Array.from(document.querySelectorAll('yt-chip-cloud-chip-renderer')).filter(chip => {
       if (!chip.isConnected || chip.closest('[hidden],[aria-hidden="true"],[inert]') ||
           chip.getAttribute('aria-disabled') === 'true' || chip.hasAttribute('disabled')) return false;
       const rect = chip.getBoundingClientRect();
@@ -86,12 +95,15 @@
       return true;
     });
     const active = chips.findIndex(chip => chip.getAttribute('selected') === '' || chip.getAttribute('selected') === 'true' ||
-      chip.getAttribute('aria-selected') === 'true' || chip.querySelector('[aria-selected="true"],[aria-pressed="true"]'));
+      chip.getAttribute('aria-selected') === 'true' || chip.querySelector('[aria-selected="true"],[aria-pressed="true"],.ytChipShapeActive'));
     if (active < 0) return 'blocked';
     const target = chips[active + direction];
     if (!target) return 'blocked';
     target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
-    target.click();
+    // New chip renderers attach activation to the inner button, not the host.
+    const button = target.querySelector('button,[role="button"]') || target;
+    if (button.disabled || button.getAttribute('aria-disabled') === 'true') return 'blocked';
+    button.click();
     return 'handled';
   }
   function showNativeControls() {
@@ -167,15 +179,21 @@
       findSave();
     });
   }
+  /** @returns {import('../types/ports.js').RouteSnapshot} */
   const readRoute = () => ({ key: location.pathname + location.search, isWatch: location.pathname === '/watch' });
   const watchFeatures = {};
+  function diagnoseSite(operation, error) {
+    try { diagnostics?.record('site', operation, error, {
+      route: location.pathname === '/watch' ? 'watch' : 'browse'
+    }); } catch (_) {}
+  }
   function optionalFeature(name, read, fallback) {
-    const fail = () => { watchFeatures[name] = 'failed'; return fallback(); };
+    const fail = error => { diagnoseSite('optional.' + name, error); watchFeatures[name] = 'failed'; return fallback(); };
     try {
       const result = read();
       return result && typeof result.then === 'function' ? Promise.resolve(result).catch(fail) : result;
     }
-    catch (_) { watchFeatures[name] = 'failed'; return fallback(); }
+    catch (error) { return fail(error); }
   }
   function inspectOptionalCapabilities() {
     const probes = {
@@ -192,30 +210,59 @@
     }
     return { ...watchFeatures };
   }
-  function inspectWatchCapabilities() {
+  function inspectWatchCapabilities(requireDestinationReady = false) {
     const missing = [];
     try {
       const player = document.querySelector('#movie_player'), video = getVideo();
-      if (!player || player.isConnected === false) missing.push('播放器');
+      if (!player || player.isConnected === false) missing.push('player');
       if (!video || video.isConnected === false || typeof video.play !== 'function' || typeof video.pause !== 'function' ||
-          (player?.contains && !player.contains(video))) missing.push('视频播放能力');
+          (player?.contains && !player.contains(video))) missing.push('video playback');
+      // YouTube reuses its player across SPA routes; an old response is not ready.
+      // Missing metadata remains optional, matching readWatchPage's contract.
+      let videoId;
+      try { videoId = player?.getPlayerResponse?.()?.videoDetails?.videoId; } catch (_) {}
+      if (videoId) {
+        const expectedId = new URLSearchParams(location.search).get('v');
+        if (expectedId && videoId !== expectedId) missing.push('current video');
+      }
+      // Before yt-navigate-finish, require positive evidence that this is the
+      // destination, rather than authorizing a reused player with no metadata.
+      if (requireDestinationReady) {
+        if (!videoId) missing.push('current video');
+        if (!video || video.readyState < 2 || !(video.videoWidth > 0)) missing.push('video frames');
+      }
       // Only the media/player contract can force a full native fallback.
       return { ready: missing.length === 0, missing };
-    } catch (_) { return { ready: false, failed: true, missing: ['播放器适配'] }; }
+    } catch (error) { diagnoseSite('inspectWatchCapabilities', error); return { ready: false, failed: true, missing: ['player interface'] }; }
   }
   function restoreNativeInterface() {
-    for (const name of ['ytg-playback', 'ytg-controls', 'ytg-watch-active', 'ytg-recommendations', 'ytg-comments', 'ytg-comments-preload', 'ytg-settings-open']) {
+    for (const name of ['ytg-playback', 'ytg-controls', 'ytg-watch-active', 'ytg-recommendations', 'ytg-recommendations-loading', 'ytg-comments', 'ytg-comments-preload', 'ytg-settings-open']) {
       document.documentElement.classList.remove?.(name);
       document.documentElement.classList.toggle(name, false);
     }
     const host = document.querySelector('#ytg-watch');
     if (host) host.hidden = true;
   }
+  function readTimeline(video) {
+    let live = false;
+    try { live = document.querySelector('#movie_player')?.getPlayerResponse?.()?.videoDetails?.isLive === true; } catch (_) {}
+    const isLive = live || video.duration === Infinity, ranges = [];
+    for (let i = 0; i < (video.seekable?.length || 0); i++) {
+      const start = video.seekable.start(i), end = video.seekable.end(i);
+      if (Number.isFinite(start) && Number.isFinite(end) && end > start) ranges.push({ start, end });
+    }
+    if (!isLive && Number.isFinite(video.duration) && video.duration > 0 && !ranges.length)
+      ranges.push({ start: 0, end: video.duration });
+    const start = ranges[0]?.start || 0, end = ranges.at(-1)?.end || 0;
+    return { isLive, canSeek: ranges.length > 0, start, end, ranges,
+      atLiveEdge: isLive && ranges.length > 0 && video.currentTime >= end - 2 };
+  }
+  /** @returns {import('../types/ports.js').PlaybackSnapshot} */
   function readPlayback() {
     const video = getVideo(), caption = optionalFeature('captions', () => document.querySelector('.ytp-subtitles-button'), () => null);
     return {
-      video: video ? { currentTime: video.currentTime, duration: video.duration, paused: video.paused, ended: video.ended } : null,
-      captionsEnabled: caption?.getAttribute('aria-pressed') === 'true',
+      video: video ? { currentTime: video.currentTime, duration: video.duration, paused: video.paused, ended: video.ended, volume: video.volume, muted: video.muted, timeline: readTimeline(video) } : null,
+      captionsEnabled: optionalFeature('captions', () => caption?.getAttribute('aria-pressed') === 'true', () => false),
       settingsOpen: optionalFeature('settings', settingsOpen, () => false)
     };
   }
@@ -240,8 +287,16 @@
   }
   function seekTo(value) {
     const video = getVideo();
-    if (!video || !Number.isFinite(video.duration) || !Number.isFinite(value)) return false;
-    video.currentTime = Math.min(video.duration, Math.max(0, value)); return true;
+    if (!video || !Number.isFinite(value)) return false;
+    const { ranges, canSeek } = readTimeline(video);
+    if (!canSeek) return false;
+    // Re-read the moving window and snap gaps to the nearest valid boundary.
+    let target = value, distance = Infinity;
+    for (const range of ranges) {
+      const candidate = Math.min(range.end, Math.max(range.start, value));
+      if (Math.abs(candidate - value) < distance) { target = candidate; distance = Math.abs(candidate - value); }
+    }
+    video.currentTime = target; return true;
   }
   function readThumbnail(node, key) {
     const fallback = `https://i.ytimg.com/vi/${encodeURIComponent(key)}/hqdefault.jpg`;
@@ -259,6 +314,7 @@
     }
     return { thumbnail: fallback, thumbnailFallback: fallback };
   }
+  /** @returns {import('../types/ports.js').WatchPageSnapshot} */
   function readWatchPage() {
     const route = readRoute(), id = new URLSearchParams(location.search).get('v');
     recommendationSources.clear(); channelSource = null;
@@ -277,10 +333,10 @@
       if (['https:', 'http:'].includes(url.protocol) && url.pathname !== '/') page.avatar = url.href;
     } catch (_) {}
     const subscription = document.querySelector('ytd-video-owner-renderer ytd-subscribe-button-renderer,ytd-watch-metadata #subscribe-button ytd-subscribe-button-renderer');
-    const subscribe = watchActionTarget('subscribe');
+    const subscribe = optionalFeature('subscribe', () => watchActionTarget('subscribe'), () => null);
     page.subscribed = !!subscription?.hasAttribute?.('subscribed') || subscribe?.getAttribute('aria-pressed') === 'true' || /^(subscribed|unsubscribe|已订阅|已訂閱|取消订阅|取消訂閱)/i.test(subscribe?.textContent?.trim() || '');
-    page.liked = watchActionTarget('like')?.getAttribute('aria-pressed') === 'true';
-    page.disliked = watchActionTarget('dislike')?.getAttribute('aria-pressed') === 'true';
+    page.liked = optionalFeature('like', () => watchActionTarget('like')?.getAttribute('aria-pressed') === 'true', () => false);
+    page.disliked = optionalFeature('dislike', () => watchActionTarget('dislike')?.getAttribute('aria-pressed') === 'true', () => false);
     page.viewCount = details?.viewCount ?? null;
     page.description = details?.shortDescription || document.querySelector('ytd-watch-metadata #description,ytd-video-secondary-info-renderer #description')?.textContent?.trim() || '';
     page.recommendations = optionalFeature('recommendations', () => readRecommendations(id), () => { recommendationSources.clear(); return []; });
@@ -299,10 +355,39 @@
       const label = node.querySelector('#video-title,.ytLockupMetadataViewModelTitle,.yt-lockup-metadata-view-model__title,h3')?.textContent?.trim() || anchor.getAttribute('title');
       if (!label) continue;
       recommendationSources.set(key, anchor);
-      records.push({ key, label, ...readThumbnail(node, key), channel: node.querySelector('#channel-name,.ytContentMetadataViewModelMetadataRow,.yt-content-metadata-view-model')?.textContent?.trim() || '' });
-      if (records.length >= 12) break;
+      const metadataRows = Array.from(node.querySelectorAll?.('.yt-content-metadata-view-model__metadata-row,.ytContentMetadataViewModelMetadataRow') || []);
+      const channel = node.querySelector('#channel-name')?.textContent?.trim() || metadataRows[0]?.textContent?.trim() || '';
+      const metadata = node.querySelector('#metadata-line')?.textContent?.trim().replace(/\s+/g, ' ') || metadataRows.slice(1).map(row => row.textContent?.trim()).filter(Boolean).join(' · ');
+      const duration = node.querySelector('ytd-thumbnail-overlay-time-status-renderer,.ytThumbnailOverlayBadgeViewModelBadgeText,yt-thumbnail-overlay-badge-view-model .yt-badge-shape__text')?.textContent?.trim() || '';
+      records.push({ key, label, ...readThumbnail(node, key), channel, metadata, duration });
+      if (records.length >= 120) break;
     }
-    return page;
+    return records;
+  }
+  let recommendationLoadRoute = '', recommendationLoadAfter = 0, recommendationLoadTimer;
+  function loadRecommendations() {
+    const route = readRoute();
+    if (!route.isWatch || recommendationSources.size >= 120) return false;
+    const source = document.querySelector('#secondary');
+    const continuation = source?.querySelector('ytd-watch-next-secondary-results-renderer ytd-continuation-item-renderer');
+    if (!continuation) return false;
+    if (recommendationLoadRoute !== route.key) {
+      recommendationLoadRoute = route.key; recommendationLoadAfter = 0;
+    }
+    const now = Date.now();
+    if (now < recommendationLoadAfter) return true;
+    recommendationLoadAfter = now + 1500;
+    // Let YouTube's own continuation enter its native scroll viewport behind
+    // the full-screen player. Never scroll the page or call private APIs.
+    const root = document.documentElement;
+    root.classList.add('ytg-recommendations-loading');
+    lifecycle.clearTimeout(recommendationLoadTimer);
+    recommendationLoadTimer = lifecycle.timeout(() => root.classList.remove('ytg-recommendations-loading'), 4000);
+    if (typeof source.scrollTop === 'number' && continuation.getBoundingClientRect) {
+      source.scrollTop += continuation.getBoundingClientRect().top - source.getBoundingClientRect().top;
+    }
+    continuation.querySelector('button,yt-button-shape button')?.click();
+    return true;
   }
   function openRecommendation(key, prepareVideo) {
     const anchor = recommendationSources.get(key);
@@ -318,6 +403,7 @@
     if (!channelSource || channelSource.isConnected === false) return false;
     beforeNavigate(); channelSource.click(); return true;
   }
+  /** @returns {readonly import('../types/ports.js').CommentSnapshot[]} */
   function readComments() {
     commentSources.clear();
     return Array.from(document.querySelectorAll('ytd-comments ytd-comment-thread-renderer')).map((thread, index) => {
@@ -375,7 +461,7 @@
   }
   function readBrowseAccount() {
     const target = browseAccountTarget();
-    return target ? { label: target.id === 'avatar-btn' ? '账号' : '登录' } : null;
+    return target ? { label: target.id === 'avatar-btn' ? 'Account' : 'Sign in' } : null;
   }
   function openBrowseAccount() { return clickWatchTarget(browseAccountTarget()); }
   const readTheme = () => document.documentElement.hasAttribute?.('dark') ?? true;
@@ -419,7 +505,34 @@
   // Policy supplies mode and callbacks; this adapter only implements native page operations.
   function createNavigationConfig(controller) {
     let sidebarSelected = false;
+    const browseChips = () => Array.from(document.querySelectorAll('yt-chip-cloud-chip-renderer')).filter(chip =>
+      chip.isConnected && !chip.closest('[hidden],[aria-hidden="true"],[inert]') && chip.getBoundingClientRect().width > 0);
+    const chipKey = chip => chip.getAttribute('aria-label') || chip.textContent.trim();
+    const chipSelected = chip => chip.getAttribute('selected') === '' || chip.getAttribute('selected') === 'true' ||
+      chip.getAttribute('aria-selected') === 'true' || Boolean(chip.querySelector('[aria-selected="true"],[aria-pressed="true"],.ytChipShapeActive'));
+    const browseFeed = () => Array.from(document.querySelectorAll('ytd-page-manager a#thumbnail[href],ytd-page-manager yt-lockup-view-model a[href^="/watch?"]'))
+      .filter(link => !link.closest('[hidden],[aria-hidden="true"]')).map(link => link.getAttribute('href')).join('|');
     return {
+      captureBrowseState() {
+        if (location.pathname === '/watch' || location.pathname.startsWith('/shorts/')) return null;
+        const chip = browseChips().find(chipSelected);
+        return chip ? { category: chipKey(chip) } : null;
+      },
+      restoreBrowseState(saved, attempt) {
+        if (!saved) return true;
+        const chip = browseChips().find(item => chipKey(item) === saved.category);
+        if (!chip) return false;
+        if (chipSelected(chip)) return !attempt.activated || browseFeed() !== attempt.previousFeed;
+        // Activate through YouTube's own handler so its cached/native list owns
+        // the renderers and continuation tokens. Never clone interactive cards.
+        if (!attempt.activated) {
+          const button = chip.querySelector('button,[role="button"]') || chip;
+          if (button.disabled || button.getAttribute('aria-disabled') === 'true') return false;
+          attempt.activated = true; attempt.previousFeed = browseFeed();
+          button.click();
+        }
+        return false;
+      },
       ignoreMutation: ignorePlayerMutation,
       shouldShowSelection: controller.shouldShowSelection,
       onScopeChange: controller.onScopeChange,
@@ -491,7 +604,6 @@
           // Native dialogs still own their targets; controls mode confines page focus to the player.
           if (controller.mode === 'controls' && !el.closest('#movie_player') && !el.closest(nativeLayerSelector)) return false;
           if (controller.mode !== 'controls' && el.matches?.(progressSelector)) return false;
-          if (document.documentElement?.classList?.contains?.('ytg-browse') && el.closest('ytd-masthead')) return false;
           // The watch page uses the player and recommendations for gamepad navigation.
           if (location.pathname === '/watch' && el.closest('ytd-masthead')) return false;
           const card = el.closest('ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model');
@@ -548,7 +660,9 @@
         if (location.pathname !== '/watch' && !location.pathname.startsWith('/shorts/') &&
             (action === 'seekBack' || action === 'seekForward'))
           return switchBrowseCategory(action === 'seekBack' ? -1 : 1);
-        return perform(action) ? 'handled' : 'pass';
+        const result = controller.perform(action);
+        // Input disposition acknowledges dispatch; media completion is handled by the coordinator.
+        return result && typeof result.then === 'function' ? 'handled' : result ? 'handled' : 'pass';
       }
     };
   }
@@ -558,12 +672,12 @@
       const inert = el.closest('[inert]');
       return el.isConnected && rect.width > 0 && rect.height > 0 && style.display !== 'none' &&
         style.visibility !== 'hidden' && !el.closest('[hidden],[aria-hidden="true"]') &&
-        (!inert || window.YTGamepadFocus?.isSuspendedScope(inert));
+        (!inert || focusManager?.isSuspendedScope(inert));
     });
   }
   window.YTGamepadSite = { hasNativeLayer, perform, showNativeControls, isProgress: el => el?.matches?.(progressSelector), createNavigationConfig,
     inspectWatchCapabilities, inspectOptionalCapabilities, readWatchFeatures: () => ({ ...watchFeatures }), restoreNativeInterface, syncCommentPreload,
-    readRoute, readPlayback, readWatchPage, readComments, openRecommendation, openChannel, performWatchAction, expandReplies, loadComments,
+    readRoute, readPlayback, readWatchPage, readComments, openRecommendation, loadRecommendations, openChannel, performWatchAction, expandReplies, loadComments,
     settingsOpen, openSettings, backSettings, seekTo, getSearchTarget, readSearch, syncSearch, submitSearch, moveSearchCursor, readTheme, observePage,
     readBrowseAccount, openBrowseAccount };
   const published = window.YTGamepadSite;
@@ -574,6 +688,8 @@
     ['readComments', 'comments', () => { commentSources.clear(); return []; }],
     ['loadComments', 'comments', () => false], ['expandReplies', 'comments', () => false],
     ['openRecommendation', 'recommendations', () => 'missing'], ['openChannel', 'channel', () => false],
+    ['loadRecommendations', 'recommendations', () => false],
+    ['hasNativeLayer', 'nativeLayers', () => false],
     ['openSettings', 'settings', () => false], ['settingsOpen', 'settings', () => false], ['backSettings', 'settings', () => false]
   ]) {
     const operation = published[method];
@@ -591,4 +707,7 @@
     recommendationSources.clear(); commentSources.clear(); channelSource = null;
     if (typeof document !== 'undefined') restoreNativeInterface();
   });
+  return published;
+  }
+  window.YTGamepadSiteModule = { create };
 })();

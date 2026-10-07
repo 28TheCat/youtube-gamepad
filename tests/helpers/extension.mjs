@@ -12,19 +12,23 @@ export async function launchExtension(t) {
   const output = resolve(repository, 'output/playwright');
   mkdirSync(output, { recursive: true });
   const profile = mkdtempSync(resolve(output, 'extension-profile-'));
-  // Branded Chrome/Edge no longer support command-line extension side-loading.
-  // Use bundled Chromium; branded-browser/hardware acceptance is a separate gate.
-  const context = await chromium.launchPersistentContext(profile, {
-    channel: 'chromium', headless: true, viewport: { width: 1280, height: 900 },
-    args: [`--disable-extensions-except=${extensionRoot}`, `--load-extension=${extensionRoot}`]
-  });
+  let context;
   t.after(async () => {
-    await context.close();
+    await context?.close();
     if (!profile.startsWith(output + '/') && !profile.startsWith(output + '\\')) throw new Error('Unsafe profile cleanup');
     rmSync(profile, { recursive: true, force: true });
   });
+  // Branded Chrome/Edge no longer support command-line extension side-loading.
+  // Use bundled Chromium; branded-browser/hardware acceptance is a separate gate.
+  context = await chromium.launchPersistentContext(profile, {
+    channel: 'chromium', headless: true, viewport: { width: 1280, height: 900 },
+    ignoreDefaultArgs: ['--disable-extensions'],
+    ...(process.env.YTG_BROWSER_EXECUTABLE ? { executablePath: process.env.YTG_BROWSER_EXECUTABLE } : {}),
+    args: [`--disable-extensions-except=${extensionRoot}`, `--load-extension=${extensionRoot}`]
+  });
   const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 15000 });
   const id = new URL(worker.url()).host;
+  t.diagnostic(`Browser ${context.browser()?.version()} | extension ${id} | root ${extensionRoot}`);
   const options = await context.newPage();
   await options.goto(`chrome-extension://${id}/options.html`);
   await options.locator('fieldset').waitFor({ state: 'visible' });
@@ -57,7 +61,7 @@ export async function virtualPad(context, page) {
   for (const world of worlds.values()) {
     if (world.id === main?.id) continue;
     const result = await cdp.send('Runtime.evaluate', { contextId: world.id,
-      expression: 'typeof chrome !== "undefined" && !!chrome.runtime?.id && !!window.YTGamepadRuntime' });
+      expression: 'typeof chrome !== "undefined" && !!chrome.runtime?.id' });
     if (result.result.value) { isolated = world; break; }
   }
   if (!main || !isolated) throw new Error('Manifest MAIN and ISOLATED worlds were not both loaded');

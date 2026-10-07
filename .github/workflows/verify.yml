@@ -20,6 +20,9 @@ jobs:
         env:
           PLAYWRIGHT_CHANNEL: chromium
           YTG_EXTENSION_ROOT: latest-release
+      - run: npm run test:extension
+        env:
+          YTG_EXTENSION_ROOT: latest-release
       - uses: actions/upload-artifact@v4
         with:
           name: youtube-gamepad

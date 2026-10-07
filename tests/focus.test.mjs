@@ -17,7 +17,7 @@ function setup() {
   let overlay = null, mutation;
   const created = [];
   const document = {
-    body: {}, documentElement: { append() {}, classList: { contains: () => false } },
+    body: {}, documentElement: { dataset: {}, append() {}, classList: { contains: () => false } },
     querySelectorAll() { return overlay ? [overlay] : []; },
     addEventListener(name, fn) { events[name] = fn; },
     contains(el) { return nodes.includes(el) || overlay?.contains(el); }
@@ -25,7 +25,7 @@ function setup() {
   const rootQuery = document.querySelectorAll;
   document.querySelectorAll = selector => selector === '[role="dialog"]' ? rootQuery() : nodes;
   document.createElement = () => {
-    const node = { style: {}, contains: () => false, attachShadow: () => ({ append() {}, set innerHTML(v) { throw new TypeError('TrustedHTML required'); } }) };
+    const node = { style: {}, attributes: {}, replaceChildren(...children) { this.children = children; }, setAttribute(name, value) { this.attributes[name] = value; }, getAttribute(name) { return this.attributes[name] ?? null; }, contains: () => false, attachShadow: () => ({ append() {}, set innerHTML(v) { throw new TypeError('TrustedHTML required'); } }) };
     created.push(node); return node;
   };
   const location = { pathname: '/', search: '' };
@@ -225,6 +225,59 @@ test('SPA return waits for saved video and restores its scroll position', () => 
   const returned = s.make('video'); s.nodes.push(returned); s.context.scrollY = 0; s.refresh();
   assert.equal(s.window.YTGamepad.current, returned); assert.equal(s.context.scrollY, 450);
 });
+
+test('navigation scroll and focus changes cannot overwrite the saved home grid', () => {
+  const s = setup(), card = s.make('original'); s.nodes.push(card);
+  s.context.scrollY = 450; s.window.YTGamepad.focus(card);
+  s.events['yt-navigate-start']();
+  s.context.scrollY = 0;
+  s.window.YTGamepad.refresh();
+  s.location.pathname = '/watch'; s.nodes.length = 0; s.events['yt-navigate-finish']();
+  s.location.pathname = '/'; s.events['yt-navigate-finish']();
+  const replacement = s.make('original'); s.nodes.push(s.make('other'), replacement);
+  s.window.YTGamepad.refresh();
+  assert.equal(s.window.YTGamepad.current, replacement);
+  assert.equal(s.context.scrollY, 450);
+  s.context.scrollY = 120; s.window.YTGamepad.refresh();
+  assert.equal(s.context.scrollY, 120, 'restoration ends and subsequent scrolling is respected');
+});
+
+test('return waits for category and page height before restoring the original card', () => {
+  const s = setup(), card = s.make('original'); s.nodes.push(card);
+  let ready = false, category = 'Music';
+  s.window.YTGamepad.registerSite({
+    getKey: el => el?.key, getSection: () => 'content',
+    captureBrowseState: () => ({ category }),
+    restoreBrowseState(saved) { category = saved.category; return ready; }
+  });
+  s.context.scrollY = 800; s.window.YTGamepad.focus(card);
+  s.events['yt-navigate-start'](); s.location.pathname = '/watch';
+  s.nodes.length = 0; s.events['yt-navigate-finish']();
+  category = 'All'; s.location.pathname = '/'; s.context.scrollY = 0;
+  s.events['yt-navigate-finish']();
+  const returned = s.make('original'); s.nodes.push(returned);
+  s.window.YTGamepad.refresh();
+  assert.equal(category, 'Music'); assert.equal(s.window.YTGamepad.current, null);
+  ready = true;
+  s.context.document.scrollingElement = { scrollHeight: 900, scrollWidth: 1000 };
+  s.window.YTGamepad.refresh(); assert.equal(s.window.YTGamepad.restoring, true);
+  s.context.document.scrollingElement.scrollHeight = 1800;
+  s.window.YTGamepad.refresh();
+  assert.equal(s.window.YTGamepad.current, returned); assert.equal(s.context.scrollY, 800);
+  assert.equal(s.window.YTGamepad.restoring, false);
+});
+
+test('a removed return target falls back to its original surviving neighbor after the deadline', () => {
+  const s = setup(), cards = ['a', 'b', 'c'].map(s.make); s.nodes.push(...cards);
+  s.window.YTGamepad.focus(cards[1]); s.events['yt-navigate-start']();
+  s.location.pathname = '/watch'; s.nodes.length = 0; s.events['yt-navigate-finish']();
+  s.location.pathname = '/'; s.events['yt-navigate-finish']();
+  const neighbor = s.make('c'); s.nodes.push(s.make('new'), neighbor, s.make('a'));
+  s.context.Date = { now: () => Date.now() + 6000 };
+  s.window.YTGamepad.refresh();
+  assert.equal(s.window.YTGamepad.current, neighbor);
+  assert.equal(s.window.YTGamepad.restoring, false);
+});
 test('YouTube adapter deduplicates targets inside one video card', () => {
   let adapter;
   const adapterWindow = {};
@@ -246,10 +299,10 @@ test('sidebar confirmation and route change retain focus for the next direction'
   s.nodes[0] = replacement;
   s.events['yt-navigate-finish']();
   assert.equal(s.window.YTGamepad.current, replacement);
-  s.window.YTGamepadNavigation = { choose(from, items, direction) {
+  s.window.YTGamepadNavigation.choose = function (from, items, direction) {
     assert.equal(from.el, replacement); assert.equal(direction, 'right');
     return items.find(item => item.el === card);
-  } };
+  };
   s.window.YTGamepad.navigate('right');
   assert.equal(s.window.YTGamepad.current, card);
 });

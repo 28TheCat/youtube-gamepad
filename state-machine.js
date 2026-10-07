@@ -1,6 +1,7 @@
 // Pure interaction rules. No DOM, clocks, media or browser history in this module.
 (() => {
   if (window.YTGamepadStateMachine) return;
+  const routeState = window.YTGamepadRouteState;
   const watchInitial = (playIndex = 4) => ({ row: 'controls', index: playIndex, controlIndex: playIndex,
     recommendationIndex: 0, adjusting: false, panel: '', panelIndex: 0, playIndex });
   const menuInitial = () => ({ opened: false, view: 'main', openedFrom: null, menuSelection: 0,
@@ -21,8 +22,8 @@
         (!app.enabled || app.navigation || app.returning)) {
       return { nextState: state, effects, disposition: 'blocked' };
     }
-    if (window.YTGamepadRouteState.handles(event.type)) {
-      const result = window.YTGamepadRouteState.transition(app, event);
+    if (routeState.handles(event.type)) {
+      const result = routeState.transition(app, event);
       return { nextState: result.app === app ? state : { ...state, app: result.app },
         effects: result.effects, disposition: result.disposition };
     }
@@ -127,14 +128,34 @@
         } else if (action === 'left' || action === 'right') {
           if (watch.row === 'progress') disposition = 'blocked';
           else {
-            const index = clamp(watch.index + (action === 'left' ? -1 : 1), watch.row === 'recommendations' ? event.cardCount : event.controlCount);
+            const columns = Math.max(1, event.cardColumns || event.cardCount || 1);
+            const edge = watch.row === 'recommendations' && (action === 'left' ? watch.index % columns === 0 : watch.index % columns === columns - 1);
+            let index = edge ? watch.index : clamp(watch.index + (action === 'left' ? -1 : 1), watch.row === 'recommendations' ? event.cardCount : event.controlCount);
+            if (watch.row === 'controls' && event.availableControls) {
+              index = (action === 'left' ? [...event.availableControls].reverse().find(i => i < watch.index) : event.availableControls.find(i => i > watch.index)) ?? watch.index;
+            }
             watch = { ...watch, index, [watch.row === 'controls' ? 'controlIndex' : 'recommendationIndex']: index }; effect('focus');
           }
         } else if (action === 'up') {
-          watch = { ...watch, row: watch.row === 'recommendations' ? 'controls' : 'progress', index: watch.controlIndex }; effect('focus');
+          if (watch.row === 'controls' && event.canSeek === false) { disposition = 'blocked'; break; }
+          if (watch.row === 'progress') { effect('mode', 'playback'); break; }
+          const columns = Math.max(1, event.cardColumns || event.cardCount || 1);
+          if (watch.row === 'recommendations' && watch.index >= columns) {
+            const index = watch.index - columns;
+            watch = { ...watch, index, recommendationIndex: index };
+          } else watch = { ...watch, row: watch.row === 'recommendations' ? 'controls' : 'progress', index: watch.controlIndex };
+          effect('focus');
         } else if (action === 'down') {
           if (watch.row === 'progress') watch = { ...watch, row: 'controls', index: watch.controlIndex };
           else if (watch.row === 'controls' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
+          else if (watch.row === 'recommendations') {
+            const columns = Math.max(1, event.cardColumns || event.cardCount || 1);
+            const nextRow = (Math.floor(watch.index / columns) + 1) * columns;
+            if (nextRow < event.cardCount) {
+              const index = clamp(watch.index + columns, event.cardCount);
+              watch = { ...watch, index, recommendationIndex: index };
+            } else effect('loadRecommendations');
+          }
           effect('focus');
         } else disposition = 'pass';
         break;

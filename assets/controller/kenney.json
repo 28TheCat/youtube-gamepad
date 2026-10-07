@@ -1,0 +1,295 @@
+{
+  "author": "Kenney",
+  "version": "1.5A",
+  "source": "https://kenney.nl/assets/input-prompts",
+  "license": "CC0-1.0",
+  "archiveSha256": "ac2fcf599080b0f3ba2d174c9474db6df1a0e96ff0662580e2da79a122ab78a1",
+  "profiles": {
+    "xbox": {
+      "A": "assets/controller/xbox_button_color_a.svg",
+      "B": "assets/controller/xbox_button_color_b.svg",
+      "X": "assets/controller/xbox_button_color_x.svg",
+      "Y": "assets/controller/xbox_button_color_y.svg",
+      "LB": "assets/controller/xbox_lb.svg",
+      "RB": "assets/controller/xbox_rb.svg",
+      "LT": "assets/controller/xbox_lt.svg",
+      "RT": "assets/controller/xbox_rt.svg",
+      "L3": "assets/controller/xbox_stick_l_press.svg",
+      "R3": "assets/controller/xbox_stick_r_press.svg",
+      "Start": "assets/controller/xbox_button_menu.svg",
+      "↑": "assets/controller/xbox_dpad_up.svg",
+      "↓": "assets/controller/xbox_dpad_down.svg",
+      "←": "assets/controller/xbox_dpad_left.svg",
+      "→": "assets/controller/xbox_dpad_right.svg",
+      "Select": "assets/controller/xbox_button_view.svg"
+    },
+    "playstation": {
+      "A": "assets/controller/playstation_button_color_cross.svg",
+      "B": "assets/controller/playstation_button_color_circle.svg",
+      "X": "assets/controller/playstation_button_color_square.svg",
+      "Y": "assets/controller/playstation_button_color_triangle.svg",
+      "LB": "assets/controller/playstation_trigger_l1.svg",
+      "RB": "assets/controller/playstation_trigger_r1.svg",
+      "LT": "assets/controller/playstation_trigger_l2.svg",
+      "RT": "assets/controller/playstation_trigger_r2.svg",
+      "L3": "assets/controller/playstation_stick_l_press.svg",
+      "R3": "assets/controller/playstation_stick_r_press.svg",
+      "Start": "assets/controller/playstation4_button_options.svg",
+      "↑": "assets/controller/playstation_dpad_up.svg",
+      "↓": "assets/controller/playstation_dpad_down.svg",
+      "←": "assets/controller/playstation_dpad_left.svg",
+      "→": "assets/controller/playstation_dpad_right.svg",
+      "Select": "assets/controller/playstation4_button_share.svg"
+    },
+    "switch": {
+      "A": "assets/controller/switch_button_b.svg",
+      "B": "assets/controller/switch_button_a.svg",
+      "X": "assets/controller/switch_button_y.svg",
+      "Y": "assets/controller/switch_button_x.svg",
+      "LB": "assets/controller/switch_button_l.svg",
+      "RB": "assets/controller/switch_button_r.svg",
+      "LT": "assets/controller/switch_button_zl.svg",
+      "RT": "assets/controller/switch_button_zr.svg",
+      "L3": "assets/controller/switch_stick_l_press.svg",
+      "R3": "assets/controller/switch_stick_r_press.svg",
+      "Start": "assets/controller/switch_button_plus.svg",
+      "↑": "assets/controller/switch_buttons_up.svg",
+      "↓": "assets/controller/switch_buttons_down.svg",
+      "←": "assets/controller/switch_buttons_left.svg",
+      "→": "assets/controller/switch_buttons_right.svg",
+      "Select": "assets/controller/switch_button_minus.svg"
+    },
+    "generic": {
+      "A": "assets/controller/xbox_button_a.svg",
+      "B": "assets/controller/xbox_button_b.svg",
+      "X": "assets/controller/xbox_button_x.svg",
+      "Y": "assets/controller/xbox_button_y.svg",
+      "LB": "assets/controller/xbox_lb.svg",
+      "RB": "assets/controller/xbox_rb.svg",
+      "LT": "assets/controller/xbox_lt.svg",
+      "RT": "assets/controller/xbox_rt.svg",
+      "L3": "assets/controller/xbox_stick_l_press.svg",
+      "R3": "assets/controller/xbox_stick_r_press.svg",
+      "Start": "assets/controller/xbox_button_start.svg",
+      "↑": "assets/controller/xbox_dpad_up.svg",
+      "↓": "assets/controller/xbox_dpad_down.svg",
+      "←": "assets/controller/xbox_dpad_left.svg",
+      "→": "assets/controller/xbox_dpad_right.svg",
+      "Select": "assets/controller/xbox_button_view.svg"
+    }
+  },
+  "files": {
+    "assets/controller/xbox_button_color_a.svg": {
+      "source": "Xbox Series/Vector/xbox_button_color_a.svg",
+      "sha256": "63d1a6d0798c09c70f1bd25cf03dce39bd0c04e721240fda62facd5dafe08bdc"
+    },
+    "assets/controller/xbox_button_color_b.svg": {
+      "source": "Xbox Series/Vector/xbox_button_color_b.svg",
+      "sha256": "1a50644b6cb5a59564a3fdb977b16abb33ebe356e65e1b610dc2f8fb21e49fe0"
+    },
+    "assets/controller/xbox_button_color_x.svg": {
+      "source": "Xbox Series/Vector/xbox_button_color_x.svg",
+      "sha256": "49840e42f7aa78d107a3c496a15093b4bdf6a114b0141807f86facdbe0461154"
+    },
+    "assets/controller/xbox_button_color_y.svg": {
+      "source": "Xbox Series/Vector/xbox_button_color_y.svg",
+      "sha256": "27436f37e982d0e2502a761d889b7502faa3fcfabf0a868dcf85bfe204dfeb38"
+    },
+    "assets/controller/xbox_lb.svg": {
+      "source": "Xbox Series/Vector/xbox_lb.svg",
+      "sha256": "6463d4c86715f1445838dd502e2060cc1719bcc66af705a15efb69fa9949c36c"
+    },
+    "assets/controller/xbox_rb.svg": {
+      "source": "Xbox Series/Vector/xbox_rb.svg",
+      "sha256": "066ac893d3baa92d4ba9e3b7e12b1829cce3cdf7d0676fbab4eb56d4cf17e63b"
+    },
+    "assets/controller/xbox_lt.svg": {
+      "source": "Xbox Series/Vector/xbox_lt.svg",
+      "sha256": "f86e4e5d11a0d7fe029362694cbf0c3b6db7daa19d43513075bd0f2ee666ef36"
+    },
+    "assets/controller/xbox_rt.svg": {
+      "source": "Xbox Series/Vector/xbox_rt.svg",
+      "sha256": "a31df1a73f3d04cdebbd2c639d273b19d840e0736a7fcc2039ac521b76652b57"
+    },
+    "assets/controller/xbox_stick_l_press.svg": {
+      "source": "Xbox Series/Vector/xbox_stick_l_press.svg",
+      "sha256": "074541e658eb04c1084b3281d8dfe51ef5dd31fa1c6f8e8e6377f920637bbbcb"
+    },
+    "assets/controller/xbox_stick_r_press.svg": {
+      "source": "Xbox Series/Vector/xbox_stick_r_press.svg",
+      "sha256": "1f17890ab137d84c44eacaaf56ffa861ba7107b709926427218f4c4743024c0f"
+    },
+    "assets/controller/xbox_button_menu.svg": {
+      "source": "Xbox Series/Vector/xbox_button_menu.svg",
+      "sha256": "6e69a539c8a57ed461cf2690a5422abd94acad05b1c7f51b879bbad8c239c3f6"
+    },
+    "assets/controller/playstation_button_color_cross.svg": {
+      "source": "PlayStation Series/Vector/playstation_button_color_cross.svg",
+      "sha256": "c9feef98bfd29797c16caef18be8f26e1ce175f140d29a48dc2ac9826fb9812e"
+    },
+    "assets/controller/playstation_button_color_circle.svg": {
+      "source": "PlayStation Series/Vector/playstation_button_color_circle.svg",
+      "sha256": "7749fe0886d9d832bff47324ab1fbe7f9f3475b7de69dbc01743365b9451d94c"
+    },
+    "assets/controller/playstation_button_color_square.svg": {
+      "source": "PlayStation Series/Vector/playstation_button_color_square.svg",
+      "sha256": "2ad7d59334648b822fdec370aa2f9b28810d6bece4cd395d8af5d1d839732385"
+    },
+    "assets/controller/playstation_button_color_triangle.svg": {
+      "source": "PlayStation Series/Vector/playstation_button_color_triangle.svg",
+      "sha256": "c8af09238e5c38203178eabbc968d04ff85ca4fb9a394b0c1f4832a0b4550704"
+    },
+    "assets/controller/playstation_trigger_l1.svg": {
+      "source": "PlayStation Series/Vector/playstation_trigger_l1.svg",
+      "sha256": "ae444563986badefcdc417b3d744be0676670fffd36783d91c1592d14f21b93a"
+    },
+    "assets/controller/playstation_trigger_r1.svg": {
+      "source": "PlayStation Series/Vector/playstation_trigger_r1.svg",
+      "sha256": "387a37176b86facb7629b0020c56f5cb780f14d30d62e54baa394ecd2ee8229b"
+    },
+    "assets/controller/playstation_trigger_l2.svg": {
+      "source": "PlayStation Series/Vector/playstation_trigger_l2.svg",
+      "sha256": "ae89a40ccb5ae3e3b79e604d9e1f4903e773f87d36b18686b2d123ce3e4a5473"
+    },
+    "assets/controller/playstation_trigger_r2.svg": {
+      "source": "PlayStation Series/Vector/playstation_trigger_r2.svg",
+      "sha256": "da1e0239321400b2e0a2941759bb75fb7382f0450ed38db2abe2eac999ea011c"
+    },
+    "assets/controller/playstation_stick_l_press.svg": {
+      "source": "PlayStation Series/Vector/playstation_stick_l_press.svg",
+      "sha256": "074541e658eb04c1084b3281d8dfe51ef5dd31fa1c6f8e8e6377f920637bbbcb"
+    },
+    "assets/controller/playstation_stick_r_press.svg": {
+      "source": "PlayStation Series/Vector/playstation_stick_r_press.svg",
+      "sha256": "1f17890ab137d84c44eacaaf56ffa861ba7107b709926427218f4c4743024c0f"
+    },
+    "assets/controller/playstation4_button_options.svg": {
+      "source": "PlayStation Series/Vector/playstation4_button_options.svg",
+      "sha256": "d89149000ce40ae26a097040d98b7d9c69e98fbc450671b46bbb110f58914d53"
+    },
+    "assets/controller/switch_button_b.svg": {
+      "source": "Nintendo Switch/Vector/switch_button_b.svg",
+      "sha256": "12061d33eb6596dc94ad551296502a9e15bd26c9199210db4728fa2a666f3ca0"
+    },
+    "assets/controller/switch_button_a.svg": {
+      "source": "Nintendo Switch/Vector/switch_button_a.svg",
+      "sha256": "64c7e4560c68bbbdc824627aca50464eee2dab31323e06df5b4d8f8b33a7d453"
+    },
+    "assets/controller/switch_button_y.svg": {
+      "source": "Nintendo Switch/Vector/switch_button_y.svg",
+      "sha256": "c509a5a985e6c6ba9bbe6caa593571488ea4307d4d134632564742cc4f98dc03"
+    },
+    "assets/controller/switch_button_x.svg": {
+      "source": "Nintendo Switch/Vector/switch_button_x.svg",
+      "sha256": "505b595feca94a6dbb3b4bfb1f8213e108fab2d3419f265d7f42c7c1c1f3c711"
+    },
+    "assets/controller/switch_button_l.svg": {
+      "source": "Nintendo Switch/Vector/switch_button_l.svg",
+      "sha256": "8f8a969fff8674dd10cf171f4dfb53843c1640ed4831a2bd23e613a0cd4c8677"
+    },
+    "assets/controller/switch_button_r.svg": {
+      "source": "Nintendo Switch/Vector/switch_button_r.svg",
+      "sha256": "7872b5892e5c33e2f379f5701b64de8a90c41b02bd32ea1f56b0d830a5f647dd"
+    },
+    "assets/controller/switch_button_zl.svg": {
+      "source": "Nintendo Switch/Vector/switch_button_zl.svg",
+      "sha256": "d0d9fc2225ef961581d1e5ced39e90aad82c0916d70da4aa48ad235fd8fefd07"
+    },
+    "assets/controller/switch_button_zr.svg": {
+      "source": "Nintendo Switch/Vector/switch_button_zr.svg",
+      "sha256": "2315db789115a620ac063f57361d22179ab00cb0fd7fd8a31657e7b8eed54364"
+    },
+    "assets/controller/switch_stick_l_press.svg": {
+      "source": "Nintendo Switch/Vector/switch_stick_l_press.svg",
+      "sha256": "074541e658eb04c1084b3281d8dfe51ef5dd31fa1c6f8e8e6377f920637bbbcb"
+    },
+    "assets/controller/switch_stick_r_press.svg": {
+      "source": "Nintendo Switch/Vector/switch_stick_r_press.svg",
+      "sha256": "1f17890ab137d84c44eacaaf56ffa861ba7107b709926427218f4c4743024c0f"
+    },
+    "assets/controller/switch_button_plus.svg": {
+      "source": "Nintendo Switch/Vector/switch_button_plus.svg",
+      "sha256": "df8e08420f54b16fae955e30ee63198d0079ff99123893938bf859ce2955b18c"
+    },
+    "assets/controller/xbox_button_a.svg": {
+      "source": "Xbox Series/Vector/xbox_button_a.svg",
+      "sha256": "64c7e4560c68bbbdc824627aca50464eee2dab31323e06df5b4d8f8b33a7d453"
+    },
+    "assets/controller/xbox_button_b.svg": {
+      "source": "Xbox Series/Vector/xbox_button_b.svg",
+      "sha256": "12061d33eb6596dc94ad551296502a9e15bd26c9199210db4728fa2a666f3ca0"
+    },
+    "assets/controller/xbox_button_x.svg": {
+      "source": "Xbox Series/Vector/xbox_button_x.svg",
+      "sha256": "505b595feca94a6dbb3b4bfb1f8213e108fab2d3419f265d7f42c7c1c1f3c711"
+    },
+    "assets/controller/xbox_button_y.svg": {
+      "source": "Xbox Series/Vector/xbox_button_y.svg",
+      "sha256": "c509a5a985e6c6ba9bbe6caa593571488ea4307d4d134632564742cc4f98dc03"
+    },
+    "assets/controller/xbox_button_start.svg": {
+      "source": "Xbox Series/Vector/xbox_button_start.svg",
+      "sha256": "6f482b0d6cc7aca1ac31d5846d7bd497e2cf228ff73da6e35eb781c87113596b"
+    },
+    "assets/controller/xbox_dpad_up.svg": {
+      "source": "Xbox Series/Vector/xbox_dpad_up.svg",
+      "sha256": "1eb952dcac0a986a5ab4f5cf61ee832504554cdc2df46b20dc0998a91b70e25b"
+    },
+    "assets/controller/xbox_dpad_down.svg": {
+      "source": "Xbox Series/Vector/xbox_dpad_down.svg",
+      "sha256": "d7a0d403e36c41120882f5713927e828794cdff93f88f8d3cbea3d8384b322c9"
+    },
+    "assets/controller/xbox_dpad_left.svg": {
+      "source": "Xbox Series/Vector/xbox_dpad_left.svg",
+      "sha256": "6fc565008a474f3c3899cc97854947a51700ce925523bf155ba77e7c28c658f6"
+    },
+    "assets/controller/xbox_dpad_right.svg": {
+      "source": "Xbox Series/Vector/xbox_dpad_right.svg",
+      "sha256": "5e3e358a70aaa5ea7236aef3504491051af91847466c349965cc345dd5b7dcb0"
+    },
+    "assets/controller/playstation_dpad_up.svg": {
+      "source": "PlayStation Series/Vector/playstation_dpad_up.svg",
+      "sha256": "e61c695f420ac22fc860b764a1527e0cf2bfd6e38162731c001bfe9121a7a0a8"
+    },
+    "assets/controller/playstation_dpad_down.svg": {
+      "source": "PlayStation Series/Vector/playstation_dpad_down.svg",
+      "sha256": "c06abfab82a6e264f4f62c546922afe6f53619bbdfae699baa9d599677093ac3"
+    },
+    "assets/controller/playstation_dpad_left.svg": {
+      "source": "PlayStation Series/Vector/playstation_dpad_left.svg",
+      "sha256": "5c81b1632941d5d297c282750f4ed4587ac3a277527df56604b8b2bf04526d7a"
+    },
+    "assets/controller/playstation_dpad_right.svg": {
+      "source": "PlayStation Series/Vector/playstation_dpad_right.svg",
+      "sha256": "32d64ec2639ef291983daba2c3eb5eae6722a5fa0289737d049a12d6275f622a"
+    },
+    "assets/controller/switch_buttons_up.svg": {
+      "source": "Nintendo Switch/Vector/switch_buttons_up.svg",
+      "sha256": "c2e377b8a0a68750c07c6326039f355e7c6e551bbb698dd33c75c99c86ca830a"
+    },
+    "assets/controller/switch_buttons_down.svg": {
+      "source": "Nintendo Switch/Vector/switch_buttons_down.svg",
+      "sha256": "e949738cd6b91ca8b5981ae6f5236a156183fc78256a2adc3a804d29d597cf44"
+    },
+    "assets/controller/switch_buttons_left.svg": {
+      "source": "Nintendo Switch/Vector/switch_buttons_left.svg",
+      "sha256": "038e2b32df4b97097151fd8c8e0b343c0d1e738ef0c1d0da1396986860ca6294"
+    },
+    "assets/controller/switch_buttons_right.svg": {
+      "source": "Nintendo Switch/Vector/switch_buttons_right.svg",
+      "sha256": "99348843f92cbea6f32f69979c8d3603e3df6df34e6637a4bcf36faf9cef8b27"
+    },
+    "assets/controller/xbox_button_view.svg": {
+      "source": "Xbox Series/Vector/xbox_button_view.svg",
+      "sha256": "d9f3bd3869469d006b3c2786ef7598f4470483371764390dbe2cb557873dde9c"
+    },
+    "assets/controller/playstation4_button_share.svg": {
+      "source": "PlayStation Series/Vector/playstation4_button_share.svg",
+      "sha256": "5fededddd3e444613b6ec045664336b3787bebb0d8cedb94b37375a21ee1bc49"
+    },
+    "assets/controller/switch_button_minus.svg": {
+      "source": "Nintendo Switch/Vector/switch_button_minus.svg",
+      "sha256": "e4d6d7238499ab290e71dfc0db83dc6d9a83d54fe54f3e0759bd992906c53cfd"
+    }
+  }
+}

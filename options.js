@@ -1,5 +1,42 @@
 const defaults = { enabled: true, theater: true, autoFullscreen: null, deadzone: 0.35, repeatDelay: 350, repeatInterval: 140 };
+// Hash links preserve direct entry points and browser back/forward navigation.
+(() => {
+  const links = [...document.querySelectorAll('[data-category-link]')];
+  const panels = [...document.querySelectorAll('[data-category]')];
+  const aliases = { general: 'general', display: 'display', shortcuts: 'controller', gamepad: 'controller', diagnostics: 'help', connectionHelp: 'help' };
+  function showCategory() {
+    const category = aliases[location.hash.slice(1)] || 'general';
+    for (const panel of panels) panel.hidden = panel.dataset.category !== category;
+    for (const link of links) {
+      if (link.dataset.categoryLink === category) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    }
+  }
+  for (const [index, link] of links.entries()) {
+    link.addEventListener('keydown', event => {
+      let next;
+      if (event.key === 'ArrowDown') next = (index + 1) % links.length;
+      else if (event.key === 'ArrowUp') next = (index + links.length - 1) % links.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = links.length - 1;
+      else return;
+      event.preventDefault(); links[next].focus();
+    });
+  }
+  window.addEventListener('hashchange', showCategory);
+  showCategory();
+})();
 const status = document.querySelector('#status');
+let statusTimer;
+window.YTGamepadSettingsFeedback = (text, success = false) => {
+  window.clearTimeout?.(statusTimer);
+  status.textContent = text;
+  status.hidden = false;
+  if (success) statusTimer = window.setTimeout?.(() => {
+    // Keep the message painted until the discrete display transition finishes.
+    if (status.textContent === text) status.hidden = true;
+  }, 2000);
+};
 const fields = Object.fromEntries(Object.keys(defaults).map(key => [key, document.getElementById(key)]));
 const deadzoneValue = document.querySelector('#deadzoneValue');
 let ready = false;
@@ -18,16 +55,16 @@ async function initialize() {
     deadzoneValue.textContent = fields.deadzone.value;
     ready = true;
     document.querySelector('fieldset').disabled = false;
-  } catch (_) { status.textContent = '无法读取设置，请重新打开此页'; }
+  } catch (_) { window.YTGamepadSettingsFeedback('Could not load settings. Please reopen this page.'); }
 }
 fields.deadzone.addEventListener('input', () => { deadzoneValue.textContent = fields.deadzone.value; });
 for (const [key, input] of Object.entries(fields)) input.addEventListener('change', async () => {
   if (!ready) return;
-  if (!input.checkValidity()) { input.reportValidity(); status.textContent = '请按提示输入有效数值'; return; }
+  if (!input.checkValidity()) { input.reportValidity(); window.YTGamepadSettingsFeedback('Please enter a valid number within the shown range'); return; }
   try {
     await chrome.storage.local.set({ [key]: input.type === 'checkbox' ? input.checked : Number(input.value) });
-    status.textContent = '已保存';
-  } catch (_) { status.textContent = '保存失败，请重试'; }
+    window.YTGamepadSettingsFeedback('Saved', true);
+  } catch (_) { window.YTGamepadSettingsFeedback('Could not save. Please try again.'); }
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !ready) return;

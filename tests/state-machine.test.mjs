@@ -11,6 +11,23 @@ const { createState, createStore, transition } = window.YTGamepadStateMachine;
 const plain = value => JSON.parse(JSON.stringify(value));
 const effects = result => result.effects.map(effect => effect.type).join(',');
 
+test('recommendation grid moves between rows, clamps a short last row and requests more at the end', () => {
+  const store = createStore(createState('/watch?v=first'));
+  store.dispatch({ type: 'WATCH_SHOW', target: 'recommendations', count: 10 });
+  const input = action => store.dispatch({ type: 'WATCH_INPUT', action, cardCount: 10, cardColumns: 4 });
+  input('right'); input('right'); input('right'); input('right');
+  assert.equal(store.state.watch.index, 3, 'right stops at the edge of the current row');
+  input('down'); assert.equal(store.state.watch.index, 7);
+  input('down'); assert.equal(store.state.watch.index, 9, 'short last row selects a surviving card');
+  assert.equal(effects(input('down')), 'loadRecommendations,focus');
+  assert.equal(store.state.watch.index, 9, 'loading cannot move selection past the list');
+  input('up'); assert.equal(store.state.watch.index, 5);
+  input('up'); assert.equal(store.state.watch.index, 1);
+  input('up'); assert.equal(store.state.watch.row, 'controls');
+  input('down'); assert.equal(store.state.watch.index, 1, 'returning preserves recommendation selection');
+  input('back'); assert.equal(store.state.watch.row, 'controls');
+});
+
 test('transitions are deterministic, replayable and leave frozen previous states untouched', () => {
   const store = createStore(createState('/watch?v=first'));
   const original = store.state;

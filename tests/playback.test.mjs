@@ -3,13 +3,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-function setup(pathname = '/watch') {
+function setup(pathname = '/watch', connected = true) {
   const events = {}, classes = new Map(), location = { pathname, search: '', origin: 'https://www.youtube.com', assign(path) { this.assigned = path; } };
   let backs = 0, jumps = [];
   const video = { duration: 100, currentTime: 95, volume: .98, paused: false, pause() { this.paused = true; }, play() { this.paused = false; return Promise.resolve(); } };
   let adapter, captions = 0, menus = 0;
   const button = { getAttribute: () => null, click() { captions++; } };
-  const window = { addEventListener(name, fn) { events[name] = fn; }, postMessage() {}, YTGamepadInput: { connected: false }, YTGamepad: { registerSite(config) { adapter = config; } }, YTGamepadMenu: { configure() {}, close() {}, handle() { menus++; } } };
+  const window = { addEventListener(name, fn) { events[name] = fn; }, postMessage() {}, YTGamepadInput: { connected }, YTGamepad: { registerSite(config) { adapter = config; } }, YTGamepadMenu: { configure() {}, close() {}, handle() { menus++; } } };
   const document = { querySelectorAll: () => [], addEventListener(name, fn) { events[name] = fn; }, querySelector(selector) { return ['.ytp-subtitles-button', '.ytp-play-button', '.ytp-settings-button'].includes(selector) ? button : video; }, documentElement: { dataset: {}, classList: { contains: name => classes.get(name) === true, toggle(name, enabled) { classes.set(name, enabled); } } } };
   const history = { back() { backs++; }, go(delta) { jumps.push(delta); }, pushState(_state, _title, href) { const url = new URL(href, location.origin); location.pathname = url.pathname; location.search = url.search; }, replaceState(_state, _title, href) { if (href) { const url = new URL(href, location.origin); location.pathname = url.pathname; location.search = url.search; } } };
   const context = { URL, window, document, location, history, innerHeight: 800, getComputedStyle: node => ({ display: 'block', position: node?.position || 'static' }) };
@@ -18,7 +18,7 @@ function setup(pathname = '/watch') {
 }
 
 test('theater layout follows controller connection and respects manual settings', () => {
-  const s = setup('/');
+  const s = setup('/', false);
   assert.equal(s.classes.get('ytg-theater'), false);
   s.window.YTGamepadInput.connected = true; s.events['yt-gamepad-connection']();
   assert.equal(s.classes.get('ytg-theater'), true);

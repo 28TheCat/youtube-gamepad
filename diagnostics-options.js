@@ -14,15 +14,19 @@
       const link = document.createElement('a');
       link.href = url; link.download = 'youtube-gamepad-diagnostics-' + new Date().toISOString().slice(0, 10) + '.json';
       document.body.append(link); link.click(); link.remove();
-      status.textContent = `已导出 ${entries.length} 条记录`;
-    } catch (_) { status.textContent = '导出失败，请重试'; }
+      status.textContent = `Exported ${entries.length} ${entries.length === 1 ? 'record' : 'records'}`;
+    } catch (_) { status.textContent = 'Export failed. Please try again.'; }
     finally {
       if (url) setTimeout(() => URL.revokeObjectURL(url), 1000);
       exportButton.disabled = false;
     }
   });
   document.querySelector('#clearDiagnostics').addEventListener('click', async () => {
-    try { await chrome.storage.local.remove(store.key); status.textContent = '诊断记录已清空'; }
-    catch (_) { status.textContent = '清空失败，请重试'; }
+    try {
+      const result = await chrome.runtime.sendMessage({ type: 'ytg-clear-diagnostics' });
+      if (!result?.ok) throw new Error('clear failed');
+      status.textContent = 'Diagnostic records cleared';
+    }
+    catch (_) { status.textContent = 'Could not clear records. Please try again.'; }
   });
 })();

@@ -2,7 +2,10 @@
   "manifest_version": 3,
   "name": "YouTube Gamepad",
   "version": "0.2.0",
-  "description": "使用手柄浏览 YouTube 并控制视频播放。",
+  "description": "Browse YouTube and control video playback with a gamepad.",
+  "icons": {
+    "128": "assets/icons/gamepad-128.png"
+  },
   "permissions": [
     "storage"
   ],
@@ -27,10 +30,14 @@
         "theater.css"
       ],
       "js": [
+        "actions.js",
+        "bindings.js",
         "runtime.js",
         "diagnostics.js",
         "app/route-state.js",
         "state-machine.js",
+        "ui/styles.js",
+        "controller-style.js",
         "gamepad.js",
         "navigation.js",
         "focus.js",
@@ -38,7 +45,6 @@
         "keyboard.js",
         "pinyin-data.js",
         "pinyin.js",
-        "ui/styles.js",
         "search.js",
         "menu.js",
         "ui/watch-view.js",
@@ -57,7 +63,10 @@
         "https://www.youtube.com/*"
       ],
       "js": [
-        "runtime.js",
+        "actions.js",
+        "bindings.js",
+        "diagnostics-store.js",
+        "inline-settings.js",
         "content.js"
       ],
       "run_at": "document_idle"

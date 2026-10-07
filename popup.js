@@ -7,17 +7,24 @@ chrome.storage.local.get({ enabled: true }, values => {
 enabled.addEventListener('change', async () => {
   try {
     await chrome.storage.local.set({ enabled: enabled.checked });
-    status.textContent = '已保存';
-  } catch (_) { status.textContent = '保存失败，请重试'; }
+    status.textContent = 'Saved';
+  } catch (_) { status.textContent = 'Could not save. Please try again.'; }
 });
-document.querySelector('#moreSettings').addEventListener('click', () => chrome.runtime.openOptionsPage());
+document.querySelector('#moreSettings').addEventListener('click', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const result = tab?.id == null ? null : await chrome.tabs.sendMessage(tab.id, { type: 'ytg-open-inline-settings' });
+    if (!result?.ok) throw new Error('YouTube unavailable');
+    window.close();
+  } catch (_) { status.textContent = 'Open a YouTube tab, then open settings here.'; }
+});
 async function refreshConnection() {
   const connection = document.querySelector('#connection');
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const state = tab?.id == null ? null : await chrome.tabs.sendMessage(tab.id, { type: 'ytg-connection-status' });
-    connection.textContent = state?.connected ? '手柄已连接（标准布局）' : '未检测到手柄 · 请在 YouTube 页面按一次手柄按键';
-  } catch (_) { connection.textContent = '请打开 YouTube 页面查看手柄连接状态'; }
+    connection.textContent = state?.connected ? 'Gamepad connected (standard layout)' : 'No gamepad detected. Press a gamepad button on YouTube.';
+  } catch (_) { connection.textContent = 'Open YouTube to check your gamepad connection'; }
 }
 refreshConnection();
 setInterval(refreshConnection, 1000);

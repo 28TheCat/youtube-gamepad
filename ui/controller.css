@@ -1,0 +1,9 @@
+/* Icon artwork comes unchanged from Kenney Input Prompts (CC0).
+   scripts/build-styles.mjs embeds the original SVG files as local data URLs. */
+[data-ytg-key][data-ytg-icon="true"]{background-image:var(--ytg-first-image)}
+[data-ytg-key*=" / "][data-ytg-icon="true"]{background-image:var(--ytg-first-image),var(--ytg-second-image)}
+[data-ytg-key][data-ytg-icon="true"]{display:inline-block;box-sizing:border-box;width:32px;height:32px;min-width:32px;padding:0;border:0;border-radius:var(--ytg-chip-radius);background-color:var(--ytg-overlay-surface);background-size:32px 32px;background-repeat:no-repeat;background-position:center;font-size:0;line-height:0;vertical-align:middle;flex-shrink:0}
+[data-ytg-key*=" / "][data-ytg-icon="true"]{width:64px;min-width:64px;background-position:left center,right center}
+.key-controller-badge [data-ytg-icon="true"]{width:24px;height:24px;min-width:24px;background-size:24px 24px}
+.search-panel .key-row button.has-controller-badge:is([data-action="NUMBER_LAYOUT"],[data-action="LETTER_LAYOUT"]){padding-bottom:28px}
+[data-ytg-hint] [data-ytg-icon="true"]{width:24px;height:24px;min-width:24px;background-size:24px 24px;margin-inline:2px}

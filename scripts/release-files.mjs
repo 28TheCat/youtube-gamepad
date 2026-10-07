@@ -27,9 +27,13 @@ export function releaseFiles(root) {
     const html = readFileSync(safePath(root, page), 'utf8');
     return [...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)].map(match => match[1]).filter(path => !path.startsWith('#'));
   });
+  const controllerManifest = 'assets/controller/kenney.json';
+  const controllerAssets = JSON.parse(readFileSync(safePath(root, controllerManifest), 'utf8'));
   const files = [...new Set(['manifest.json', manifest.background.service_worker, ...pages, ...assets,
+    ...Object.values(manifest.icons || {}),
     ...manifest.content_scripts.flatMap(entry => [...entry.js, ...(entry.css || [])]),
-    'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt'])].sort();
+    controllerManifest, ...Object.keys(controllerAssets.files),
+    'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt', 'licenses/kenney-input-prompts-LICENSE.txt'])].sort();
   for (const file of files) {
     if (!lstatSync(safePath(root, file)).isFile()) throw new Error(`Not a release file: ${file}`);
   }

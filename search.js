@@ -1,8 +1,11 @@
 // Search feature. Receives its host, focus operations and site commands from the menu shell.
 (() => {
   if (window.YTGamepadSearch) return;
-  window.YTGamepadSearch = { create(port) {
+  window.YTGamepadSearch = {
+    /** @param {import('./types/ports.js').SearchPort} port */
+    create(port) {
     const { root, host, menuState, send, buttons, focus, feedback } = port;
+    const { controllerStyle, pinyin, keyboard } = port;
   let keyboardPosition = ['0', '0'];
   let cursor = [0, 0];
   let searchTarget = null, recent = [];
@@ -20,14 +23,15 @@
   function refreshCandidates() {
     const container = root.querySelector('#composition');
     if (!container) return;
-    candidates = window.YTGamepadPinyin.lookup(menuState().composing);
+    candidates = pinyin.lookup(menuState().composing);
     updateShortcuts();
     container.replaceChildren(); container.hidden = menuState().language !== 'zh-CN' || !menuState().composing;
     for (const item of root.querySelectorAll('#recent button')) if (Number(item.dataset.column) === -1) item.hidden = !container.hidden;
     const title = root.querySelector('#history-title'); if (title) title.hidden = !container.hidden;
     const empty = root.querySelector('#history-empty'); if (empty) empty.hidden = !container.hidden;
     const label = document.createElement('p');
-    label.textContent = menuState().composing ? '拼音：' + menuState().composing + ' · R3 选词 · Y 确认 · LB / RB 翻页' : '中文拼音 · 用 V 输入 ü · 输入后上键选字';
+    label.textContent = menuState().composing ? 'Pinyin: ' + menuState().composing : 'Chinese pinyin · Use V for ü · Press ↑ to select a candidate';
+    if (menuState().composing) label.append(controllerStyle.hint(document.createElement('span'), ' · R3 Candidates · Y Confirm · LB / RB Page'));
     container.append(label);
     if (!menuState().composing) return;
     const line = document.createElement('div'); line.className = 'candidate-row';
@@ -39,22 +43,22 @@
     };
     const start = menuState().candidatePage * 5;
     for (const candidate of candidates.slice(start, start + 5)) add(candidate.text, () => commitCandidate(candidate));
-    if (menuState().candidatePage > 0) add('上一页', () => { send({ type: 'MENU_PAGE', delta: -1 }); refreshCandidates(); focusCandidate(); });
-    if (start + 5 < candidates.length) add('下一页', () => { send({ type: 'MENU_PAGE', delta: 1 }); refreshCandidates(); focusCandidate(); });
-    add('原文 ' + menuState().composing, () => { const raw = menuState().composing; send({ type: 'MENU_COMPOSE', value: '' }); edit(raw); refreshCandidates(); focusFirstKey(); });
+    if (menuState().candidatePage > 0) add('Previous page', () => { send({ type: 'MENU_PAGE', delta: -1 }); refreshCandidates(); focusCandidate(); });
+    if (start + 5 < candidates.length) add('Next page', () => { send({ type: 'MENU_PAGE', delta: 1 }); refreshCandidates(); focusCandidate(); });
+    add('Use typed text: ' + menuState().composing, () => { const raw = menuState().composing; send({ type: 'MENU_COMPOSE', value: '' }); edit(raw); refreshCandidates(); focusFirstKey(); });
     container.append(line);
   }
   function focusCandidate() { port.selected = buttons().findIndex(button => button.dataset.row === '-1'); focus(); }
   function focusFirstKey() { port.selected = buttons().findIndex(button => button.dataset.row === '0' && button.dataset.column === '0'); focus(); }
   function commitCandidate(candidate) {
     send({ type: 'MENU_COMPOSE', value: menuState().composing.slice(candidate.consumed) });
-    window.YTGamepadPinyin.learn(candidate); edit(candidate.text); refreshCandidates(); focusFirstKey();
+    pinyin.learn(candidate); edit(candidate.text); refreshCandidates(); focusFirstKey();
   }
   function typeText(text) {
     if (menuState().language === 'zh-CN' && menuState().frame === 'LETTER_LAYOUT' && /^[a-z']$/i.test(text)) {
-      if (menuState().composing.length >= 48) { feedback('请确认当前拼音后继续输入'); return; }
-      send({ type: 'MENU_COMPOSE', value: window.YTGamepadPinyin.normalize(menuState().composing + text).slice(0, 48) }); refreshCandidates();
-    } else if (menuState().composing) feedback('请先选择候选，或按 B 取消拼音');
+      if (menuState().composing.length >= 48) { feedback('Confirm the current pinyin before typing more'); return; }
+      send({ type: 'MENU_COMPOSE', value: pinyin.normalize(menuState().composing + text).slice(0, 48) }); refreshCandidates();
+    } else if (menuState().composing) feedback('Select a candidate, or press B to cancel pinyin');
     else edit(text);
   }
   function backspace() {
@@ -66,40 +70,31 @@
     if (!hint) return;
     hint.replaceChildren();
     const shortcuts = [
-      ['方向键 / 左摇杆', '选择'], ['A / ×', '输入'], ['X / □', '删除 · 长按连续'],
-      ['Y / △', menuState().composing ? '确认候选' : '空格'],
-      ['LB / RB', menuState().composing ? '翻页' : '移动光标'],
-      ['L3', '符号'], ['R3', '候选 / 历史'], ['LT', '大小写'],
-      ['RT', '搜索'], ['B / ○', '返回'], ['Start', '关闭']
+      ['D-pad / left stick', 'Select'], ['A', 'Type'], ['X', 'Delete · Hold to repeat'],
+      ['Y', menuState().composing ? 'Confirm candidate' : 'Space'],
+      ['LB / RB', menuState().composing ? 'Change page' : 'Move cursor'],
+      ['L3', 'Symbols'], ['R3', 'Candidates / history'], ['LT', 'Letter case'],
+      ['RT', 'Search'], ['B', 'Back'], ['Start', 'Close']
     ];
     for (const [key, description] of shortcuts) {
       const item = document.createElement('span'); item.className = 'shortcut-item';
-      const badge = document.createElement('span'); badge.className = 'shortcut-button'; badge.textContent = key;
+      const badge = document.createElement('span'); badge.className = 'shortcut-button'; controllerStyle.badge(badge, key);
       const label = document.createElement('span'); label.textContent = description;
       item.append(badge, label); hint.append(item);
     }
   }
   function addControllerBadge(button, action) {
     const shortcuts = {
-      BACKSPACE: ['X / □', 'X / □ 删除（长按连续）'], SPACE: ['Y / △', 'Y / △ 空格；拼音输入时确认候选'],
-      NUMBER_LAYOUT: ['L3', 'L3 切换符号'], LETTER_LAYOUT: ['L3', 'L3 切换字母'], SEARCH: ['RT', 'RT 搜索']
+      BACKSPACE: ['X', 'X Delete (hold to repeat)'], SPACE: ['Y', 'Y Space; confirm candidate when entering pinyin'],
+      NUMBER_LAYOUT: ['L3', 'L3 Switch to symbols'], LETTER_LAYOUT: ['L3', 'L3 Switch to letters'], SEARCH: ['RT', 'RT Search']
     };
     const shortcut = shortcuts[action];
     if (!shortcut) return;
     const badge = document.createElement('span'); badge.className = 'key-controller-badge';
     badge.setAttribute('aria-hidden', 'true');
-    if (document.createElementNS) {
-      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      icon.setAttribute('viewBox', '0 0 24 24'); icon.setAttribute('fill', 'none');
-      icon.setAttribute('stroke', 'currentColor'); icon.setAttribute('stroke-width', '1.6');
-      icon.setAttribute('stroke-linecap', 'round'); icon.setAttribute('stroke-linejoin', 'round');
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', 'M7 6h10c2 0 3 2 3.5 4l1.2 7c.4 2-1.6 3-3 1.6L15.5 15h-7l-3.2 3.6C3.9 20 1.9 19 2.3 17l1.2-7C4 8 5 6 7 6ZM7 9v5m-2.5-2.5h5M16 10h.01M18 12h.01');
-      icon.append(path); badge.append(icon);
-    }
-    const label = document.createElement('span'); label.textContent = shortcut[0]; badge.append(label);
+    const label = document.createElement('span'); controllerStyle.badge(label, shortcut[0]); badge.append(label);
     button.className = 'has-controller-badge'; button.append(badge);
-    button.setAttribute('title', shortcut[1]);
+    controllerStyle.bind(button, shortcut[1], 'title');
   }
   function pageCandidates(delta) {
     const page = menuState().candidatePage;
@@ -117,7 +112,7 @@
     } else {
       if (active?.dataset.row !== undefined) keyboardPosition = [active.dataset.row, active.dataset.column];
       if (menuState().composing) focusCandidate();
-      else { const target = buttons().findIndex(button => button.dataset.column === '-1'); if (target >= 0) { port.selected = target; focus(); } else feedback('还没有搜索历史'); }
+      else { const target = buttons().findIndex(button => button.dataset.column === '-1'); if (target >= 0) { port.selected = target; focus(); } else feedback('No recent searches yet'); }
     }
   }
   function space() {
@@ -128,7 +123,7 @@
       if (active?.dataset.row === '-1' && index >= candidates.slice(menuState().candidatePage * 5, menuState().candidatePage * 5 + 5).length) active.click();
       else commitCandidate(candidate);
     } else if (!menuState().composing) edit(' ');
-    else feedback('没有候选，请选择原文或修改拼音');
+    else feedback('No candidates. Use the typed text or edit your pinyin.');
   }
 
   try {
@@ -179,18 +174,18 @@
         focus(); break;
       }
       case 'SWITCH_LANGUAGE':
-        if (menuState().composing) { feedback('请先选择候选，或按 B 取消拼音'); focusCandidate(); break; }
+        if (menuState().composing) { feedback('Select a candidate, or press B to cancel pinyin'); focusCandidate(); break; }
         send({ type: 'MENU_LANGUAGE', value: true }); renderKeys(); port.selected = buttons().findIndex(button => button.dataset.action === 'ENGLISH'); focus(); break;
       case 'ENGLISH': case 'CHINESE':
-        if (menuState().composing) { feedback('请先选择候选，或按 B 取消拼音'); break; }
+        if (menuState().composing) { feedback('Select a candidate, or press B to cancel pinyin'); break; }
         setLanguage(key.action === 'CHINESE' ? 'zh-CN' : 'en'); send({ type: 'MENU_LANGUAGE', value: false }); send({ type: 'MENU_FRAME', value: 'LETTER_LAYOUT' }); renderKeys(); refreshCandidates(); focusFirstKey(); break;
-      case 'PHYSICAL_INPUT': setLanguage('en'); send({ type: 'MENU_LANGUAGE', value: false }); renderKeys(); refreshCandidates(); root.querySelector('#query').focus(); feedback('使用实体键盘输入中文，Enter 搜索，B 返回'); break;
+      case 'PHYSICAL_INPUT': setLanguage('en'); send({ type: 'MENU_LANGUAGE', value: false }); renderKeys(); refreshCandidates(); root.querySelector('#query').focus(); feedback('Type with your keyboard. Press Enter to search, or B to go back.'); break;
     }
   }
   function renderKeys() {
     const container = root.querySelector('#keys');
     container.replaceChildren();
-    const rows = menuState().choosingLanguage ? [[{ label: 'English', action: 'ENGLISH' }, { label: '中文（拼音）', action: 'CHINESE' }, { label: '实体键盘', action: 'PHYSICAL_INPUT' }]] : window.YTGamepadKeyboard.rows(menuState().frame, menuState().uppercase);
+    const rows = menuState().choosingLanguage ? [[{ label: 'English', action: 'ENGLISH' }, { label: 'Chinese (Pinyin)', action: 'CHINESE' }, { label: 'Physical keyboard', action: 'PHYSICAL_INPUT' }]] : keyboard.rows(menuState().frame, menuState().uppercase);
     rows.forEach((keys, row) => {
       const line = document.createElement('div'); line.className = 'key-row' + (menuState().choosingLanguage ? ' languages' : '');
       keys.forEach((key, column) => {
@@ -204,8 +199,9 @@
             path.setAttribute('d', 'M22 3H7c-.69 0-1.23.35-1.59.88L0 12l5.41 8.11c.36.53.9.89 1.59.89h15c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-3 12.59L17.59 17 14 13.41 10.41 17 9 15.59 12.59 12 9 8.41 10.41 7 14 10.59 17.59 7 19 8.41 15.41 12 19 15.59z');
             path.setAttribute('fill', 'currentColor');
           } else {
-            path.setAttribute('d', 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 0c-5 5-5 15 0 20m0-20c5 5 5 15 0 20M2 12h20M4 6h16M4 18h16');
-            path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor'); path.setAttribute('stroke-width', '1.5');
+            // Google Material Icons language, Apache-2.0; see THIRD_PARTY_NOTICES.md.
+            path.setAttribute('d', "M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.9-4.33-3.56zm2.95-8H5.08c.96-1.66 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z");
+            path.setAttribute('fill', 'currentColor');
           }
           icon.append(path); button.replaceChildren(icon);
         }
@@ -220,23 +216,23 @@
     });
   }
   function submit() {
-    if (menuState().composing) { feedback('请先选择候选字，再搜索'); focusCandidate(); return; }
+    if (menuState().composing) { feedback('Select a candidate before searching'); focusCandidate(); return; }
     const query = root.querySelector('#query').value.trim();
-    if (!query) { feedback('请输入搜索内容'); return; }
+    if (!query) { feedback('Enter a search query'); return; }
     const submitted = port.controller.submitSearch(searchTarget, query, () => {
       // Commit history only when the adapter has a usable native search target.
       recent = sanitizeRecent([query, ...recent.filter(item => item !== query)]);
       try { localStorage.setItem('ytg-recent-searches', JSON.stringify(recent)); } catch (_) {}
       port.close();
     });
-    if (!submitted) feedback('暂时找不到 YouTube 搜索按钮，请稍后重试');
+    if (!submitted) feedback('YouTube search is unavailable. Please try again shortly.');
   }
   function createInput(section) {
       const input = document.createElement('input');
       input.id = 'query';
-      input.setAttribute('aria-label', '搜索内容');
+      input.setAttribute('aria-label', 'Search query');
       input.autocomplete = 'off';
-      input.placeholder = '搜索';
+      input.placeholder = 'Search';
       cursor = [0, 0];
       for (const event of ['input', 'select', 'keyup', 'click']) input.addEventListener(event, () => { rememberCursor(); syncSearch(); });
       section.append(input);
@@ -245,8 +241,8 @@
       const layout = document.createElement('div'); layout.className = 'search-layout';
       const history = document.createElement('div'); history.id = 'recent';
       const composition = document.createElement('div'); composition.id = 'composition'; history.append(composition);
-      const caption = document.createElement('p'); caption.id = 'history-title'; caption.textContent = '最近搜索'; history.append(caption);
-      if (!recent.length) { const empty = document.createElement('p'); empty.id = 'history-empty'; empty.textContent = '搜索后会保存在这里'; history.append(empty); }
+      const caption = document.createElement('p'); caption.id = 'history-title'; caption.textContent = 'Recent searches'; history.append(caption);
+      if (!recent.length) { const empty = document.createElement('p'); empty.id = 'history-empty'; empty.textContent = 'Your recent searches will appear here'; history.append(empty); }
       recent.forEach((query, row) => {
         const button = document.createElement('button'); button.textContent = '↶  ' + query;
         button.dataset.row = row; button.dataset.column = -1;

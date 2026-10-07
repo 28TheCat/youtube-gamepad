@@ -63,7 +63,7 @@ test('route disposal preserves a later site wrapper and makes a retained wrapper
   const original = history.pushState;
   runInNewContext(moduleSource('app/route-controller.js'), { window, URL });
   const interaction = window.YTGamepadStateMachine.createStore();
-  const routes = window.YTGamepadRouteController.create({ interaction, location, history, window: s.target, document: s.target,
+  const routes = window.YTGamepadRouteController.create({ runtime: window.YTGamepadRuntime, interaction, location, history, window: s.target, document: s.target,
     routeNow: () => '/', enabled: () => true, renderMode() {}, onStart() {}, hasTemporaryLayer: () => false
   });
   routes.start(); const retained = history.pushState;

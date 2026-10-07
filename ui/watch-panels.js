@@ -1,10 +1,14 @@
 // Description/comments rendering and native comment requests through an injected port.
 (() => {
   if (window.YTGamepadWatchPanels) return;
-  window.YTGamepadWatchPanels = { create(port) {
+  window.YTGamepadWatchPanels = {
+    /** @param {import('../types/ports.js').WatchPanelsPort} port */
+    create(port) {
     const { make, dialog, sheet, panelTitle, description, close, surface, watchState, send, focus } = port;
-    const focusManager = port.focusManager;
+    const { focusManager, controllerStyle } = port;
     let commentKey = '', commentButtons = [];
+    let commentRoute = '';
+    const collapsedComments = new Set();
   function clearPanel() {
     send({ type: 'WATCH_PANEL', panel: '' }); dialog.hidden = true; dialog.classList.remove('comments'); surface.classList.remove('comments-open');
     document.documentElement.classList.remove('ytg-comments');
@@ -14,25 +18,48 @@
   }
   function readComments() {
     if (watchState().panel !== 'comments') return;
+    const route = port.controller.readRoute().key;
+    if (route !== commentRoute) { commentRoute = route; collapsedComments.clear(); commentKey = ''; }
     const records = port.controller.readComments();
     const unavailable = port.controller.readWatchFeatures?.().comments === 'failed';
     const key = JSON.stringify([records, unavailable]);
     if (key === commentKey) return;
     commentKey = key;
-    commentButtons = records.map(item => {
-      const node = make('button', 'comment');
-      node.append(make('div', 'comment-author', item.author), make('div', '', item.text));
-      for (const reply of item.expanded) node.append(make('div', 'comment-replies', '↳ ' + reply));
-      if (item.hasReplies) node.append(make('div', 'comment-replies', item.repliesLabel + ' · A 展开'));
-      node.addEventListener('click', () => {
-        if (port.controller.request('replies', item.key)) { commentKey = ''; readComments(); }
+    commentButtons = [];
+    const threads = records.map(item => {
+      const node = make('div', 'comment');
+      const collapsed = collapsedComments.has(item.key);
+      const header = make('button', 'comment-header');
+      header.setAttribute('aria-expanded', String(!collapsed));
+      header.append(make('span', 'comment-toggle', collapsed ? '+' : '−'), make('span', 'comment-author', item.author));
+      if (collapsed) header.append(make('span', 'comment-summary', 'Comment collapsed'));
+      const body = make('div', 'comment-body'); body.hidden = collapsed;
+      body.append(make('div', '', item.text));
+      const repliesList = make('div', 'comment-replies-list');
+      for (const reply of item.expanded) repliesList.append(make('div', 'comment-reply', '↳ ' + reply));
+      if (item.expanded.length) body.append(repliesList);
+      commentButtons.push(header);
+      header.addEventListener('click', () => {
+        if (collapsedComments.has(item.key)) collapsedComments.delete(item.key); else collapsedComments.add(item.key);
+        send({ type: 'WATCH_FOCUS', region: 'panel', index: commentButtons.indexOf(header) + 1 });
+        commentKey = ''; readComments();
       });
+      if (item.hasReplies) {
+        const replies = make('button', 'comment-replies', item.repliesLabel);
+        replies.append(controllerStyle.hint(make('span'), ' · A Load replies'));
+        replies.addEventListener('click', () => {
+          if (port.controller.request('replies', item.key)) { commentKey = ''; readComments(); }
+        });
+        body.append(replies);
+        if (!collapsed) commentButtons.push(replies);
+      }
+      node.append(header, body);
       return node;
     });
-    description.replaceChildren(...commentButtons);
-    if (!records.length) description.append(make('p', '', unavailable ? '评论暂不可用，播放不受影响。B 返回。' : '评论尚未加载，或此视频未开放评论。按下键继续加载，B 返回。'));
+    description.replaceChildren(...threads);
+    if (!records.length) description.append(controllerStyle.hint(make('p'), unavailable ? 'Comments are unavailable. Playback continues normally. B Back.' : 'Comments are still loading or disabled for this video. Press ↓ to load more, B to go back.'));
     if (records.length) {
-      const more = make('button', 'control', '加载更多评论');
+      const more = make('button', 'control', 'Load more comments');
       more.addEventListener('click', loadComments); description.append(more); commentButtons.push(more);
     }
     send({ type: 'WATCH_PANEL_COUNT', count: commentButtons.length }); if (!port.controller.navigating && !port.controller.hasTemporaryLayer?.()) focus();
@@ -44,10 +71,10 @@
     if (action === 'description' || action === 'comments') focusManager?.open(dialog, 'watch');
     if (action === 'description') {
       sheet.replaceChildren(panelTitle, description, close);
-      send({ type: 'WATCH_PANEL', panel: action }); panelTitle.textContent = '视频说明'; dialog.setAttribute('aria-label', '视频说明'); description.textContent = port.descriptionText || '暂无视频说明'; dialog.hidden = false; focus();
+      send({ type: 'WATCH_PANEL', panel: action }); panelTitle.textContent = 'Video description'; dialog.setAttribute('aria-label', 'Video description'); description.textContent = port.descriptionText || 'No description available'; dialog.hidden = false; focus();
     } else if (action === 'comments') {
       sheet.replaceChildren(panelTitle, close, description); sheet.scrollTop = 0;
-      send({ type: 'WATCH_PANEL', panel: action }); commentKey = ''; panelTitle.textContent = '评论'; dialog.setAttribute('aria-label', '评论');
+      send({ type: 'WATCH_PANEL', panel: action }); commentKey = ''; panelTitle.textContent = 'Comments'; dialog.setAttribute('aria-label', 'Comments');
       dialog.classList.add('comments'); surface.classList.add('comments-open');
       document.documentElement.classList.add('ytg-comments'); dialog.hidden = false;
       port.controller.request('comments', true);
@@ -59,7 +86,7 @@
   }
   return { open, hide, close: closePanel, refresh: readComments, load: loadComments,
     get buttons() { return commentButtons; },
-    destroy() { hide(); commentButtons = []; commentKey = ''; description.replaceChildren(); }
+    destroy() { hide(); commentButtons = []; commentKey = ''; collapsedComments.clear(); description.replaceChildren(); }
   };
   } };
 })();

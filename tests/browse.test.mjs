@@ -4,6 +4,33 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
+test('browse return restores a category by identity and waits for its native list', () => {
+  const window = {}; let selected = 'Music', clicks = 0, feed = ['/watch?v=original'];
+  const chips = ['All', 'Music'].map(label => ({
+    isConnected: true, textContent: label, closest: () => null,
+    getBoundingClientRect: () => ({ width: 80 }),
+    getAttribute: name => name === 'selected' && label === selected ? '' : null,
+    querySelector: selector => selector === 'button,[role="button"]' ? {
+      getAttribute: () => null, click() { clicks++; selected = label; }
+    } : null
+  }));
+  const document = { querySelectorAll: selector => selector === 'yt-chip-cloud-chip-renderer' ? chips :
+    feed.map(href => ({ closest: () => null, getAttribute: () => href })) };
+  runInNewContext(moduleSource('sites/youtube.js'), { window, document, location: { pathname: '/' } });
+  const config = window.YTGamepadSite.createNavigationConfig({}), saved = config.captureBrowseState();
+  assert.equal(saved.category, 'Music');
+  assert.equal(config.restoreBrowseState(saved, {}), true, 'retained native category/list is reused');
+  selected = 'All'; feed = ['/watch?v=other']; chips.reverse();
+  const attempt = {};
+  assert.equal(config.restoreBrowseState(saved, attempt), false); assert.equal(clicks, 1);
+  assert.equal(config.restoreBrowseState(saved, attempt), false, 'selected chip can precede asynchronous feed data');
+  assert.equal(clicks, 1, 'native activation happens once');
+  feed = ['/watch?v=original'];
+  assert.equal(config.restoreBrowseState(saved, attempt), true);
+  chips.length = 0;
+  assert.equal(config.restoreBrowseState(saved, {}), false, 'wait for chips to be rebuilt');
+});
+
 test('returning from native sidebar closes only a transient open drawer', () => {
   const window = {};
   let clicks = 0, opened = true, persistent = false;
@@ -44,7 +71,7 @@ test('shoulders activate adjacent categories, skip hidden chips, and stop at eit
   runInNewContext(moduleSource('sites/youtube.js'), {
     window, document, location, getComputedStyle: () => ({ display: 'block', visibility: 'visible' })
   });
-  const config = window.YTGamepadSite.createNavigationConfig({});
+  const config = window.YTGamepadSite.createNavigationConfig({ perform: action => window.YTGamepadSite.perform(action) });
   const press = action => config.onAction(action, { scope: document });
   assert.equal(press('seekForward'), 'handled');
   assert.deepEqual(clicks, [3], 'offscreen category can be activated and hidden category is skipped');
@@ -64,6 +91,44 @@ test('shoulders activate adjacent categories, skip hidden chips, and stop at eit
   location.pathname = '/watch';
   assert.equal(press('seekForward'), 'handled');
   assert.equal(video.currentTime, 60, 'watch shoulders still seek');
+});
+
+test('shoulders activate modern chip buttons outside the page manager', () => {
+  const window = {}, clicks = [], scrolls = [];
+  let active = 0;
+  const buttons = Array.from({ length: 3 }, (_, index) => ({
+    disabled: false, getAttribute: () => null,
+    click() { clicks.push(index); active = index; }
+  }));
+  const chips = buttons.map((button, index) => ({
+    isConnected: true, parentElement: null, closest: () => null,
+    hasAttribute: () => false, getAttribute: () => null,
+    getBoundingClientRect: () => ({ width: 80, height: 40 }),
+    querySelector(selector) {
+      if (selector === 'button,[role="button"]') return button;
+      return selector.includes('.ytChipShapeActive') && index === active ? button : null;
+    },
+    scrollIntoView() { scrolls.push(index); },
+    click() { assert.fail('host clicks do not reach the inner button handler'); }
+  }));
+  const document = {
+    querySelectorAll: selector => selector === 'yt-chip-cloud-chip-renderer' ? chips : []
+  };
+  runInNewContext(moduleSource('sites/youtube.js'), {
+    window, document, location: { pathname: '/' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' })
+  });
+  const config = window.YTGamepadSite.createNavigationConfig({});
+  const press = action => config.onAction(action, { scope: document });
+  assert.equal(press('seekForward'), 'handled');
+  assert.equal(press('seekForward'), 'handled');
+  assert.equal(press('seekForward'), 'blocked');
+  assert.equal(press('seekBack'), 'handled');
+  assert.deepEqual(clicks, [1, 2, 1]);
+  assert.deepEqual(scrolls, [1, 2, 1]);
+  buttons[0].disabled = true;
+  assert.equal(press('seekBack'), 'blocked');
+  assert.deepEqual(clicks, [1, 2, 1], 'disabled category is not activated');
 });
 
 test('category focus ring follows the visible chip face and its smaller corners', () => {
@@ -87,10 +152,10 @@ test('TV account entry forwards to the native account target and rejects unavail
   assert.equal(site.readBrowseAccount(), null);
   assert.equal(site.openBrowseAccount(), false);
   native = { id: 'avatar-btn', isConnected: true, getAttribute: () => null, click() { clicks++; } };
-  assert.equal(site.readBrowseAccount().label, '账号');
+  assert.equal(site.readBrowseAccount().label, 'Account');
   assert.equal(site.openBrowseAccount(), true); assert.equal(clicks, 1);
   native.disabled = true;
   assert.equal(site.openBrowseAccount(), false); assert.equal(clicks, 1);
   native.disabled = false; native.id = '';
-  assert.equal(site.readBrowseAccount().label, '登录');
+  assert.equal(site.readBrowseAccount().label, 'Sign in');
 });

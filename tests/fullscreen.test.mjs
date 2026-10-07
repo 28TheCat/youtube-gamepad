@@ -20,7 +20,11 @@ function setup(state = 'maximized') {
   const restart = () => runInNewContext(source, { chrome, console });
   restart();
   const sender = { frameId: 0, url: 'https://www.youtube.com/watch?v=test', tab: { id: 3, windowId: 7, active: true } };
-  return { window, calls, settings, listeners, restart, async connect(connected, origin = sender) {
+  return { window, calls, settings, listeners, restart, async escape(origin = sender) {
+    return new Promise(resolve => {
+      if (!listeners.message({ type: 'ytg-exit-fullscreen' }, origin, resolve)) resolve(undefined);
+    });
+  }, async connect(connected, origin = sender) {
     return new Promise(resolve => {
       const handled = listeners.message({ type: 'ytg-controller-connection', connected }, origin, resolve);
       if (!handled) resolve(undefined);
@@ -100,7 +104,7 @@ test('new document does not interpret an initial empty gamepad snapshot as disco
   assert.equal(sent[3].connected, true);
 });
 
-test('page Escape cannot report a false controller disconnect or exit fullscreen', () => {
+test('synthetic Escape cannot request fullscreen exit or report a false disconnect', () => {
   const sent = [], events = {}, pad = { connected: true, mapping: 'standard', axes: [.8, 0], buttons: [] };
   let tick, frame;
   const window = { addEventListener(name, fn) { events[name] = fn; }, postMessage() {} };
@@ -109,12 +113,36 @@ test('page Escape cannot report a false controller disconnect or exit fullscreen
     window, chrome, console, location: { origin: 'https://www.youtube.com' }, navigator: { getGamepads: () => [pad] },
     document: { hidden: false, hasFocus: () => true, addEventListener() {} }, setInterval(fn) { tick = fn; }, requestAnimationFrame(fn) { frame = fn; }
   });
-  events.keydown?.({ key: 'Escape', isTrusted: false });
+  events['yt-gamepad-escape-request']({ detail: { key: 'Escape', isTrusted: false } });
   assert.equal(sent.length, 1);
-  events.keydown?.({ key: 'Escape', isTrusted: true });
+  events['yt-gamepad-escape-request']({ detail: { key: 'Escape', isTrusted: true }, preventDefault() {} });
   tick(); tick();
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].type, 'ytg-exit-fullscreen');
   assert.equal(sent[0].connected, true);
+});
+
+test('Escape restores the original window and stays dismissed through reload and worker restart', async () => {
+  for (const original of ['normal', 'maximized']) {
+    const s = setup(original);
+    await s.connect(true);
+    assert.equal((await s.escape()).exited, true);
+    assert.equal(s.window.state, original);
+    s.restart();
+    await s.connect(true); await s.connect(true);
+    assert.equal(s.window.state, original);
+    await s.connect(false); await s.connect(true);
+    assert.equal(s.window.state, 'fullscreen');
+  }
+});
+
+test('Escape outside fullscreen falls back and rejects inactive or foreign senders', async () => {
+  const s = setup();
+  assert.equal((await s.escape()).exited, false);
+  await s.connect(true);
+  assert.equal((await s.escape({ frameId: 0, url: 'https://www.youtube.com/', tab: { id: 3, windowId: 7, active: false } })).exited, false);
+  assert.equal(await s.escape({ frameId: 0, url: 'https://example.com/', tab: { id: 3, windowId: 7, active: true } }), undefined);
+  assert.equal(s.window.state, 'fullscreen');
 });
 
 function connectionBridge() {

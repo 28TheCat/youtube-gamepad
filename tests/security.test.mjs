@@ -30,7 +30,7 @@ test('page bridge publishes only allowed settings with validated values', () => 
   const s = bridge();
   assert.deepEqual(JSON.parse(JSON.stringify(s.messages[0])), {
     origin: 'https://www.youtube.com', message: { source: 'yt-gamepad-settings',
-      values: { enabled: false, theater: true, deadzone: .35, repeatDelay: 150, repeatInterval: 140 } }
+      values: { enabled: false, theater: true, deadzone: .35, repeatDelay: 150, repeatInterval: 140, bindings: { confirm: 0, back: 1, playPause: 2, search: 3, seekBack: 4, seekForward: 5, volumeDown: 6, volumeUp: 7, help: 9, keyboardSymbols: 10, keyboardCandidates: 11 } } }
   });
 });
 
@@ -65,6 +65,38 @@ test('settings entry forwards only a fixed request, with origin and rate limits'
   assert.equal(s.writes.length, 0);
   s.advance(); s.receive(data);
   assert.equal(s.runtime.length, 2);
+});
+
+test('toolbar inline settings request accepts only this extension and never writes supplied values', () => {
+  const s = bridge(), replies = [];
+  const request = { type: 'ytg-open-inline-settings', values: { enabled: true }, key: 'secret' };
+  s.events.extension(request, { id: 'another-extension' }, result => replies.push(result));
+  assert.equal(replies.length, 0);
+  s.events.extension(request, { id: 'test-extension' }, result => replies.push(result));
+  assert.equal(replies[0].ok, true);
+  assert.equal(s.messages.at(-1).message.source, 'yt-gamepad-show-settings');
+  assert.equal(s.writes.length, 0);
+  s.receive({ source: 'yt-gamepad-clear-inline-diagnostics' });
+  assert.equal(s.runtime.length, 0);
+});
+
+test('diagnostic bridge bounds untrusted telemetry and never accepts storage keys or export commands', () => {
+  const s = bridge();
+  const data = { source: 'yt-gamepad-diagnostic', key: 'enabled', entry: {
+    module: 'site', operation: 'readPlayback', reason: 'failure', stack: '',
+    state: { enabled: true, route: 'watch', secret: 'private' }, url: 'https://example.com/'
+  } };
+  s.receive(data, {}, 'https://www.youtube.com');
+  s.receive(data, undefined, 'https://example.com');
+  assert.equal(s.runtime.length, 0);
+  s.receive({ ...data, entry: { ...data.entry, stack: 'x'.repeat(1025) } });
+  assert.equal(s.runtime.length, 0);
+  s.receive(data);
+  assert.equal(s.runtime[0].type, 'ytg-diagnostic');
+  assert.equal(s.runtime[0].entry.state.enabled, true);
+  assert.equal(s.runtime[0].entry.state.secret, undefined); assert.equal(s.runtime[0].entry.url, undefined);
+  for (let i = 0; i < 150; i++) s.receive(data);
+  assert.ok(s.runtime.length <= 100); assert.equal(s.writes.length, 0);
 });
 
 test('connection status responds only to this extension', () => {

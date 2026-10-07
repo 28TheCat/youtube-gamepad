@@ -15,6 +15,7 @@ function setup(records = {}) {
       append(...items) { this.children.push(...items); },
       replaceChildren(...items) { this.children = items; },
       setAttribute(name, value) { this.attributes[name] = value; },
+      getAttribute(name) { return this.attributes[name] ?? null; },
       addEventListener(name, fn) { handlers[name] = fn; },
       fire(name, event) { handlers[name]?.(event); },
       focus() { root.activeElement = this; handlers.focus?.(); },
@@ -63,6 +64,21 @@ function setup(records = {}) {
   return { menu, window, press, escape, actions, restored, nativeSearch, get root() { return root; }, pageOrigin() { region = 'header'; origin = 'search'; } };
 }
 
+test('quick menu waits for media completion before reporting success or failure', async () => {
+  for (const ok of [false, true]) {
+    const s = setup(); let settle;
+    s.menu.connect({ perform: () => new Promise(resolve => { settle = resolve; }) });
+    s.menu.handle('help');
+    s.root.querySelectorAll('button')[1].click();
+    const message = s.root.querySelector('#message');
+    const text = node => [node.textContent || '', ...node.children.map(text)].join('');
+    assert.doesNotMatch(text(message), /Done/);
+    settle(ok);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(text(message), ok ? /Done/ : /No video or captions available/);
+  }
+});
+
 test('search history treats page storage as bounded text, never HTML', () => {
   const s = setup({ 'ytg-recent-searches': JSON.stringify(['<img onerror=alert(1)>', 'x'.repeat(257), 42, ' ', '<img onerror=alert(1)>']) });
   s.menu.openSearch(s.nativeSearch);
@@ -85,14 +101,14 @@ test('search from a quick menu returns to its entry even when the native search 
   const searchEntry = s.root.querySelectorAll('button')[0]; searchEntry.focus(); searchEntry.click();
   assert.equal(s.menu.state.openedFrom, 'quickMenu');
   assert.equal(s.root.querySelector('#query').value, 'existing');
-  s.press('切换语言');
+  s.press('Switch input language');
   s.escape();
   assert.equal(s.menu.state.view, 'search');
   assert.equal(s.root.activeElement.dataset.action, 'SWITCH_LANGUAGE');
   assert.deepEqual(s.restored, []);
   s.escape();
   assert.equal(s.menu.state.view, 'main'); assert.equal(s.menu.opened, true);
-  assert.equal(s.root.activeElement.textContent, '搜索视频');
+  assert.equal(s.root.activeElement.textContent, 'Search videos');
   assert.equal(s.window.YTGamepadFocus.suspended, true);
   s.escape();
   assert.equal(s.menu.opened, false);
@@ -112,7 +128,7 @@ test('page search returns directly to its captured entry and restores it once', 
 
 test('pinyin consumes one back before search, menu and the original recommendation', () => {
   const s = setup(); s.menu.handle('help'); s.menu.handle('search');
-  s.press('切换语言'); s.press('中文（拼音）'); s.press('N'); s.press('I');
+  s.press('Switch input language'); s.press('Chinese (Pinyin)'); s.press('N'); s.press('I');
   s.menu.handle('back');
   assert.equal(s.menu.state.composing, ''); assert.equal(s.menu.state.view, 'search');
   assert.equal(s.root.activeElement.dataset.row, '0'); assert.equal(s.root.activeElement.dataset.column, '0');

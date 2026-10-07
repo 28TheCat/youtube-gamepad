@@ -4,6 +4,51 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
+test('live DVR uses moving seekable ranges and returns to the latest live edge', () => {
+  const s = setup(true);
+  let ranges = [[100, 160], [180, 220]];
+  s.video.duration = Infinity; s.video.currentTime = 200;
+  s.video.seekable = { get length() { return ranges.length; }, start: i => ranges[i][0], end: i => ranges[i][1] };
+  s.watch.show();
+  const find = (node, predicate) => predicate(node) ? node : node.children.map(child => find(child, predicate)).find(Boolean);
+  const progress = find(s.shadow, node => node.getAttribute('role') === 'slider');
+  const live = find(s.shadow, node => node.dataset.action === 'goLive');
+  assert.equal(progress.getAttribute('aria-valuemin'), '100');
+  assert.equal(progress.getAttribute('aria-valuemax'), '220');
+  assert.equal(live.hidden, false);
+  progress.dispatchEvent({ type: 'click', detail: 1, clientX: 500 });
+  assert.equal(s.video.currentTime, 160);
+  assert.equal(s.site.seekTo(175), true); assert.equal(s.video.currentTime, 180);
+  ranges = [[190, 250]];
+  s.site.perform('seekBack'); assert.equal(s.video.currentTime, 190);
+  live.click(); assert.equal(s.video.currentTime, 250);
+  assert.equal(live.disabled, true);
+  assert.equal(s.video.paused, false);
+  s.watch.show(); s.watch.handle('up'); s.watch.handle('confirm');
+  ranges = []; s.tick();
+  assert.equal(progress.disabled, true);
+  assert.equal(s.watch.state.adjusting, false);
+  assert.equal(s.watch.state.row, 'controls');
+  s.watch.handle('up'); assert.equal(s.watch.state.row, 'controls');
+  assert.equal(s.site.perform('seekBack'), false);
+  assert.equal(s.site.perform('goLive'), false);
+});
+
+test('finite live metadata and unknown durations do not invent a DVR window', () => {
+  const s = setup();
+  const query = s.document.querySelector;
+  s.document.querySelector = selector => selector === '#movie_player'
+    ? { getPlayerResponse: () => ({ videoDetails: { isLive: true } }) } : query(selector);
+  assert.equal(s.site.readPlayback().video.timeline.isLive, true);
+  assert.equal(s.site.seekTo(20), false);
+  s.video.seekable = { length: 1, start: () => 30, end: () => 90 };
+  assert.equal(s.site.seekTo(20), true); assert.equal(s.video.currentTime, 30);
+  s.document.querySelector = query;
+  s.video.duration = NaN; s.video.seekable = { length: 0 };
+  assert.equal(s.site.seekTo(20), false);
+  assert.equal(s.site.readPlayback().video.timeline.isLive, false);
+});
+
 function setup(integrated = false) {
   let shadow, frame, clicks = 0, now = 0;
   const classes = new Set(), actions = [];
@@ -48,7 +93,7 @@ function setup(integrated = false) {
       return null;
     }, querySelectorAll: selector => selector.startsWith('ytd-compact-video-renderer') ? nativeCards : []
   };
-  const window = { addEventListener(name, fn) { events[name] = fn; }, postMessage() {}, YTGamepadInput: { configure() {} }, YTGamepad: { refresh() {}, configure() {}, registerSite(config) { configs.push(config); } } };
+  const window = { YTGamepadMenu: { opened: false, close() { this.opened = false; } }, addEventListener(name, fn) { events[name] = fn; }, postMessage() {}, YTGamepadInput: { connected: true, configure() {} }, YTGamepad: { refresh() {}, configure() {}, registerSite(config) { configs.push(config); } } };
   const controller = {
     state: { mode: 'playback', enabled: true, navigating: false },
     requestMode(mode) { this.state.mode = mode; window.YTGamepadWatch.sync(); },
@@ -95,6 +140,25 @@ function setup(integrated = false) {
   }
   return { watch, window, video, classes, actions, events, adapter: configs[0], anchor, nativeImage, site, document, location, get shadow() { return shadow; }, get clicks() { return clicks; }, tick: () => frame(), advance(ms) { now += ms; }, controller, clearCards() { nativeCards = []; watch.refresh(); } };
 }
+
+test('watch controls observe asynchronous media failure and refresh playback after success', async () => {
+  const s = setup(); s.video.paused = true;
+  s.watch.show('controls');
+  let settle;
+  s.controller.perform = () => new Promise(resolve => { settle = resolve; });
+  const find = node => node.dataset.action === 'playPause' ? node : node.children.map(find).find(Boolean);
+  const button = find(s.shadow);
+  const texts = node => [node.textContent, ...node.children.flatMap(texts)].join('');
+  button.click();
+  assert.doesNotMatch(texts(s.shadow), /This action is (?:currently )?unavailable/);
+  settle(false);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(texts(s.shadow), /This action is (?:currently )?unavailable/);
+  assert.equal(button.getAttribute('aria-label'), 'Play');
+  button.click(); s.video.paused = false; settle(true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(button.getAttribute('aria-label'), 'Pause');
+});
 
 test('recommendation thumbnails recover from unloaded, placeholder and srcset images', () => {
   const s = setup();
@@ -150,6 +214,28 @@ test('progress requires A to adjust and A ends adjustment without hiding control
   s.watch.handle('down'); assert.equal(s.watch.state.row, 'controls'); assert.equal(s.watch.state.index, 5);
   s.watch.handle('left');
   s.watch.handle('confirm'); assert.equal(s.video.paused, true);
+});
+
+test('up from progress hides the watch surface and preserves playback and control selection', () => {
+  const s = setup(true);
+  const input = action => s.adapter.interceptAction(action);
+  input('up'); input('right'); input('up');
+  assert.equal(s.watch.state.row, 'progress');
+  assert.equal(s.watch.state.adjusting, false);
+  input('up');
+  assert.equal(s.watch.state.mode, 'playback');
+  assert.equal(s.watch.ownsFocus, false);
+  assert.equal(s.classes.has('ytg-controls'), false);
+  assert.equal(s.video.paused, false);
+  assert.equal(s.video.currentTime, 10);
+  input('up');
+  assert.equal(s.watch.state.row, 'controls');
+  assert.equal(s.watch.state.index, 5);
+  input('up'); input('confirm'); input('up');
+  assert.equal(s.watch.state.adjusting, true);
+  assert.equal(s.watch.state.mode, 'controls');
+  input('confirm'); input('up');
+  assert.equal(s.watch.state.mode, 'playback');
 });
 
 test('recommendation B returns to controls before returning to pure playback', () => {
@@ -219,11 +305,27 @@ test('loaded comments remain text and activate the original reply control', () =
   const original = s.document.querySelectorAll;
   s.document.querySelectorAll = selector => selector.startsWith('ytd-comments') ? [thread] : original(selector);
   s.watch.show(); for (let i = 0; i < 4; i++) s.watch.handle('right');
-  s.watch.handle('confirm'); s.watch.handle('down'); s.watch.handle('confirm');
+  s.watch.handle('confirm'); s.watch.handle('down'); s.watch.handle('down'); s.watch.handle('confirm');
   assert.equal(clicks, 1);
   const texts = node => [node.textContent, ...node.children.flatMap(texts)];
   assert.equal(texts(s.shadow).includes('<img src=x> 测试评论'), true);
   assert.equal(texts(s.shadow).includes('↳ 回复内容'), true);
+  s.watch.handle('up'); s.watch.handle('confirm');
+  const find = (node, predicate) => predicate(node) ? node : node.children.map(child => find(child, predicate)).find(Boolean);
+  let header = find(s.shadow, node => node.className === 'comment-header');
+  let body = find(s.shadow, node => node.className === 'comment-body');
+  assert.equal(header.getAttribute('aria-expanded'), 'false');
+  assert.equal(body.hidden, true);
+  assert.equal(clicks, 1);
+  s.tick();
+  assert.equal(find(s.shadow, node => node.className === 'comment-body').hidden, true);
+  s.watch.handle('confirm');
+  header = find(s.shadow, node => node.className === 'comment-header');
+  body = find(s.shadow, node => node.className === 'comment-body');
+  assert.equal(header.getAttribute('aria-expanded'), 'true');
+  assert.equal(body.hidden, false);
+  assert.equal(texts(body).includes('↳ 回复内容'), true);
+  assert.equal(clicks, 1);
   s.watch.handle('back'); assert.equal(s.watch.state.index, 8);
 });
 
@@ -285,7 +387,7 @@ test('auto-hide requires idle controls, playing video and no temporary layer or 
     if (blocker === 'recommendations') s.watch.show('recommendations');
     if (blocker === 'progress') s.watch.handle('up');
     if (blocker === 'panel') { for (let i = 0; i < 3; i++) s.watch.handle('left'); s.watch.handle('confirm'); }
-    if (blocker === 'menu') s.window.YTGamepadMenu = { opened: true };
+    if (blocker === 'menu') s.window.YTGamepadMenu.opened = true;
     if (blocker === 'nativeDialog') {
       const original = s.document.querySelectorAll;
       s.document.querySelectorAll = selector => selector.startsWith('[role=') ? [{ isConnected: true, getBoundingClientRect: () => ({ width: 100, height: 100 }), closest: () => null }] : original(selector);
@@ -354,7 +456,7 @@ test('watch renders and operates through injected snapshots without native DOM a
     readRoute: () => ({ key: '/watch?v=isolated', isWatch: true }),
     readWatchPage: () => ({ isWatch: true, title: '适配器提供的标题', channel: '频道', viewCount: 42,
       description: '说明', recommendations: [{ key: 'isolated-next', label: '下一条', channel: '频道', thumbnail: '' }] }),
-    readPlayback: () => ({ video: { currentTime: 25, duration: 100, paused: false }, captionsEnabled: true, settingsOpen: false }),
+    readPlayback: () => ({ video: { currentTime: 25, duration: 100, paused: false, timeline: { isLive: false, canSeek: true, start: 0, end: 100, ranges: [{ start: 0, end: 100 }], atLiveEdge: false } }, captionsEnabled: true, settingsOpen: false }),
     readComments: () => [{ key: 'comment', author: '作者', text: '评论', expanded: [], hasReplies: true, repliesLabel: '回复' }],
     hasNativeLayer: () => false, hasTemporaryLayer: () => false,
     perform: action => { commands.push(action); return true; },

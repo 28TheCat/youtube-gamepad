@@ -1,15 +1,17 @@
 // Owns browser history interception and route notifications; rules stay in route-state.
 (() => {
   if (window.YTGamepadRouteController) return;
-  window.YTGamepadRouteController = { create(port) {
-    const lifecycle = window.YTGamepadRuntime.scope('route');
+  window.YTGamepadRouteController = {
+    /** @param {import('../types/ports.js').RoutePort} port */
+    create(port) {
+    const lifecycle = port.runtime.scope('route');
     const send = event => port.interaction.dispatch(event);
     const app = () => port.interaction.state.app;
     let started = false;
     function cancel() { send({ type: 'NAV_CANCEL', route: port.routeNow() }); port.renderMode(); }
     function finish() {
       const previous = app(); send({ type: 'NAV_FINISH', route: port.routeNow() });
-      if (previous.mode !== app().mode || previous.settledRoute !== app().settledRoute) port.renderMode();
+      if (previous.mode !== app().mode || previous.settledRoute !== app().settledRoute || previous.navigation) port.renderMode();
     }
     function prepareVideo(href) {
       if (lifecycle.destroyed || !port.enabled() || !href || app().navigation || app().returning) return false;
@@ -45,7 +47,10 @@
         if (!original) continue;
         const wrapped = function (...args) {
           const before = port.routeNow(), result = original.apply(this, args);
-          if (!lifecycle.destroyed) send({ type: 'HISTORY', method, route: port.routeNow(), changed: before !== port.routeNow() });
+          if (!lifecycle.destroyed) {
+            send({ type: 'HISTORY', method, route: port.routeNow(), changed: before !== port.routeNow() });
+            if (before !== port.routeNow()) port.renderMode();
+          }
           return result;
         };
         port.history[method] = wrapped;

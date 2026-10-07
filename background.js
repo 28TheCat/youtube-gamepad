@@ -19,13 +19,23 @@ async function restore(windowId, states) {
   try {
     const current = await chrome.windows.get(Number(windowId));
     // Do not overwrite a user's subsequent manual window change.
-    if (current.state === 'fullscreen') await chrome.windows.update(Number(windowId), { state: previous.state });
+    if (!previous.dismissed && current.state === 'fullscreen') await chrome.windows.update(Number(windowId), { state: previous.state });
   } finally {
     delete states[windowId];
     await save(states);
   }
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === 'ytg-clear-diagnostics' || message?.type === 'ytg-clear-inline-diagnostics') {
+    // Settings UI can clear from the extension page or the top-level isolated
+    // YouTube script; no MAIN message is forwarded as a clear request.
+    const inline = message.type === 'ytg-clear-inline-diagnostics' && sender.frameId === 0 && sender.tab?.active && sender.url?.startsWith('https://www.youtube.com/');
+    const options = message.type === 'ytg-clear-diagnostics' && sender.url === chrome.runtime.getURL('options.html') && !sender.tab?.url?.startsWith('https://');
+    if (sender.id !== chrome.runtime.id || (!inline && !options)) return;
+    diagnosticQueue = diagnosticQueue.catch(() => {}).then(() => chrome.storage.local.remove(globalThis.YTGamepadDiagnosticStore.key));
+    diagnosticQueue.then(() => reply({ ok: true }), () => reply({ ok: false }));
+    return true;
+  }
   if (message?.type === 'ytg-diagnostic') {
     if (sender.frameId !== 0 || !sender.tab || !sender.url?.startsWith('https://www.youtube.com/')) return;
     const now = Date.now(), id = sender.tab.id;
@@ -50,12 +60,24 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     chrome.runtime.openOptionsPage().then(() => reply({ ok: true }), error => reply({ ok: false, error: error.message }));
     return true;
   }
-  if (message?.type !== 'ytg-controller-connection' || typeof message.connected !== 'boolean') return;
+  const escape = message?.type === 'ytg-exit-fullscreen';
+  if (!escape && (message?.type !== 'ytg-controller-connection' || typeof message.connected !== 'boolean')) return;
   if (sender.frameId !== 0 || !sender.tab || !sender.url?.startsWith('https://www.youtube.com/')) return;
   const { windowId, id: tabId } = sender.tab;
   if (!Number.isInteger(windowId) || !Number.isInteger(tabId)) return;
   enqueue(async () => {
     const states = await records();
+    if (escape) {
+      if (!sender.tab.active) return { exited: false };
+      const current = await chrome.windows.get(windowId);
+      if (current.state !== 'fullscreen') return { exited: false };
+      const previous = states[windowId];
+      await chrome.windows.update(windowId, { state: previous?.state || 'normal' });
+      // Keep a dismissal until disconnect so refresh/focus cannot reenter.
+      states[windowId] = { state: previous?.state || 'normal', tabId, dismissed: true };
+      await save(states);
+      return { exited: true };
+    }
     const settings = await chrome.storage.local.get({ enabled: true, theater: true, autoFullscreen: null });
     if (!settings.enabled || !(settings.autoFullscreen ?? settings.theater)) { await restore(windowId, states); return; }
     if (!message.connected) {
@@ -67,7 +89,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     const current = await chrome.windows.get(windowId);
     if (states[windowId]) {
       // A reload or B return must not replace the original window state.
-      if (current.state !== 'fullscreen') { delete states[windowId]; await save(states); }
+      if (current.state !== 'fullscreen') { states[windowId].dismissed = true; await save(states); }
       return;
     }
     // Fullscreen already enabled by the user stays under their control.
@@ -76,7 +98,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     await save(states);
     try { await chrome.windows.update(windowId, { state: 'fullscreen' }); }
     catch (error) { delete states[windowId]; await save(states); throw error; }
-  }).then(applied => reply({ ok: true, retry: applied === false }), error => reply({ ok: false, error: error.message }));
+  }).then(applied => reply({ ok: true, retry: applied === false, ...(escape ? applied : {}) }), error => reply({ ok: false, error: error.message }));
   return true;
 });
 chrome.storage.onChanged.addListener((changes, area) => {

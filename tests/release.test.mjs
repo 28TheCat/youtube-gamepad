@@ -16,11 +16,14 @@ function fixture(t) {
     rmSync(root + '.inventory.json', { force: true });
   });
   const manifest = { manifest_version: 3, version: '0.2.0', background: { service_worker: 'background.js' },
-    action: { default_popup: 'popup.html' }, content_scripts: [{ js: ['runtime.js', 'gamepad.js'], css: ['browse.css'] }] };
+    action: { default_popup: 'popup.html' }, content_scripts: [{ js: ['actions.js', 'bindings.js', 'runtime.js', 'ui/styles.js', 'controller-style.js', 'gamepad.js'], css: ['browse.css'] }] };
   function write(file, content = '') { const path = resolve(root, file); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); }
   write('manifest.json', JSON.stringify(manifest)); write('popup.html', '<link href="popup.css"><script src="popup.js"></script>');
-  for (const file of ['runtime.js', 'gamepad.js', 'background.js', 'popup.js', 'popup.css', 'browse.css',
-    'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt']) write(file);
+  for (const file of ['actions.js', 'bindings.js', 'runtime.js', 'ui/styles.js', 'controller-style.js', 'gamepad.js', 'background.js', 'popup.js', 'popup.css', 'browse.css',
+    'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt', 'licenses/kenney-input-prompts-LICENSE.txt']) write(file);
+  const controllerAssets = JSON.parse(readFileSync(new URL('../assets/controller/kenney.json', import.meta.url), 'utf8'));
+  write('assets/controller/kenney.json', JSON.stringify(controllerAssets));
+  for (const file of Object.keys(controllerAssets.files)) write(file, readFileSync(new URL('../' + file, import.meta.url)));
   const { files } = releaseFiles(root);
   const inventory = Object.fromEntries(files.map(file => [file, createHash('sha256').update(readFileSync(resolve(root, file))).digest('hex')]));
   writeFileSync(root + '.inventory.json', JSON.stringify({ version: manifest.version, files: inventory }));
