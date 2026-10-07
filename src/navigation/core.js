@@ -16,6 +16,21 @@
     return list.find(el => el === contentReturn.el || (config.getSection?.(el) === 'content' && config.getKey?.(el) === contentReturn.key));
   }
   const scopeLayers = [];
+  const scopeViews = new Map();
+  function syncView(root) {
+    const key = config.getOverlayView?.(root);
+    if (!key) return;
+    const views = scopeViews.get(root) || [];
+    if (views.at(-1)?.key === key) return;
+    const parent = views.findIndex(view => view.key === key);
+    let saved;
+    if (parent >= 0) { saved = views[parent]; views.splice(parent + 1); }
+    else views.push({ key });
+    scopeViews.set(root, views);
+    const list = candidates(root);
+    const target = saved && (list.find(el => config.getKey?.(el) === saved.itemKey) || list[saved.index]);
+    if (!config.getPriorityLayer?.()) select(target || list[0], false);
+  }
   // DOM reads live only for one synchronous action; no stale cross-frame cache.
   let reads = null;
   function withReads(fn) {
@@ -77,21 +92,23 @@
   }
   function remember() {
     if (!current || !current.isConnected || activeScope !== document || restoring || navigating || route !== location.pathname + location.search) return;
-    memories.set(route, { key: config.getKey?.(current), section: config.getSection?.(current), x: scrollX, y: scrollY,
-      keys: candidates().filter(el => config.getSection?.(el) === config.getSection?.(current)).map(el => config.getKey?.(el)),
+    const region = candidates().filter(el => config.getSection?.(el) === config.getSection?.(current));
+    const peers = region.filter(el => config.getKey?.(el) === config.getKey?.(current));
+    memories.set(route, { key: config.getKey?.(current), occurrence: peers.indexOf(current), section: config.getSection?.(current), x: scrollX, y: scrollY,
+      keys: region.map(el => config.getKey?.(el)),
       browse: config.captureBrowseState?.() });
     if (memories.size > 30) memories.delete(memories.keys().next().value);
   }
   function initial(list) {
     const saved = memories.get(route);
-    return (saved?.key && list.find(el => config.getKey?.(el) === saved.key && config.getSection?.(el) === saved.section))
+    return (saved?.key && list.filter(el => config.getKey?.(el) === saved.key && config.getSection?.(el) === saved.section)[saved.occurrence || 0])
       || list.find(el => (config.getSection?.(el) === config.defaultSection) && inViewport(el))
       || list.find(inViewport) || list[0];
   }
   function inViewport(el) { const r = rect(el); return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth; }
   function syncScope() {
     const next = scope();
-    if (next === activeScope) return;
+    if (next === activeScope) { if (next !== document) syncView(next); return; }
     const previous = activeScope;
     endAdjustment();
     // Update the underlying surface before restoring focus into it.
@@ -102,7 +119,7 @@
       activeScope = next;
       const closing = scopeLayers.splice(parent + 1).reverse();
       // Restore once, after the entire closed branch has been removed.
-      closing.forEach((layer, index) => focusManager?.close(layer, index === closing.length - 1));
+      closing.forEach((layer, index) => { scopeViews.delete(layer); focusManager?.close(layer, index === closing.length - 1); });
     } else {
       const owner = previous === document ? (config.getFocusOwner?.() || 'core') : 'core';
       focusManager?.open(next, owner);
@@ -110,6 +127,7 @@
       activeScope = next;
       if (!config.getPriorityLayer?.()) select(candidates(next)[0], false);
     }
+    if (next !== document) syncView(next);
   }
   function recover(alignGamepad = false) {
     if (!reads) return withReads(() => recover(alignGamepad));
@@ -128,10 +146,12 @@
       const browseReady = ready && (config.restoreBrowseState?.(saved?.browse, browseRestore) !== false);
       if (browseReady || (ready && expired)) {
         const list = candidates().filter(el => config.getSection?.(el) === saved?.section);
-        let found = saved?.key && list.find(el => config.getKey?.(el) === saved.key);
+        const matches = list.filter(el => config.getKey?.(el) === saved?.key);
+        let found = saved?.key && matches[saved.occurrence || 0];
         window.scrollTo({ left: saved.x, top: saved.y, behavior: 'instant' });
         reads.rects = new WeakMap();
         if (!found && expired) {
+          found = matches[0];
           const keys = saved.keys || [], position = keys.indexOf(saved.key);
           for (let distance = 1; !found && position >= 0 && distance < keys.length; distance++) {
             for (const key of [keys[position + distance], keys[position - distance]]) {
@@ -206,6 +226,8 @@
     const scrolled = scroll && el ? alignSelection(el) : false;
     (config.getContainer?.(current) || current)?.classList?.remove('ytg-selected');
     current = el || null;
+    const view = scopeViews.get(activeScope)?.at(-1);
+    if (view && current) { view.itemKey = config.getKey?.(current); view.index = candidates(activeScope).indexOf(current); }
     if (rowFocus && current && activeScope === document && config.sections?.[config.getSection?.(current)]?.retainRowFocus) {
       const items = measure(candidates()), item = items.find(entry => entry.el === current);
       if (item) rowFocus.remember(item, items, keepColumn);
@@ -342,7 +364,8 @@
       const list = candidates(activeScope);
       const el = list.includes(document.activeElement) ? document.activeElement : current;
       if (!el || !list.includes(el)) return null;
-      return { region: activeScope === document ? config.getSection?.(el) || 'content' : 'overlay',
+      return { el, pageScroll: activeScope === document ? { x: scrollX, y: scrollY } : null,
+        region: activeScope === document ? config.getSection?.(el) || 'content' : 'overlay',
         itemKey: config.getKey?.(el) || el, index: list.indexOf(el), scope: activeScope };
     },
     items(region, target) {
@@ -351,7 +374,13 @@
         .map(el => ({ region, itemKey: config.getKey?.(el) || el, el }));
     },
     fallback() { return { el: initial(candidates(activeScope)) }; },
-    apply(target) { select(target?.el, false); }
+    apply(target, saved) {
+      if (saved?.pageScroll && activeScope === document) {
+        window.scrollTo({ left: saved.pageScroll.x, top: saved.pageScroll.y, behavior: 'instant' });
+        if (reads) reads.rects = new WeakMap();
+      }
+      select(target?.el, false);
+    }
   });
   if (unregisterFocus) lifecycle.cleanup(unregisterFocus);
   lifecycle.listen(window, 'yt-gamepad-action', e => { if (typeof e.detail?.action === 'string') act(e.detail.action); });
@@ -367,6 +396,7 @@
     (config.getContainer?.(current) || current)?.classList?.remove('ytg-selected');
     endAdjustment();
     route = next; current = null; contentReturn = null; activeScope = document;
+    scopeViews.clear();
     rowFocus?.reset();
     scopeLayers.splice(0).forEach(layer => focusManager?.close(layer, false));
     if (sidebarKey && !config.rememberRegionReturn?.()) current = candidates().find(el => config.getSection?.(el) === 'sidebar' && config.getKey?.(el) === sidebarKey) || null;
@@ -420,7 +450,7 @@
     endAdjustment();
     enabled = false; (config.getContainer?.(current) || current)?.classList?.remove('ytg-selected');
     scopeLayers.splice(0).forEach(layer => focusManager?.close(layer, false));
-    current = null; memories.clear(); contentReturn = null; host.remove?.();
+    current = null; memories.clear(); scopeViews.clear(); contentReturn = null; host.remove?.();
   });
   return published;
   } };

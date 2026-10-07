@@ -179,6 +179,21 @@ test('native settings B returns from a submenu, then closes settings', () => {
   assert.equal(s.location.assigned, undefined);
 });
 
+test('settings page identity uses visible labels and survives value changes', () => {
+  const s = setup();
+  const label = textContent => ({ textContent, getBoundingClientRect: () => ({ width: 100, height: 30 }) });
+  const speed = label('Playback speed'), quality = label('Quality');
+  let labels = [speed, quality], value = 'Auto';
+  const menu = { matches: () => true, querySelectorAll: () => labels };
+  const item = { closest: () => menu, querySelector: () => quality, getAttribute: () => value };
+  const main = s.adapter.getOverlayView(menu);
+  assert.equal(s.adapter.getKey(item), 'Quality');
+  value = '1080p'; assert.equal(s.adapter.getOverlayView(menu), main);
+  labels = [label('Auto'), label('1080p')];
+  assert.notEqual(s.adapter.getOverlayView(menu), main);
+  assert.equal(s.adapter.getOverlayView({ matches: () => false }), null);
+});
+
 test('B recognizes the current YouTube settings header back button', () => {
   const s = setup(); let clicked = false;
   const scope = { matches: () => true, querySelector(selector) {

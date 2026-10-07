@@ -27,8 +27,10 @@
     const adapter = owners.get(owner);
     const target = adapter?.capture();
     if (!target) return null;
-    const keys = adapter.items(target.region, target).map(item => item.itemKey);
-    return { ...target, owner, routeKey: routeKey(), keys };
+    const items = adapter.items(target.region, target), keys = items.map(item => item.itemKey);
+    const matches = items.filter(item => item.itemKey === target.itemKey);
+    const occurrence = matches.findIndex(item => target.el ? item.el === target.el : item.index === target.index);
+    return { ...target, owner, routeKey: routeKey(), keys, occurrence: Math.max(0, occurrence) };
   }
   function restore(target) {
     let adapter = target?.routeKey === routeKey() ? owners.get(target.owner) : null;
@@ -40,7 +42,8 @@
     let chosen;
     if (target) {
       const items = adapter.items(target.region, target);
-      chosen = items.find(item => item.itemKey === target.itemKey);
+      const matches = items.filter(item => item.itemKey === target.itemKey);
+      chosen = (target.el && matches.find(item => item.el === target.el)) || matches[target.occurrence || 0] || matches[0];
       if (!chosen) {
         const keys = target.keys || [], position = keys.indexOf(target.itemKey);
         for (let distance = 1; !chosen && position >= 0 && distance < keys.length; distance++) {
@@ -52,7 +55,7 @@
         chosen ||= items[Math.max(0, Math.min(target.index || 0, items.length - 1))];
       }
     }
-    adapter.apply(chosen || adapter.fallback(target));
+    adapter.apply(chosen || adapter.fallback(target), target);
   }
   window.YTGamepadFocus = {
     register(owner, adapter) {

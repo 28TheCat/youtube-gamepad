@@ -278,6 +278,55 @@ test('a removed return target falls back to its original surviving neighbor afte
   assert.equal(s.window.YTGamepad.current, neighbor);
   assert.equal(s.window.YTGamepad.restoring, false);
 });
+test('return restores the second occurrence of a repeated video after cards are rebuilt', () => {
+  const s = setup(), first = s.make('same-video'), selected = s.make('same-video');
+  s.nodes.push(first, selected); s.context.scrollY = 650;
+  s.window.YTGamepad.focus(selected); s.events['yt-navigate-start']();
+  s.location.pathname = '/watch'; s.nodes.length = 0; s.events['yt-navigate-finish']();
+  s.location.pathname = '/'; s.context.scrollY = 0; s.events['yt-navigate-finish']();
+  s.nodes.push(s.make('same-video')); s.refresh();
+  assert.equal(s.window.YTGamepad.restoring, true, 'wait for the original occurrence to load');
+  const returned = s.make('same-video'); s.nodes.push(returned); s.refresh();
+  assert.equal(s.window.YTGamepad.current, returned); assert.equal(s.context.scrollY, 650);
+});
+
+test('closing a dialog restores the original duplicate card and page scroll', () => {
+  const s = setup(), first = s.make('same-video'), selected = s.make('same-video');
+  s.nodes.push(first, selected); s.context.scrollY = 650; s.window.YTGamepad.focus(selected);
+  s.open([s.make('close')]); s.refresh(); s.context.scrollY = 0;
+  s.show(null); s.refresh();
+  assert.equal(s.window.YTGamepad.current, selected); assert.equal(s.context.scrollY, 650);
+});
+
+test('settings pages in a reused container return to their original parent items', () => {
+  const s = setup(), card = s.make('video'); s.nodes.push(card);
+  s.window.YTGamepad.registerSite({ getKey: el => el?.key, getSection: () => 'content',
+    getOverlayView: root => root.view });
+  s.window.YTGamepad.focus(card);
+  let items = [s.make('speed'), s.make('quality')];
+  const menu = s.open(items); menu.view = 'main';
+  menu.querySelectorAll = () => items; menu.contains = el => items.includes(el);
+  s.refresh(); s.window.YTGamepad.focus(items[1]);
+  items = [s.make('back'), s.make('advanced')]; menu.view = 'quality'; s.refresh();
+  s.window.YTGamepad.focus(items[1]);
+  items = [s.make('back'), s.make('1080p')]; menu.view = 'advanced'; s.refresh();
+  items = [s.make('back'), s.make('advanced')]; menu.view = 'quality'; s.refresh();
+  assert.equal(s.window.YTGamepad.current, items[1]);
+  items = [s.make('speed'), s.make('quality')]; menu.view = 'main'; s.refresh();
+  assert.equal(s.window.YTGamepad.current, items[1]);
+  s.show(null); s.refresh(); assert.equal(s.window.YTGamepad.current, card);
+});
+
+test('manual navigation cancels a delayed card restoration', () => {
+  const s = setup(), original = s.make('original'); s.nodes.push(original);
+  s.window.YTGamepad.focus(original); s.events['yt-navigate-start']();
+  s.location.pathname = '/watch'; s.nodes.length = 0; s.events['yt-navigate-finish']();
+  s.location.pathname = '/'; s.events['yt-navigate-finish']();
+  const other = s.make('other'); s.nodes.push(other); s.window.YTGamepad.navigate('right');
+  s.nodes.push(s.make('original')); s.refresh();
+  assert.equal(s.window.YTGamepad.current, other); assert.equal(s.window.YTGamepad.restoring, false);
+});
+
 test('YouTube adapter deduplicates targets inside one video card', () => {
   let adapter;
   const adapterWindow = {};

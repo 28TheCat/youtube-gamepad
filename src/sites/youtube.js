@@ -596,7 +596,19 @@
         for (const bar of bars) if (bar.top <= top) top = Math.max(top, bar.bottom + 16);
         return { top: Math.min(top, innerHeight - 32), bottom: innerHeight - 16 };
       },
-      getKey(el) { return el?.getAttribute('href') || el?.id || el?.getAttribute('aria-label'); },
+      getKey(el) {
+        const label = el?.closest?.('.ytp-settings-menu') && el.querySelector?.('.ytp-menuitem-label');
+        return label?.textContent?.trim() || el?.getAttribute('href') || el?.id || el?.getAttribute('aria-label');
+      },
+      getOverlayView(scope) {
+        if (!scope.matches?.('.ytp-settings-menu')) return null;
+        const labels = Array.from(scope.querySelectorAll('.ytp-menuitem-label')).filter(el => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        }).map(el => el.textContent.trim());
+        // Values (such as the selected quality) can change without changing pages.
+        return labels.length ? JSON.stringify(labels) : null;
+      },
       getRow(el) { return el?.closest?.('ytd-rich-grid-row,ytd-horizontal-list-renderer,yt-horizontal-list-renderer') || null; },
       filterCandidates(list) {
         const seen = new Set();

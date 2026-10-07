@@ -140,13 +140,14 @@ export interface ControllerStyle {
 }
 export interface FocusTarget {
   region: string; itemKey?: string | Element; index?: number; scope?: Document | Element; el?: HTMLElement;
+  pageScroll?: { x: number; y: number } | null;
 }
-export interface FocusRecord extends FocusTarget { owner: string; routeKey: string; keys: readonly (string | Element)[] }
+export interface FocusRecord extends FocusTarget { owner: string; routeKey: string; keys: readonly (string | Element)[]; occurrence?: number }
 export interface FocusOwner {
   active(): boolean; capture(): FocusTarget | null | undefined;
   items(region: string, target: FocusTarget): readonly FocusTarget[];
   fallback(target?: FocusTarget | null): FocusTarget;
-  apply(target: FocusTarget): void;
+  apply(target: FocusTarget, saved?: FocusRecord | null): void;
 }
 export interface FocusManager {
   readonly suspended: boolean; register(owner: string, adapter: FocusOwner): Dispose;
