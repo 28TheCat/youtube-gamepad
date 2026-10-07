@@ -1,35 +1,35 @@
 // Runtime prerequisites checked against the manifest and used by VM fixtures.
 // Site and view instances are connected by coordinator; they do not import each other.
 export const dependencies = {
-  'actions.js': [],
-  'bindings.js': ['actions.js'],
-  'runtime.js': [],
-  'diagnostics.js': ['runtime.js'],
-  'diagnostics-store.js': [],
-  'app/route-state.js': [],
-  'state-machine.js': ['app/route-state.js'],
-  'app/route-controller.js': ['runtime.js', 'state-machine.js'],
-  'controller-style.js': ['runtime.js', 'ui/styles.js', 'bindings.js'],
-  'gamepad.js': ['runtime.js', 'controller-style.js'],
-  'navigation.js': [],
-  'focus.js': [],
-  'core.js': ['runtime.js', 'controller-style.js', 'state-machine.js', 'navigation.js', 'focus.js'],
-  'keyboard.js': [],
-  'pinyin-data.js': [],
-  'pinyin.js': ['pinyin-data.js'],
-  'ui/styles.js': [],
-  'search.js': ['controller-style.js', 'keyboard.js', 'pinyin.js', 'state-machine.js'],
-  'menu.js': ['runtime.js', 'ui/styles.js', 'search.js', 'focus.js', 'state-machine.js', 'controller-style.js'],
-  'ui/watch-view.js': ['controller-style.js', 'ui/styles.js'],
-  'ui/watch-panels.js': ['controller-style.js'],
-  'watch.js': ['runtime.js', 'state-machine.js', 'ui/watch-view.js', 'ui/watch-panels.js', 'focus.js'],
-  'browse.js': ['runtime.js'],
-  'sites/youtube.js': ['actions.js', 'runtime.js', 'focus.js'],
-  'coordinator.js': ['bindings.js', 'diagnostics.js', 'runtime.js', 'app/route-controller.js', 'core.js', 'sites/youtube.js'],
-  'content.js': ['bindings.js'],
-  'inline-settings.js': ['bindings.js', 'diagnostics-store.js'],
-  'background.js': ['diagnostics-store.js'],
-  'popup.js': []
+  'src/shared/actions.js': [],
+  'src/input/bindings.js': ['src/shared/actions.js'],
+  'src/shared/runtime.js': [],
+  'src/diagnostics/diagnostics.js': ['src/shared/runtime.js'],
+  'src/diagnostics/diagnostics-store.js': [],
+  'src/app/route-state.js': [],
+  'src/app/state-machine.js': ['src/app/route-state.js'],
+  'src/app/route-controller.js': ['src/shared/runtime.js', 'src/app/state-machine.js'],
+  'src/input/controller-style.js': ['src/shared/runtime.js', 'src/ui/styles.js', 'src/input/bindings.js'],
+  'src/input/gamepad.js': ['src/shared/runtime.js', 'src/input/controller-style.js'],
+  'src/navigation/navigation.js': [],
+  'src/navigation/focus.js': [],
+  'src/navigation/core.js': ['src/shared/runtime.js', 'src/input/controller-style.js', 'src/app/state-machine.js', 'src/navigation/navigation.js', 'src/navigation/focus.js'],
+  'src/search/keyboard.js': [],
+  'src/search/pinyin-data.js': [],
+  'src/search/pinyin.js': ['src/search/pinyin-data.js'],
+  'src/ui/styles.js': [],
+  'src/search/search.js': ['src/input/controller-style.js', 'src/search/keyboard.js', 'src/search/pinyin.js', 'src/app/state-machine.js'],
+  'src/ui/menu.js': ['src/shared/runtime.js', 'src/ui/styles.js', 'src/search/search.js', 'src/navigation/focus.js', 'src/app/state-machine.js', 'src/input/controller-style.js'],
+  'src/ui/watch-view.js': ['src/input/controller-style.js', 'src/ui/styles.js'],
+  'src/ui/watch-panels.js': ['src/input/controller-style.js'],
+  'src/playback/watch.js': ['src/shared/runtime.js', 'src/app/state-machine.js', 'src/ui/watch-view.js', 'src/ui/watch-panels.js', 'src/navigation/focus.js'],
+  'src/app/browse.js': ['src/shared/runtime.js'],
+  'src/sites/youtube.js': ['src/shared/actions.js', 'src/shared/runtime.js', 'src/navigation/focus.js'],
+  'src/app/coordinator.js': ['src/input/bindings.js', 'src/diagnostics/diagnostics.js', 'src/shared/runtime.js', 'src/app/route-controller.js', 'src/navigation/core.js', 'src/sites/youtube.js'],
+  'src/app/content.js': ['src/input/bindings.js'],
+  'src/settings/inline-settings.js': ['src/input/bindings.js', 'src/diagnostics/diagnostics-store.js'],
+  'src/background/background.js': ['src/diagnostics/diagnostics-store.js'],
+  'src/popup/popup.js': []
 };
 export function assertLoadOrder(files) {
   const loaded = new Set();
@@ -39,9 +39,9 @@ export function assertLoadOrder(files) {
     for (const dependency of dependencies[file]) {
       if (!loaded.has(dependency)) throw new Error(`${file} requires ${dependency} before it`);
     }
-    if (file === 'coordinator.js') {
+    if (file === 'src/app/coordinator.js') {
       for (const module of compositionModules) {
-        if (!loaded.has(module)) throw new Error(`coordinator.js requires ${module} before assembly`);
+        if (!loaded.has(module)) throw new Error(`src/app/coordinator.js requires ${module} before assembly`);
       }
     }
     loaded.add(file);
@@ -50,5 +50,5 @@ export function assertLoadOrder(files) {
 
 // Full extension assembly requires these definitions; small VM policy tests can
 // provide module doubles instead of rendering every feature.
-export const compositionModules = ['focus.js', 'controller-style.js', 'gamepad.js',
-  'menu.js', 'watch.js', 'browse.js', 'ui/styles.js', 'keyboard.js', 'pinyin.js'];
+export const compositionModules = ['src/navigation/focus.js', 'src/input/controller-style.js', 'src/input/gamepad.js',
+  'src/ui/menu.js', 'src/playback/watch.js', 'src/app/browse.js', 'src/ui/styles.js', 'src/search/keyboard.js', 'src/search/pinyin.js'];

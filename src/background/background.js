@@ -1,5 +1,5 @@
 // Window fullscreen belongs to the extension, not to a document or a video.
-if (!globalThis.YTGamepadDiagnosticStore) importScripts('diagnostics-store.js');
+if (!globalThis.YTGamepadDiagnosticStore) importScripts('../diagnostics/diagnostics-store.js');
 let diagnosticQueue = Promise.resolve();
 const diagnosticRates = new Map();
 const stateKey = 'ytg-fullscreen-windows';
@@ -30,7 +30,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     // Settings UI can clear from the extension page or the top-level isolated
     // YouTube script; no MAIN message is forwarded as a clear request.
     const inline = message.type === 'ytg-clear-inline-diagnostics' && sender.frameId === 0 && sender.tab?.active && sender.url?.startsWith('https://www.youtube.com/');
-    const options = message.type === 'ytg-clear-diagnostics' && sender.url === chrome.runtime.getURL('options.html') && !sender.tab?.url?.startsWith('https://');
+    const options = message.type === 'ytg-clear-diagnostics' && sender.url === chrome.runtime.getURL('src/settings/options.html') && !sender.tab?.url?.startsWith('https://');
     if (sender.id !== chrome.runtime.id || (!inline && !options)) return;
     diagnosticQueue = diagnosticQueue.catch(() => {}).then(() => chrome.storage.local.remove(globalThis.YTGamepadDiagnosticStore.key));
     diagnosticQueue.then(() => reply({ ok: true }), () => reply({ ok: false }));

@@ -10,13 +10,13 @@
     "storage"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background/background.js"
   },
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "src/popup/popup.html"
   },
   "options_ui": {
-    "page": "options.html",
+    "page": "src/settings/options.html",
     "open_in_tab": true
   },
   "content_scripts": [
@@ -25,35 +25,35 @@
         "https://www.youtube.com/*"
       ],
       "css": [
-        "ui/theme.css",
-        "browse.css",
-        "theater.css"
+        "src/ui/theme.css",
+        "src/app/browse.css",
+        "src/app/theater.css"
       ],
       "js": [
-        "actions.js",
-        "bindings.js",
-        "runtime.js",
-        "diagnostics.js",
-        "app/route-state.js",
-        "state-machine.js",
-        "ui/styles.js",
-        "controller-style.js",
-        "gamepad.js",
-        "navigation.js",
-        "focus.js",
-        "core.js",
-        "keyboard.js",
-        "pinyin-data.js",
-        "pinyin.js",
-        "search.js",
-        "menu.js",
-        "ui/watch-view.js",
-        "ui/watch-panels.js",
-        "watch.js",
-        "browse.js",
-        "sites/youtube.js",
-        "app/route-controller.js",
-        "coordinator.js"
+        "src/shared/actions.js",
+        "src/input/bindings.js",
+        "src/shared/runtime.js",
+        "src/diagnostics/diagnostics.js",
+        "src/app/route-state.js",
+        "src/app/state-machine.js",
+        "src/ui/styles.js",
+        "src/input/controller-style.js",
+        "src/input/gamepad.js",
+        "src/navigation/navigation.js",
+        "src/navigation/focus.js",
+        "src/navigation/core.js",
+        "src/search/keyboard.js",
+        "src/search/pinyin-data.js",
+        "src/search/pinyin.js",
+        "src/search/search.js",
+        "src/ui/menu.js",
+        "src/ui/watch-view.js",
+        "src/ui/watch-panels.js",
+        "src/playback/watch.js",
+        "src/app/browse.js",
+        "src/sites/youtube.js",
+        "src/app/route-controller.js",
+        "src/app/coordinator.js"
       ],
       "world": "MAIN",
       "run_at": "document_idle"
@@ -63,11 +63,11 @@
         "https://www.youtube.com/*"
       ],
       "js": [
-        "actions.js",
-        "bindings.js",
-        "diagnostics-store.js",
-        "inline-settings.js",
-        "content.js"
+        "src/shared/actions.js",
+        "src/input/bindings.js",
+        "src/diagnostics/diagnostics-store.js",
+        "src/settings/inline-settings.js",
+        "src/app/content.js"
       ],
       "run_at": "document_idle"
     }

@@ -1,7 +1,7 @@
 // A gamepad-first watch surface. YouTube retains ownership of media and navigation.
 (() => {
   window.YTGamepadWatchModule = {
-    /** @param {import('./types/ports.js').WatchDependencies} dependencies */
+    /** @param {import('../../types/ports.js').WatchDependencies} dependencies */
     create({ runtime, interaction, controllerStyle, focusManager, createView, createPanels }) {
   const lifecycle = runtime.scope('watch');
   // The coordinator injects data snapshots and commands; this view never reads
@@ -360,7 +360,7 @@
     return handle(action) ? 'handled' : watchState().panel ? 'blocked' : 'pass';
   }
   window.YTGamepadWatch = {
-    /** @param {import('./types/ports.js').WatchPort} port */
+    /** @param {import('../../types/ports.js').WatchPort} port */
     connect(port) { controller = port; }, sync, show, handle, handleInput, mediaFeedback, refresh: readPage,
     get ownsFocus() { return enabled() && !host.hidden && mode() === 'controls'; },
     get state() { return { mode: mode(), row: watchState().row, index: watchState().index, adjusting: watchState().adjusting, panel: watchState().panel, recommendations: cards.length }; } };

@@ -2,7 +2,7 @@
 (() => {
   if (window.YTGamepadRouteController) return;
   window.YTGamepadRouteController = {
-    /** @param {import('../types/ports.js').RoutePort} port */
+    /** @param {import('../../types/ports.js').RoutePort} port */
     create(port) {
     const lifecycle = port.runtime.scope('route');
     const send = event => port.interaction.dispatch(event);

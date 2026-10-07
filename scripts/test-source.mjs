@@ -15,20 +15,20 @@ export function moduleSource(file) {
 }
 
 // Small VM scenarios assemble only their requested modules. Production assembly
-// lives in coordinator.js; the scripts themselves only define these factories.
+// lives in src/app/coordinator.js; the scripts themselves only define these factories.
 const shared = `runtime: window.YTGamepadRuntime, interaction: window.YTGamepadInteraction,
   controllerStyle: window.YTGamepadControllerStyle, focusManager: window.YTGamepadFocus`;
 const fixtureAssembly = {
-  'core.js': `if (!window.YTGamepad) window.YTGamepadCoreModule.create({ ${shared}, navigation: window.YTGamepadNavigation });`,
-  'sites/youtube.js': `window.YTGamepadSiteModule.create({ ${shared}, diagnostics: window.YTGamepadDiagnostics });`,
-  'gamepad.js': `if (!window.YTGamepadInput) window.YTGamepadInputModule.create({ ${shared},
+  'src/navigation/core.js': `if (!window.YTGamepad) window.YTGamepadCoreModule.create({ ${shared}, navigation: window.YTGamepadNavigation });`,
+  'src/sites/youtube.js': `window.YTGamepadSiteModule.create({ ${shared}, diagnostics: window.YTGamepadDiagnostics });`,
+  'src/input/gamepad.js': `if (!window.YTGamepadInput) window.YTGamepadInputModule.create({ ${shared},
     isSearchOpen: () => !!(window.YTGamepadMenu?.opened && window.YTGamepadMenu.state.view === 'search') });`,
-  'menu.js': `window.YTGamepadMenuModule.create({ ${shared}, styles: window.YTGamepadStyles,
+  'src/ui/menu.js': `window.YTGamepadMenuModule.create({ ${shared}, styles: window.YTGamepadStyles,
     createSearch: port => window.YTGamepadSearch.create(Object.assign(port, { controllerStyle: window.YTGamepadControllerStyle,
       keyboard: window.YTGamepadKeyboard, pinyin: window.YTGamepadPinyin })) });`,
-  'watch.js': `if (!window.YTGamepadWatch) window.YTGamepadWatchModule.create({ ${shared},
+  'src/playback/watch.js': `if (!window.YTGamepadWatch) window.YTGamepadWatchModule.create({ ${shared},
     createView: port => window.YTGamepadWatchView.create({ ...port, styles: window.YTGamepadStyles }),
     createPanels: port => window.YTGamepadWatchPanels.create(port) });`,
-  'browse.js': `window.YTGamepadBrowseModule.create({ ${shared}, core: window.YTGamepad,
+  'src/app/browse.js': `window.YTGamepadBrowseModule.create({ ${shared}, core: window.YTGamepad,
     isMenuOpen: () => !!window.YTGamepadMenu?.opened });`
 };

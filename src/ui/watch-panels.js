@@ -2,7 +2,7 @@
 (() => {
   if (window.YTGamepadWatchPanels) return;
   window.YTGamepadWatchPanels = {
-    /** @param {import('../types/ports.js').WatchPanelsPort} port */
+    /** @param {import('../../types/ports.js').WatchPanelsPort} port */
     create(port) {
     const { make, dialog, sheet, panelTitle, description, close, surface, watchState, send, focus } = port;
     const { focusManager, controllerStyle } = port;

@@ -1,6 +1,6 @@
 (() => {
   window.YTGamepadCoreModule = {
-    /** @param {import('./types/ports.js').CoreDependencies} dependencies */
+    /** @param {import('../../types/ports.js').CoreDependencies} dependencies */
     create({ runtime, navigation, focusManager, interaction, controllerStyle }) {
   const lifecycle = runtime.scope('core');
   let config = {}, current = null, enabled = true, helpVisible = false, observer, navigating = false;

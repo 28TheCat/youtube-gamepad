@@ -1,5 +1,5 @@
 import { readFileSync, lstatSync } from 'node:fs';
-import { resolve, relative, isAbsolute, dirname } from 'node:path';
+import { resolve, relative, isAbsolute, dirname, posix } from 'node:path';
 import { assertLoadOrder } from './module-graph.mjs';
 export function safePath(root, file) {
   if (!file || file.includes('\\') || isAbsolute(file) || file.split('/').some(part => !part || part === '..' || part === '.')) {
@@ -25,7 +25,14 @@ export function releaseFiles(root) {
   const pages = [manifest.action.default_popup, manifest.options_ui?.page].filter(Boolean);
   const assets = pages.flatMap(page => {
     const html = readFileSync(safePath(root, page), 'utf8');
-    return [...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)].map(match => match[1]).filter(path => !path.startsWith('#'));
+    return [...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
+      .map(match => match[1]).filter(path => !path.startsWith('#'))
+      .map(path => {
+        if (path.includes('\\') || posix.isAbsolute(path) || /^[a-z][a-z\d+.-]*:/i.test(path)) {
+          throw new Error(`Unsafe release path: ${path}`);
+        }
+        return posix.normalize(posix.join(posix.dirname(page), path));
+      });
   });
   const controllerManifest = 'assets/controller/kenney.json';
   const controllerAssets = JSON.parse(readFileSync(safePath(root, controllerManifest), 'utf8'));

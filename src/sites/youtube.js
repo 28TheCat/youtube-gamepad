@@ -1,5 +1,5 @@
 (() => {
-  /** @param {import('../types/ports.js').SiteDependencies} dependencies */
+  /** @param {import('../../types/ports.js').SiteDependencies} dependencies */
   function create({ runtime, diagnostics, focusManager }) {
   const lifecycle = runtime.scope('site');
   const getVideo = () => document.querySelector('video.html5-main-video') || document.querySelector('video');
@@ -179,7 +179,7 @@
       findSave();
     });
   }
-  /** @returns {import('../types/ports.js').RouteSnapshot} */
+  /** @returns {import('../../types/ports.js').RouteSnapshot} */
   const readRoute = () => ({ key: location.pathname + location.search, isWatch: location.pathname === '/watch' });
   const watchFeatures = {};
   function diagnoseSite(operation, error) {
@@ -257,7 +257,7 @@
     return { isLive, canSeek: ranges.length > 0, start, end, ranges,
       atLiveEdge: isLive && ranges.length > 0 && video.currentTime >= end - 2 };
   }
-  /** @returns {import('../types/ports.js').PlaybackSnapshot} */
+  /** @returns {import('../../types/ports.js').PlaybackSnapshot} */
   function readPlayback() {
     const video = getVideo(), caption = optionalFeature('captions', () => document.querySelector('.ytp-subtitles-button'), () => null);
     return {
@@ -314,7 +314,7 @@
     }
     return { thumbnail: fallback, thumbnailFallback: fallback };
   }
-  /** @returns {import('../types/ports.js').WatchPageSnapshot} */
+  /** @returns {import('../../types/ports.js').WatchPageSnapshot} */
   function readWatchPage() {
     const route = readRoute(), id = new URLSearchParams(location.search).get('v');
     recommendationSources.clear(); channelSource = null;
@@ -403,7 +403,7 @@
     if (!channelSource || channelSource.isConnected === false) return false;
     beforeNavigate(); channelSource.click(); return true;
   }
-  /** @returns {readonly import('../types/ports.js').CommentSnapshot[]} */
+  /** @returns {readonly import('../../types/ports.js').CommentSnapshot[]} */
   function readComments() {
     commentSources.clear();
     return Array.from(document.querySelectorAll('ytd-comments ytd-comment-thread-renderer')).map((thread, index) => {

@@ -31,8 +31,8 @@ export function coreFixture(size = 1000) {
     requestAnimationFrame(fn) { frames.push(fn); return frames.length; },
     MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} }
   };
-  for (const file of ['navigation.js', 'core.js']) runInNewContext(moduleSource(file), context);
-  runInNewContext(moduleSource('sites/youtube.js'), { window });
+  for (const file of ['src/navigation/navigation.js', 'src/navigation/core.js']) runInNewContext(moduleSource(file), context);
+  runInNewContext(moduleSource('src/sites/youtube.js'), { window });
   window.YTGamepad.registerSite({ selectors: 'cards', getSection: () => 'content',
     sections: { content: { layout: 'grid' } }, getKey: el => String(nodes.indexOf(el)),
     ignoreMutation: window.YTGamepadSite.createNavigationConfig({}).ignoreMutation,
@@ -72,7 +72,7 @@ export function measure() {
   const samples = [];
   for (let i = 0; i < 7; i++) {
     const context = { window: {} }, start = performance.now();
-    for (const file of ['pinyin-data.js', 'pinyin.js']) runInNewContext(moduleSource(file), context);
+    for (const file of ['src/search/pinyin-data.js', 'src/search/pinyin.js']) runInNewContext(moduleSource(file), context);
     const loaded = performance.now(); context.window.YTGamepadPinyin.lookup('nihao');
     const first = performance.now();
     for (let j = 0; j < 200; j++) context.window.YTGamepadPinyin.lookup('zhong');

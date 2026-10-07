@@ -2,7 +2,7 @@
 (() => {
   if (window.YTGamepadSearch) return;
   window.YTGamepadSearch = {
-    /** @param {import('./types/ports.js').SearchPort} port */
+    /** @param {import('../../types/ports.js').SearchPort} port */
     create(port) {
     const { root, host, menuState, send, buttons, focus, feedback } = port;
     const { controllerStyle, pinyin, keyboard } = port;

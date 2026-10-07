@@ -12,10 +12,10 @@ for (const entry of manifest.content_scripts) {
   assertLoadOrder(entry.js);
   if (new Set(entry.css || []).size !== (entry.css || []).length) throw new Error('Duplicate manifest stylesheet.');
 }
-if (readFileSync(resolve(root, 'ui/styles.js'), 'utf8') !== styleSource()) {
+if (readFileSync(resolve(root, 'src/ui/styles.js'), 'utf8') !== styleSource()) {
   throw new Error('Shadow styles are stale. Run node scripts/build-styles.mjs.');
 }
-const scripts = [...manifest.content_scripts.flatMap(entry => entry.js), manifest.background.service_worker, 'popup.js', 'options.js', 'options-bindings.js', 'ui/theme-sync.js', 'ui/controller-sync.js'];
+const scripts = [...manifest.content_scripts.flatMap(entry => entry.js), manifest.background.service_worker, 'src/popup/popup.js', 'src/settings/options.js', 'src/settings/options-bindings.js', 'src/ui/theme-sync.js', 'src/ui/controller-sync.js'];
 for (const path of scripts) new Script(readFileSync(resolve(root, path), 'utf8'), { filename: path });
 for (const path of manifest.content_scripts.flatMap(entry => entry.css || [])) {
   if (!existsSync(resolve(root, path))) throw new Error(`Missing stylesheet: ${path}`);

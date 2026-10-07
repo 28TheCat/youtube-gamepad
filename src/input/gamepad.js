@@ -1,5 +1,5 @@
 (() => {
-  /** @param {import('./types/ports.js').InputDependencies} dependencies */
+  /** @param {import('../../types/ports.js').InputDependencies} dependencies */
   function create({ runtime, controllerStyle, isSearchOpen }) {
   const lifecycle = runtime.scope('input');
   const defaults = { enabled: true, deadzone: 0.35, repeatDelay: 350, repeatInterval: 140 };

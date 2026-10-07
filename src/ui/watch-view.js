@@ -2,7 +2,7 @@
 (() => {
   if (window.YTGamepadWatchView) return;
   window.YTGamepadWatchView = {
-    /** @param {import('../types/ports.js').WatchViewDependencies} dependencies */
+    /** @param {import('../../types/ports.js').WatchViewDependencies} dependencies */
     create({ activate, closePanel, controllerStyle, styles }) {
   const host = document.createElement('div');
   host.id = 'ytg-watch'; host.hidden = true; host.setAttribute('lang', 'en');

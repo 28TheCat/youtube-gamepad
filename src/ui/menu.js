@@ -1,6 +1,6 @@
 (() => {
   window.YTGamepadMenuModule = {
-    /** @param {import('./types/ports.js').MenuDependencies} dependencies */
+    /** @param {import('../../types/ports.js').MenuDependencies} dependencies */
     create({ runtime, interaction, controllerStyle, focusManager, styles, createSearch }) {
   const lifecycle = runtime.scope('menu');
   let controller;
@@ -153,7 +153,7 @@
     focus(); return 'handled';
   }
   window.YTGamepadMenu = {
-    /** @param {import('./types/ports.js').MenuPort} port */
+    /** @param {import('../../types/ports.js').MenuPort} port */
     connect(port) { controller = port; },
     get opened() { return menuState().opened; },
     get state() { return { ...menuState() }; },

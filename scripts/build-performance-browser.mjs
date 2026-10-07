@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 const dir = new URL('../output/performance/', import.meta.url);
 mkdirSync(dir, { recursive: true });
-const sources = ['actions.js', 'bindings.js', 'runtime.js', 'ui/styles.js', 'controller-style.js', 'navigation.js', 'core.js', 'sites/youtube.js', 'pinyin-data.js', 'pinyin.js']
+const sources = ['src/shared/actions.js', 'src/input/bindings.js', 'src/shared/runtime.js', 'src/ui/styles.js', 'src/input/controller-style.js', 'src/navigation/navigation.js', 'src/navigation/core.js', 'src/sites/youtube.js', 'src/search/pinyin-data.js', 'src/search/pinyin.js']
   .map(file => readFileSync(new URL('../' + file, import.meta.url), 'utf8').replace(/<\/script/gi, '<\\/script'));
 writeFileSync(new URL('fixture.html', dir), `<!doctype html><meta charset="utf-8"><title>Gamepad performance fixture</title>
 <style>body{margin:0}#cards{display:grid;grid-template-columns:repeat(5,180px);gap:20px;padding:20px}#cards button{height:80px}</style>

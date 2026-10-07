@@ -1,7 +1,7 @@
 // Repack existing CC-CEDICT data without changing entries or attribution.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-const path = new URL('../pinyin-data.js', import.meta.url);
+const path = new URL('../src/search/pinyin-data.js', import.meta.url);
 const source = readFileSync(path, 'utf8'), window = {};
 runInNewContext(source, { window });
 const dictionary = window.YTGamepadPinyinData;

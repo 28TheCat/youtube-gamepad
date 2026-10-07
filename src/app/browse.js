@@ -1,7 +1,7 @@
 // Preserve native navigation chrome; observe category changes for gamepad focus.
 (() => {
   window.YTGamepadBrowseModule = {
-    /** @param {import('./types/ports.js').BrowseDependencies} dependencies */
+    /** @param {import('../../types/ports.js').BrowseDependencies} dependencies */
     create({ runtime, core, isMenuOpen }) {
   const lifecycle = runtime.scope('browse');
   let categoryTimer, categoryObserver, categoryDeadline;
