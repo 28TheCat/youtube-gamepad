@@ -19,8 +19,9 @@ export function styleSource() {
       `[data-ytg-family="${family}"][data-ytg-first-key="${key}"]{--ytg-first-image:${image(path)}}\n[data-ytg-family="${family}"][data-ytg-second-key="${key}"]{--ytg-second-image:${image(path)}}`);
     return selectors;
   }).join('\n');
-  const controller = readFileSync(resolve(root, 'ui/controller.css'), 'utf8') + '\n' + rules;
-  const styles = Object.fromEntries(['menu', 'watch'].map(name => [name, readFileSync(resolve(root, `ui/${name}.css`), 'utf8') + '\n' + controller]));
+  const readCss = file => readFileSync(resolve(root, file), 'utf8').replace(/\r\n/g, '\n');
+  const controller = readCss('ui/controller.css') + '\n' + rules;
+  const styles = Object.fromEntries(['menu', 'watch'].map(name => [name, readCss(`ui/${name}.css`) + '\n' + controller]));
   styles.controller = controller;
   const layoutImage = readFileSync(resolve(root, 'assets/controller/layout.svg')).toString('base64');
   styles.menu += `\n#inline-settings .inline-controller-map{background-image:url("data:image/svg+xml;base64,${layoutImage}")}`;

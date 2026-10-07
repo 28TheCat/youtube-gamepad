@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" fill="none" stroke="#697582" stroke-width="2.5">
+  <path d="M103 88C106 51 173 30 202 43L219 53H381L398 43C427 30 494 51 497 88"/>
+  <path d="M110 82C142 61 177 54 201 65C226 77 374 77 399 65C423 54 458 61 490 82C526 102 549 213 566 304C579 376 550 389 510 384C491 382 469 328 439 301C426 287 407 280 384 280H216C193 280 174 287 161 301C131 328 109 382 90 384C50 389 21 376 34 304C51 213 74 102 110 82Z"/>
+  <path d="M191 63C215 83 225 116 259 120H341C375 116 385 83 409 63"/>
+  <circle cx="158" cy="146" r="43"/><circle cx="158" cy="146" r="33"/><circle cx="158" cy="146" r="23"/>
+  <circle cx="378" cy="230" r="43"/><circle cx="378" cy="230" r="33"/><circle cx="378" cy="230" r="23"/>
+  <circle cx="227" cy="234" r="47" stroke-width="1"/><path d="M216 198H238V223H262V245H238V270H216V245H192V223H216Z"/>
+  <circle cx="259" cy="146" r="13"/><circle cx="341" cy="146" r="13"/>
+  <path d="M251 144H263V152H251ZM255 140H267V148H255M335 141H347M335 146H347M335 151H347" stroke-width="1.5"/>
+  <circle cx="447" cy="109" r="20"/><circle cx="408" cy="148" r="20"/><circle cx="486" cy="148" r="20"/><circle cx="447" cy="187" r="20"/>
+  <g font-family="Arial,sans-serif" font-weight="bold" font-size="25" text-anchor="middle" stroke="none" fill="#697582"><text x="447" y="118">Y</text><text x="408" y="157">X</text><text x="486" y="157">B</text><text x="447" y="196">A</text></g>
+  <circle cx="300" cy="92" r="12" stroke-width="1.5"/><path d="M294 89L300 95L306 89M300 95V100" stroke-width="1.5"/>
+</svg>
