@@ -7,7 +7,7 @@ import { runInNewContext } from 'node:vm';
 function setup() {
   const window = {}, location = { pathname: '/watch', search: '?v=123' }, applied = [];
   let keys = ['a', 'b', 'c', 'd'];
-  runInNewContext(moduleSource('focus.js'), { window, location });
+  runInNewContext(moduleSource('src/navigation/focus.ts'), { window, location });
   const focus = window.YTGamepadFocus;
   focus.register('watch', {
     active: () => location.pathname === '/watch',

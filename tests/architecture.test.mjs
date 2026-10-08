@@ -54,7 +54,7 @@ function setup() {
   const context = { window, document, location, URL, URLSearchParams, history: { back() {}, go() {} },
     getComputedStyle: () => ({ visibility: 'visible', display: 'block', opacity: '1' }),
     MutationObserver: class { observe() {} disconnect() {} }, requestAnimationFrame() {}, setTimeout, clearTimeout };
-  for (const file of ['app/route-state.js', 'state-machine.js', 'core.js', 'sites/youtube.js', 'coordinator.js']) {
+  for (const file of ['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/navigation/core.ts', 'src/sites/youtube.ts', 'src/app/coordinator.ts']) {
     runInNewContext(moduleSource(file), context);
   }
   return { window, watch, menu, commands, video, get watchPort() { return watchPort; }, get menuPort() { return menuPort; },

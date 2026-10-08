@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 const window = {};
-runInNewContext(moduleSource('navigation.js'), { window });
+runInNewContext(moduleSource('src/navigation/navigation.ts'), { window });
 const { choose } = window.YTGamepadNavigation;
 const item = (section, left, top, width = 100, height = 60) => ({ section, rect: { left, top, width, height } });
 const sections = {
@@ -12,6 +12,18 @@ const sections = {
   sidebar: { axis: 'vertical', exits: { right: ['content'] } },
   header: { axis: 'horizontal', exits: { down: ['content'] } }
 };
+test('region exits prefer substantial overlap over a barely intersecting diagonal', () => {
+  const from = item('sidebar', 0, 100, 80, 100);
+  const diagonal = item('content', 100, 199, 100, 100);
+  const aligned = item('content', 180, 100, 100, 100);
+  assert.equal(choose(from, [from, diagonal, aligned], 'right', sections), aligned);
+});
+test('edge distance does not penalize a wide aligned target for its distant center', () => {
+  const from = item('sidebar', 0, 100, 80, 60);
+  const wide = item('content', 100, 100, 600, 60);
+  const narrow = item('content', 200, 100, 100, 60);
+  assert.equal(choose(from, [from, narrow, wide], 'right', sections), wide);
+});
 test('right selects same row instead of a nearer diagonal card', () => {
   const a = item('content', 200, 100), right = item('content', 500, 100), diagonal = item('content', 310, 170);
   assert.equal(choose(a, [a, right, diagonal], 'right', sections), right);

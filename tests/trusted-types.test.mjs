@@ -41,7 +41,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
     return el;
   };
   const window = { YTGamepadSite: { perform() { return true; } } };
-  runInNewContext(['app/route-state.js', 'state-machine.js', 'focus.js', 'keyboard.js', 'pinyin-data.js', 'pinyin.js', 'ui/styles.js', 'search.js'].map(file => moduleSource(file)).join('\n') + moduleSource('menu.js'), { window, document, location: { pathname: '/', search: '' }, Event: class {}, innerWidth: 1200, innerHeight: 800, HTMLInputElement: class {} });
+  runInNewContext(['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/navigation/focus.ts', 'src/search/keyboard.ts', 'src/search/pinyin-data.ts', 'src/search/pinyin.ts', 'src/ui/styles.ts', 'src/search/search.ts'].map(file => moduleSource(file)).join('\n') + moduleSource('src/ui/menu.ts'), { window, document, location: { pathname: '/', search: '' }, Event: class {}, innerWidth: 1200, innerHeight: 800, HTMLInputElement: class {} });
   window.YTGamepadFocus.register('page', {
     active: () => true,
     capture: () => document.activeElement ? { region: 'page', itemKey: 'input', index: 0 } : null,
@@ -49,7 +49,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
     fallback: () => null,
     apply: () => document.activeElement?.focus()
   });
-  runInNewContext(moduleSource('sites/youtube.js'), {
+  runInNewContext(moduleSource('src/sites/youtube.ts'), {
     window, document, location: { pathname: '/', search: '' }, Event: class {}, HTMLInputElement: class {}
   });
   window.YTGamepadMenu.connect(window.YTGamepadSite);
@@ -125,6 +125,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
   document.querySelector = selector => selector.includes('search-icon-legacy') ? { click() { searches++; } } : target;
   window.YTGamepadMenu.openSearch(target);
   root.querySelector('#query').value = '  fullscreen search  ';
+  root.querySelector('#query').input();
   window.YTGamepadMenu.handle('volumeUp');
   assert.equal(searches, 1);
   assert.equal(target.value, 'fullscreen search');

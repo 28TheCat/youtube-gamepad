@@ -17,7 +17,7 @@ function bridge() {
     },
     runtime: { id: 'test-extension', onMessage: { addListener(fn) { events.extension = fn; } }, async sendMessage(message) { runtime.push(message); } }
   };
-  runInNewContext(read('content.js'), {
+  runInNewContext(read('src/app/content.ts'), {
     window, chrome, console, Date: { now: () => now }, location: { origin: 'https://www.youtube.com' },
     document: { hidden: false, addEventListener() {} }, navigator: { getGamepads: () => [] }, setInterval() {}
   });
@@ -109,7 +109,7 @@ test('connection status responds only to this extension', () => {
 
 function pinyin(raw) {
   const window = {}, writes = [];
-  runInNewContext(read('pinyin-data.js') + '\n' + read('pinyin.js'), {
+  runInNewContext(read('src/search/pinyin-data.ts') + '\n' + read('src/search/pinyin.ts'), {
     window, localStorage: { getItem() { return raw; }, setItem(key, value) { writes.push({ key, value }); } }
   });
   return { ime: window.YTGamepadPinyin, writes };

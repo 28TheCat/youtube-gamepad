@@ -15,15 +15,18 @@ function fixture(t) {
     rmSync(root, { recursive: true });
     rmSync(root + '.inventory.json', { force: true });
   });
-  const manifest = { manifest_version: 3, version: '0.2.0', background: { service_worker: 'background.js' },
-    action: { default_popup: 'popup.html' }, content_scripts: [{ js: ['actions.js', 'bindings.js', 'runtime.js', 'ui/styles.js', 'controller-style.js', 'gamepad.js'], css: ['browse.css'] }] };
+  const manifest = { manifest_version: 3, version: '0.2.0', background: { service_worker: 'src/background/background.ts' },
+    action: { default_popup: 'src/popup/popup.html' }, content_scripts: [{ js: ['src/shared/actions.ts', 'src/input/bindings.ts', 'src/shared/runtime.ts', 'src/ui/styles.ts', 'src/input/controller-style.ts', 'src/input/gamepad.ts'], css: ['src/app/browse.css'] }] };
   function write(file, content = '') { const path = resolve(root, file); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); }
-  write('manifest.json', JSON.stringify(manifest)); write('popup.html', '<link href="popup.css"><script src="popup.js"></script>');
-  for (const file of ['actions.js', 'bindings.js', 'runtime.js', 'ui/styles.js', 'controller-style.js', 'gamepad.js', 'background.js', 'popup.js', 'popup.css', 'browse.css',
+  write('manifest.json', JSON.stringify(manifest)); write('src/popup/popup.html', '<link href="popup.css"><script src="popup.js"></script><script src="../shared/actions.ts"></script>');
+  for (const file of ['src/shared/actions.ts', 'src/input/bindings.ts', 'src/shared/runtime.ts', 'src/ui/styles.ts', 'src/input/controller-style.ts', 'src/input/gamepad.ts', 'src/background/background.ts', 'src/popup/popup.js', 'src/popup/popup.css', 'src/app/browse.css',
     'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt', 'licenses/kenney-input-prompts-LICENSE.txt']) write(file);
   const controllerAssets = JSON.parse(readFileSync(new URL('../assets/controller/kenney.json', import.meta.url), 'utf8'));
+  write('licenses/vue-LICENSE.txt', readFileSync(new URL('../licenses/vue-LICENSE.txt', import.meta.url)));
+  write('licenses/pinia-LICENSE.txt', readFileSync(new URL('../licenses/pinia-LICENSE.txt', import.meta.url)));
   write('assets/controller/kenney.json', JSON.stringify(controllerAssets));
   for (const file of Object.keys(controllerAssets.files)) write(file, readFileSync(new URL('../' + file, import.meta.url)));
+  write('assets/controller/layout.svg', readFileSync(new URL('../assets/controller/layout.svg', import.meta.url)));
   const { files } = releaseFiles(root);
   const inventory = Object.fromEntries(files.map(file => [file, createHash('sha256').update(readFileSync(resolve(root, file))).digest('hex')]));
   writeFileSync(root + '.inventory.json', JSON.stringify({ version: manifest.version, files: inventory }));
@@ -33,8 +36,8 @@ function fixture(t) {
 test('release inventory detects changed scripts and rejects unlisted debug data', t => {
   const s = fixture(t); assert.equal(checkRelease(s.root), s.files.length);
   assert.equal(s.files.includes('LICENSE'), true);
-  s.write('gamepad.js', 'throw new Error("tampered");'); assert.throws(() => checkRelease(s.root), /Changed release file/);
-  s.write('gamepad.js'); s.write('output/captured-data.txt', 'private debug data');
+  s.write('src/input/gamepad.ts', 'throw new Error("tampered");'); assert.throws(() => checkRelease(s.root), /Changed release file/);
+  s.write('src/input/gamepad.ts'); s.write('output/captured-data.txt', 'private debug data');
   assert.throws(() => checkRelease(s.root), /inventory mismatch/);
   assert.equal(releaseFiles(s.root).files.includes('output/captured-data.txt'), false);
 });
@@ -43,6 +46,16 @@ test('release rejects missing dependencies and paths outside the package', t => 
   const s = fixture(t);
   s.manifest.content_scripts[0].css = ['../outside.css']; s.write('manifest.json', JSON.stringify(s.manifest));
   assert.throws(() => releaseFiles(s.root), /Unsafe release path/);
-  assert.throws(() => assertLoadOrder(['gamepad.js', 'runtime.js']), /requires runtime/);
-  assert.throws(() => assertLoadOrder(['runtime.js', 'runtime.js']), /Duplicate module/);
+  assert.throws(() => assertLoadOrder(['src/input/gamepad.ts', 'src/shared/runtime.ts']), /requires src\/shared\/runtime/);
+  assert.throws(() => assertLoadOrder(['src/shared/runtime.ts', 'src/shared/runtime.ts']), /Duplicate module/);
+});
+
+test('nested extension pages resolve sibling assets and reject external or escaping paths', t => {
+  const s = fixture(t);
+  assert.equal(s.files.includes('src/popup/popup.css'), true);
+  assert.equal(s.files.includes('src/shared/actions.ts'), true);
+  for (const path of ['../../../outside.js', '/outside.js', 'https://example.com/script.js']) {
+    s.write('src/popup/popup.html', `<script src="${path}"></script>`);
+    assert.throws(() => releaseFiles(s.root), /Unsafe release path/);
+  }
 });

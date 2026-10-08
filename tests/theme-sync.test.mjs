@@ -1,9 +1,10 @@
+import { legacyModuleSource } from '../scripts/test-source.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
-const source = readFileSync(new URL('../ui/theme-sync.js', import.meta.url), 'utf8');
+const source = legacyModuleSource('src/ui/theme-sync.ts');
 const settle = () => new Promise(resolve => setImmediate(resolve));
 function setup({ saved, tab, dark = false } = {}) {
   const attrs = new Set(), events = {};

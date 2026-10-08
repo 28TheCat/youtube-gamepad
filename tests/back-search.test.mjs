@@ -41,7 +41,7 @@ function setup(records = {}) {
   const document = { createElement: node, documentElement: node('html'), body: node('body'), querySelector: () => nativeSearch };
   const actions = [], window = { YTGamepadSite: { perform: () => true }, YTGamepad: { act(action) { actions.push(action); return window.YTGamepadMenu.handle(action); } } };
   const context = { window, document, localStorage: { getItem(key) { return records[key] ?? null; }, setItem(key, value) { records[key] = value; } }, location: { pathname: '/watch', search: '?v=current' }, Event: class {}, HTMLInputElement: class {}, innerWidth: 1200, innerHeight: 800 };
-  for (const file of ['app/route-state.js', 'state-machine.js', 'focus.js', 'keyboard.js', 'pinyin-data.js', 'pinyin.js', 'ui/styles.js', 'search.js', 'menu.js']) {
+  for (const file of ['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/navigation/focus.ts', 'src/search/keyboard.ts', 'src/search/pinyin-data.ts', 'src/search/pinyin.ts', 'src/ui/styles.ts', 'src/search/search.ts', 'src/ui/menu.ts']) {
     runInNewContext(moduleSource(file), context);
   }
   window.YTGamepadFocus.register('origin', {

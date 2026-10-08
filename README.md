@@ -1,6 +1,12 @@
 # YouTube Gamepad
 
+故障诊断：在“完整设置 → 诊断”中主动导出 JSON 或清空记录。诊断只保存在扩展本地存储，包含时间、版本、模块、操作、原始错误消息及堆栈、界面状态摘要；最多保留 100 条且序列化记录不超过 32,768 个字符，超限移除最早记录。错误文本截断并隐藏网址，不采集视频标题、评论或完整页面地址。页面侧诊断属于未经信任的遥测，桥接和后台均校验并限流，不授权设置修改或文件导出。
+
 用手柄浏览 YouTube、控制视频播放，并通过屏幕键盘搜索英文或中文。
+
+当前扩展界面使用英文，覆盖设置、工具栏弹窗、快捷菜单、播放控件和搜索提示；中文拼音输入仍可使用。本文档保留中英文说明。
+
+插件仅在浏览器检测到已连接的标准映射手柄、且扩展开关开启时生效。未连接或断开手柄时恢复 YouTube 原生界面，不接管页面操作或 Escape 键；重新连接后自动恢复。
 
 Browse YouTube, control video playback, and search in English or Chinese with a gamepad.
 
@@ -8,11 +14,12 @@ Browse YouTube, control video playback, and search in English or Chinese with a 
 
 ## 简体中文
 
-独立的 Chrome / Edge Manifest V3 扩展，使用原生 JavaScript，无服务器。源码可直接加载；开发与发布使用可重复的检查和打包流程。
+独立的 Chrome / Edge Manifest V3 扩展，使用 TypeScript 模块、Vue 3 和 Pinia，无服务器。运行 `npm ci` 和 `npm run build:extension` 后加载 `dist/`；开发与发布使用可重复的检查和打包流程。
 
 ### 功能亮点
 
 - 用方向键或左摇杆浏览视频卡片、侧边栏、播放器按钮和弹窗。
+- 在“Display & layout → 分类栏内容调整”中设置顶部分类的显示、隐藏及顺序，支持拖动、上下移位和重置；完整设置和页面内设置自动同步。分类读取 YouTube 提供的筛选项与请求参数，由 Vue 管理选中状态并请求、渲染分类视频及后续分页；遇到新分类后自动加入设置列表；“全部”保留，正在使用的分类切换后隐藏。LB/RB 按自定义顺序切换，退出电视布局恢复原生分类栏。
 - 电视式视频页：视频背景、标题、独立进度条、大按钮和横向推荐卡片。
 - 播放 / 暂停、快进 / 快退、调整音量与快捷菜单字幕切换。
 - 检测到标准映射手柄后自动进入浏览器窗口全屏。
@@ -26,7 +33,7 @@ Browse YouTube, control video playback, and search in English or Chinese with a 
 先下载本仓库 ZIP 并解压，或克隆仓库到本地。安装和使用无需 Node.js；下文的开发检查需要 Node.js。
 
 1. Chrome 打开 `chrome://extensions`，Edge 打开 `edge://extensions`。
-2. 打开开发者模式，选择“加载已解压的扩展”，选择本文件夹。
+2. 运行 `npm ci` 和 `npm run build:extension`。打开开发者模式，选择“加载已解压的扩展”，选择生成的 `dist/` 文件夹。
 3. 打开或刷新 https://www.youtube.com/，连接手柄，点击页面并按一次手柄按键。
 4. 用方向键或左摇杆选择，A 打开视频，Start 打开快捷菜单。工具栏弹窗保留启用开关、连接状态和“更多设置”。快捷菜单中的“完整设置”也可进入设置页。
 
@@ -34,27 +41,27 @@ Browse YouTube, control video playback, and search in English or Chinese with a 
 
 参考 [Couch Browser 的分层设计](https://github.com/SeeSharpSoft/couch-browser/blob/main/DEVELOPMENT.md)，本项目代码独立编写。
 
-- `gamepad.js`：MAIN world 输入轮询、标准按键映射、死区、方向长按重复；只发送动作，不点击页面。
-- `core.js`：MAIN world 导航核心；维护选中项、按几何位置选择目标、处理弹窗范围和 Shadow DOM 提示层。输入归属和选中框显示由注入策略决定，不读取具体菜单或播放模块的状态。
-- `navigation.js`：独立的方向规则，参考 [js-spatial-navigation](https://github.com/luke-chang/js-spatial-navigation) 的 section 思路，代码独立编写；先在分区内寻找同一行列的目标，再按显式出口跨区。无需 React 或第三方运行依赖。
-- `sites/youtube.js`：集中管理 YouTube 选择器、视频/推荐/评论/播放状态读取、搜索同步和原生设置操作；界面接收数据快照，原生节点保留在适配层。通过 `createNavigationConfig(policy)` 接收协调层接口。
-- `coordinator.js`：管理模式、适配能力、设置和动作归属，连接站点与界面。`app/route-state.js` 保存纯导航返回规则，`app/route-controller.js` 负责路由监听和历史操作。
-- `keyboard.js`：按官方电视版已核对的布局定义字母页、数字页和键盘动作；不依赖官方混淆脚本。
-- `menu.js`：快捷菜单宿主、焦点与搜索入口；`search.js` 负责文本编辑、拼音候选、键盘和搜索历史，原生操作通过端口请求。
-- `watch.js`：观看交互与数据刷新；`ui/watch-view.js` 创建界面，`ui/watch-panels.js` 管理说明和评论面板。Shadow 样式源文件为 `ui/menu.css` 和 `ui/watch.css`，由开发脚本生成 `ui/styles.js`。
-- `runtime.js`：按模块登记监听器、定时器、动画帧、观察器和清理函数；销毁后清理浮层和历史包装，支持重新注入。
+- `gamepad.ts`：ISOLATED world 输入轮询、标准按键映射、死区、方向长按重复；只发送动作，不点击页面。
+- `core.ts`：ISOLATED world 导航核心；维护选中项、按几何位置选择目标、处理弹窗范围和 Shadow DOM 提示层。输入归属和选中框显示由注入策略决定，不读取具体菜单或播放模块的状态。
+- `navigation.ts`：独立的方向规则，参考 [js-spatial-navigation](https://github.com/luke-chang/js-spatial-navigation) 的 section 思路，代码独立编写；先在分区内寻找同一行列的目标，再按显式出口跨区。无需 React 或第三方运行依赖。
+- `sites/youtube.ts`：集中管理 YouTube 选择器、视频/推荐/评论/播放状态读取、搜索同步和原生设置操作；界面接收数据快照，原生节点保留在适配层。通过 `createNavigationConfig(policy)` 接收协调层接口。
+- `coordinator.ts`：管理模式、适配能力、设置和动作归属，连接站点与界面。`app/route-state.ts` 保存纯导航返回规则，`app/route-controller.ts` 负责路由监听和历史操作。
+- `keyboard.ts`：按官方电视版已核对的布局定义字母页、数字页和键盘动作；不依赖官方混淆脚本。
+- `menu.ts`：快捷菜单宿主、焦点与搜索入口；`search.ts` 负责文本编辑、拼音候选、键盘和搜索历史，原生操作通过端口请求。
+- `watch.ts`：观看交互与数据刷新；`ui/watch-view.ts` 创建界面，`ui/watch-panels.ts` 管理说明和评论面板。Shadow 样式源文件为 `ui/menu.css` 和 `ui/watch.css`，由开发脚本生成 `ui/styles.ts`。
+- `runtime.ts`：按模块登记监听器、定时器、动画帧、观察器和清理函数；销毁后清理浮层和历史包装，支持重新注入。
 - `browse.js` / `browse.css`：主页外围导航；顶栏、侧栏和分类栏布局保留在 `browse.css`。公共配色、字体、圆角、间距和焦点反馈统一在 `ui/theme.css`，主页、快捷菜单、搜索和设置弹窗共同引用；搜索实时跟随 YouTube 明暗主题，视频控制层保留深色半透明背景。完整设置页与扩展工具栏弹窗使用最近一次 YouTube 明暗主题，尚未读取到网站主题时采用系统明暗偏好。
-- `content.js`：ISOLATED world 设置桥接，读取扩展存储；独立检测标准手柄并向后台报告连接状态。页面不接受设置写入，仅允许限频打开固定的完整设置页；连接状态由隔离脚本检测。
-- `background.js`：使用 `chrome.windows.update` 管理 F11 式窗口全屏；原窗口状态保存在 `chrome.storage.session`，页面跳转和后台休眠不会清除。只恢复扩展自己开启的全屏。
-- `popup.html` / `popup.js` / `popup.css`：工具栏弹窗，提供启用开关、连接状态和更多设置入口。`options.html` / `options.js` / `options.css`：完整设置页，分为“常用”“手柄”“显示”。
+- `content.ts`：ISOLATED world 设置桥接，读取扩展存储；独立检测标准手柄并向后台报告连接状态。`inline-settings.ts` 在同一隔离环境中渲染快捷菜单内的设置，界面事件处理器直接保存固定设置项；页面消息不能提供任意存储键或设置值。
+- `background.ts`：使用 `chrome.windows.update` 管理 F11 式窗口全屏；原窗口状态保存在 `chrome.storage.session`，页面跳转和后台休眠不会清除。只恢复扩展自己开启的全屏。
+- `popup.html` / `popup.js` / `popup.css`：工具栏弹窗，提供启用开关、连接状态和更多设置入口。`options.html` / `options.js` / `options.css`：完整设置页，左侧分类、右侧内容，分为“常用”“画面与布局”“手柄与按键”“帮助与诊断”；窄屏分类显示在内容上方，修改后自动保存。
 - `manifest.json`：声明两个执行环境中的脚本，只匹配 www.youtube.com。
 
-设置面板 → chrome.storage → content.js → 设置消息 → coordinator.js → 输入层、导航核心与播放界面。
-手柄 → gamepad.js → 动作事件 → core.js → 协调层 → 播放界面 / YouTube 适配。
+设置面板 → chrome.storage → content.ts → 设置消息 → coordinator.ts → 输入层、导航核心与播放界面。
+手柄 → gamepad.ts → 动作事件 → core.ts → 协调层 → 播放界面 / YouTube 适配。
 
 模块职责、数据端口和输入优先级见 [ARCHITECTURE.md](ARCHITECTURE.md)。播放界面通过 `connect(port)` 读取数据快照并请求操作，通过 `sync()` 接收协调层的模式更新。菜单、原生弹窗、说明/评论面板按层消费动作，只有明确返回 `pass` 才允许继续分发。
 
-`core.js` 通过站点配置中的 `shouldShowSelection({ scope })` 回调决定是否显示选择框，不读取站点或播放界面状态。`watch.js` 通过 `connect({ state, request, ... })` 接收只读状态快照与统一命令入口，模式、启用状态和导航锁由 `coordinator.js` 管理，`sync()` 仅按当前状态渲染，不能回写模式。推荐切换、播放操作、设置、频道、评论及返回控制栏都经过 `request(type, value)`，共享禁用和导航锁检查。原生设置关闭后的焦点只由 `focus.js` 的层级栈恢复，播放页不再保存第二份恢复目标。站点层不调用播放界面；协调层最后加载并完成接口注入。
+`core.ts` 通过站点配置中的 `shouldShowSelection({ scope })` 回调决定是否显示选择框，不读取站点或播放界面状态。`watch.ts` 通过 `connect({ state, request, ... })` 接收只读状态快照与统一命令入口，模式、启用状态和导航锁由 `coordinator.ts` 管理，`sync()` 仅按当前状态渲染，不能回写模式。推荐切换、播放操作、设置、频道、评论及返回控制栏都经过 `request(type, value)`，共享禁用和导航锁检查。原生设置关闭后的焦点只由 `focus.ts` 的层级栈恢复，播放页不再保存第二份恢复目标。站点层不调用播放界面；协调层最后加载并完成接口注入。
 
 MAIN world 脚本通过 Manifest V3 静态声明加载，避免手动插入脚本标签。窗口全屏由后台 service worker 控制，不读取标签敏感信息，无需 tabs 权限。
 
@@ -63,16 +70,34 @@ MAIN world 脚本通过 Manifest V3 静态声明加载，避免手动插入脚�
 需要 Node.js 22 或更高版本。运行 `npm ci` 安装锁定的开发依赖；默认浏览器验证使用本机 Chrome，CI 使用 Playwright Chromium。
 
 - `npm run styles`：修改 Shadow 样式后重新生成同步样式资源。
-- `npm run check`：检查清单、模块依赖顺序、语法和样式一致性。
+- `npm run check:modules`：检查清单中的构建入口、模块导入、语法、资产和样式一致性。
+- `npm run check`：完成上述检查，再执行 TypeScript 和 Vue 的完整类型检查。
 - `npm test`：运行纯状态规则及模拟 DOM / 扩展 API 回归。
 - `npm run test:browser`：运行全部 MAIN 模块的真实浏览器集成测试，缺少依赖会报错。
+- `npm run test:extension`：用 Playwright Chromium 实际加载未修改的扩展清单，覆盖 MAIN / ISOLATED、设置存储、后台消息、刷新、标签切换、模拟手柄断连重连与真实 MV3 worker 停止 / 唤醒。首次需运行 `npx playwright install chromium`。
+- `npm run test:youtube`：实际加载扩展并访问联网 YouTube，验证首页注入、设置桥接与刷新；网络失败会报错，不跳过。不能替代品牌浏览器与实体手柄验收。
 - `npm run verify`：完成静态检查、单元和浏览器回归。
-- `npm run build`：仅打包运行所需文件和许可证，输出到 `output/releases/`；生成 SHA-256 完整性清单。
+- `npm run build:extension`：由 Vite 构建 MAIN、ISOLATED、后台、Popup 和 Options 五个独立入口，生成可加载的 `dist/`。
+- `npm run build`：检查源码、构建扩展，再将运行所需文件和许可证打包到 `output/releases/`；生成 SHA-256 完整性清单。
 - `npm run check:release`：验证最新发布包的文件和完整性。
+
+模块构建的入口映射见 `scripts/extension-entries.mjs`：`src/entries/main.ts` 组装页面内模块，`content.ts` 组装 ISOLATED 桥接，`background.ts` 组装后台，`popup.ts` 和 `options.ts` 挂载扩展页面。源码通过 `import/export` 声明依赖，Vite 为每个入口生成独立的 IIFE；清单只加载两个页面脚本包，保留原有 MAIN / ISOLATED 分工和 `document_idle` 时机。修改源码后重新执行 `npm run build:extension`，并在扩展管理页重新加载 `dist/`。
+
+`check:modules` 只验证模块构建，不执行完整类型检查和全部回归。`npm run build` 的发布门槛仍是完整 `check`；类型错误会阻止发布打包。
 
 以 `YTG_EXTENSION_ROOT=latest-release` 运行浏览器测试可直接验证发布包。完整模块接口和销毁约定见 [ARCHITECTURE.md](ARCHITECTURE.md)。`.github/workflows/verify.yml` 自动运行检查、构建和发布包浏览器回归。
 
+功能定义统一在 `actions.js`，与实体按钮绑定分开；分类、场景及执行入口见 [动作目录](ACTIONS.md)。
+
 ### 默认按键（Xbox 命名）
+
+快捷键设置提供“播放页”和“主页”两套独立布局。手柄示意图上的按键可点击修改；主页布局也用于搜索结果、频道等浏览页面，播放页使用自己的布局。切换页面时自动切换输入映射和按键提示，先前的共用配置会作为两套布局的初始值。交换按键与恢复默认仅影响正在编辑的布局。按键图标仍使用 Kenney 素材，整只手柄轮廓为项目绘制的 SVG。
+
+快捷菜单的 All settings 在当前 YouTube 页面内打开设置分类，可调整启用、画面、自动全屏、按键绑定与输入灵敏度，并导出或清理诊断记录。扩展工具栏的设置入口也打开这个菜单，不另开标签页。B / Escape 逐级返回到分类、快捷菜单，再关闭菜单。独立 `options.html` 保留为浏览器扩展管理页的兼容入口。
+
+「手柄快捷键」可为确认、返回、播放、搜索、快进快退、音量、快捷菜单及搜索键盘功能分配标准手柄按键。选择已占用的按键会自动交换两项功能，支持恢复默认按键；方向键和左摇杆保留导航用途。修改自动保存在本机，已打开的 YouTube 页面和按键提示同步更新。按键菜单使用项目现有的 Kenney CC0 图标和 Xbox / PlayStation 物理位置对照；菜单内的图标跟随当前手柄类型，Switch 以相同物理位置为准。
+
+界面会根据当前使用的标准映射手柄自动切换按键图标和提示：Xbox 显示彩色 A / B / X / Y，PlayStation 显示 × / ○ / □ / △ 和 L1 / R1 / L2 / R2，Switch 显示对应位置的 B / A / Y / X 和 L / R / ZL / ZR。图标直接使用 [Kenney Input Prompts](https://kenney.nl/assets/input-prompts) 的原版 SVG（CC0），不自行绘制；来源和授权见 [第三方说明](THIRD_PARTY_NOTICES.md)。素材随扩展本地打包，使用时无需联网加载。整体界面配色仍跟随 YouTube 主题。搜索、菜单和播放提示在手柄切换时实时更新；多个手柄连接时跟随正在操作的手柄。无法识别的型号使用通用 Xbox 命名，识别依赖浏览器报告的设备名称；按键动作仍采用 Gamepad API 标准位置。
 
 浏览模式：方向键 / 左摇杆移动选择，A 打开，B 关闭弹窗或返回。LB / RB 直接切换到上一个 / 下一个分类，无需先选中分类栏；到达两端时停止。
 
@@ -109,13 +134,15 @@ Y / Start 只允许从页面或播放区域打开搜索 / 快捷菜单；菜单�
 
 以每次同步方向键操作的 P95 为准，测量前先预热；目标设备上 100 / 1,000 / 5,000 张卡片分别不超过 8 / 16.7 / 50 ms。低性能设备档用 Chromium DevTools 的 4× CPU slowdown，在 1,000 张卡片时 P95 不超过 50 ms。连续一小时播放负载后，强制 GC（若浏览器支持）后的已用 JS 堆相对测试前增长不超过 16 MB；没有可用 GC 或堆 API 时记录为未测，不以缺失数据判定通过。任何基准需同时记录浏览器版本、设备 CPU 核心数和 slowdown 档位。
 
-这些是本地扩展开销的验收线，不包含 YouTube 网络、视频解码或页面实验造成的延迟。不同设备的结果不得混作同一基线。5,000 张卡片当前本机 Chromium P95 为 29.3 ms，满足该档目标；4× CPU slowdown 和长时堆增长尚未测量。
+这些是本地扩展开销的验收线，不包含 YouTube 网络、视频解码或页面实验造成的延迟。不同设备的结果不得混作同一基线。当前 headless Chromium 151（16 核 / 16 GB）实测 100 / 1,000 / 5,000 张卡片 P95 为 2.2 / 10.6 / 40.6 ms；4× CPU slowdown 下 1,000 张为 41.4 ms，均满足对应阈值。加速一小时事件频率模拟的堆读数变化为 0 MB，但没有强制 GC，也不代表真实一小时结果；长时堆增长仍未验收。
 
-真实浏览器的本地压力页由 `node scripts/build-performance-browser.mjs` 生成，运行 `node scripts/preview-watch.mjs` 后访问 `http://127.0.0.1:8765/output/performance/fixture.html`，在浏览器控制台执行 `await runPerformance()`。结果包含运行环境信息、分规模导航延迟、滚动焦点框检查，以及 216,000 次播放器样式变化后的堆采样（Chromium 支持时）。这是一小时事件频率的加速模拟，不等于一小时实际播放；要验收长时标准，应在目标设备上实际运行一小时并记录采样。低性能档需在 DevTools 手动启用 4× CPU slowdown 后运行。
+真实浏览器的本地压力页由 `node scripts/build-performance-browser.mjs` 生成，运行 `node scripts/preview-watch.mjs` 后访问 `http://127.0.0.1:8765/output/performance/fixture.html`，在浏览器控制台执行 `await runPerformance()`。结果包含运行环境信息、分规模导航延迟、滚动焦点框检查，以及 216,000 次播放器样式变化后的堆采样和强制 GC 是否可用（Chromium 支持时）。这是一小时事件频率的加速模拟，不等于一小时实际播放；要验收长时标准，应在目标设备上实际运行一小时并记录采样。低性能档需在 DevTools 手动启用 4× CPU slowdown 后运行。
 
 真实 YouTube 页面与实体手柄的兼容性仍需实测。只接受 Gamepad API 标准映射；不支持非标准手柄自定义映射、Shorts 专用操作、浏览器标签切换。首页使用大屏样式增强，视频页由独立界面接管；底层仍加载原 YouTube 页面以保留播放、登录和数据能力。尚未覆盖 YouTube 的所有布局实验。YouTube DOM 改版可能需要更新选择器。网站可能拒绝合成点击或键盘事件；浏览器也可能限制脚本触发的视频播放。
 
 ### 手动验收
+
+上线前必须完成 [完整扩展与真实 YouTube 验收](ACCEPTANCE.md)。自动化全绿只证明对应测试范围，不代表 Chrome / Edge 与真实手柄兼容性已通过。
 
 - 搜索框按 A 自动打开手柄键盘，带入原搜索词；B 关闭后回到搜索框。搜索采用 YouTube 电视式整页视图：顶部搜索栏、左侧最近 5 次搜索、右侧 A–Z 字母网格和底部空格 / 清除 / 搜索。默认选中 A，数字符号通过 &123 切换；输入同步至网站搜索框，提交使用网站原搜索按钮，B 返回原页面。配色跟随网站浅色 / 深色主题，左右可在历史与键盘之间切换。清除按钮清空输入，RT 或搜索按钮提交。历史记录保存在当前浏览器的 YouTube 网站存储中。
 
@@ -131,7 +158,7 @@ Y / Start 只允许从页面或播放区域打开搜索 / 快捷菜单；菜单�
 
 ### 导航分区与焦点
 
-B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返回规则](BACK_BEHAVIOR.md)。两者共用 `back` 动作及导航锁；长按 Escape 不连续退层，也不退出手柄模式或窗口全屏。拔掉当前手柄会退出手柄模式；松开手柄按键和摇杆后，再操作可重新进入。
+B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返回规则](BACK_BEHAVIOR.md)。窗口全屏时 Escape 优先退出全屏；非全屏时两者共用 `back` 动作及导航锁。长按 Escape 不连续退层，也不退出手柄模式。手动退出全屏后，刷新与切换焦点不会重新进入；断开并重新连接手柄后可再次自动全屏。拔掉当前手柄会退出手柄模式；松开手柄按键和摇杆后，再操作可重新进入。
 
 快捷菜单或搜索覆盖原生弹窗时，统一焦点模块暂时给下层弹窗添加 `inert`，避免原生焦点限制把选择拉回后台。下层弹窗仍保留在返回栈中；关闭上层界面时先解除限制，再恢复原选项。页面原有的 `inert` 属性不改动。
 
@@ -147,7 +174,7 @@ B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返�
 
 ### 电视式视频页
 
-视频页接管前检查播放器、视频播放能力、播放按钮和设置按钮。正常加载期间保持原生界面，最多等待 5 秒；超时、已接管后关键能力丢失或适配异常时，自动恢复原生布局和控制栏，关闭扩展菜单及说明/评论面板，并显示原因。降级不会暂停视频或退出浏览器窗口全屏。提示中的“重试适配”可重新检查；打开其他视频或刷新页面也会重新检查。字幕、推荐、评论、标题缺失及直播时长不触发整页降级。
+视频页接管前检查播放器和属于该播放器的视频播放能力。正常加载期间以电视加载画面覆盖原生界面，最多等待 5 秒；超时、已接管后关键能力丢失或适配异常时，自动恢复原生布局和控制栏，关闭扩展菜单及说明/评论面板，并显示原因。降级不会暂停视频或退出浏览器窗口全屏。提示中的“重试适配”可重新检查；打开其他视频或刷新页面也会重新检查。字幕、推荐、评论、标题缺失及直播时长不触发整页降级。推荐、评论、频道、字幕、设置与订阅/点赞/点踩/保存分别检查能力；读取或执行异常只降级对应功能，后续页面检查继续尝试恢复。原生播放/设置按钮缺失不会退出播放界面，播放仍通过视频能力控制。
 
 普通 YouTube 的播放器、字幕和登录状态继续保留，扩展接管视频页展示。标题和频道显示在顶部，独立进度条、大按钮与推荐卡片显示在底部。播放时按钮区无操作 5 秒后自动收起；暂停、选择进度、浏览推荐或打开功能面板时保持显示。说明使用独立面板；清晰度、字幕语言等设置沿用原播放器菜单。关闭设置后恢复原按钮焦点。首页与搜索保留原站视频列表，大屏模式仅精简外围导航。关闭手柄操作后恢复普通视频页。
 
@@ -155,7 +182,7 @@ B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返�
 
 ### 手柄播放流程
 
-主页或搜索结果中按 A 打开视频后，立即进入铺满窗口的播放布局。窗口全屏由后台独立管理，播放模式不调用网页 Fullscreen API。扩展菜单可覆盖在视频上。
+主页或搜索结果中按 A 打开视频后，立即显示电视加载画面，播放器就绪后直接进入铺满窗口的播放布局，不展示电脑端详情页。手柄打开推荐视频沿用同一过渡；导航取消或关闭手柄操作时清除加载画面。窗口全屏由后台独立管理，播放模式不调用网页 Fullscreen API。扩展菜单可覆盖在视频上。
 
 播放模式：A 暂停或继续，左右唤出控制栏并移动焦点，Start 打开快捷菜单，上键显示电视式播放面板，下键进入推荐卡片。控制栏内左右移动焦点，上键进入进度条，下键回到按钮；选中进度条时按 A 开始调整，左右快退或快进 10 秒，A 结束调整并保留进度条焦点，保持原播放或暂停状态。B 按层级返回：设置子菜单 → 设置主菜单 → 播放面板 → 纯播放 → 原列表；退出视频时暂停，由导航核心恢复原卡片和滚动位置。直接打开视频链接时退出视频返回首页。快捷菜单仍优先接收输入。
 
@@ -163,7 +190,7 @@ B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返�
 
 ### 紧凑主页导航
 
-连接标准手柄并开启大屏布局后，列表页面只替换顶部导航：左侧圆角搜索入口，右侧 YouTube 标识；菜单按钮转发原站的侧栏展开、收起操作。侧栏沿用 YouTube 原有入口、顺序和布局，焦点进入不会自动展开。视频区保留原生卡片尺寸、列数、间距、字号、头像和菜单，只增加手柄方向导航与缩略图上的轻量焦点框。原站分类保留，并兼容固定和随内容滚动的两种布局；关闭大屏布局或断开手柄后恢复原站顶栏。
+连接标准手柄并开启大屏布局后，列表页面只替换顶部导航：左侧圆角搜索入口，右侧 YouTube 标识；菜单按钮转发原站的侧栏展开、收起操作。侧栏沿用 YouTube 原有入口、顺序和布局，焦点进入不会自动展开。视频区保留原生卡片尺寸、列数、间距、字号、头像和菜单，只增加手柄方向导航与缩略图上的轻量焦点框。分类栏由 Vue 渲染，切换直接请求 YouTube 分类接口，并兼容原分类栏的布局位置；关闭大屏布局或断开手柄后恢复原站顶栏。
 
 视频区左边界按左进入侧边栏，按右或 B 回到原卡片；顶部边界按上进入分类或搜索，按下返回视频区时恢复原卡片，B 直接返回视频区。切换分类后等待新列表加载，再选择第一张卡片。页面跳转保留既有的返回列表与滚动恢复机制。搜索继续使用原有电视式键盘。
 
@@ -193,7 +220,9 @@ B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返�
 
 ## English
 
-YouTube Gamepad is an independent Manifest V3 extension for Chrome and Edge. It adds gamepad navigation and a large-screen viewing experience to the regular YouTube website. It uses vanilla JavaScript without a server or third-party runtime dependencies. Source files can be loaded directly; development checks and release packaging use Node.js.
+The extension interface is in English, including settings, the toolbar popup, quick menu, playback controls, and search prompts. Chinese Pinyin input remains available. This README includes both Chinese and English documentation.
+
+YouTube Gamepad is an independent Manifest V3 extension for Chrome and Edge. It adds gamepad navigation and a large-screen viewing experience to the regular YouTube website. TypeScript modules are bundled with Vite; Vue 3 and Pinia render extension pages and selected overlays. Run `npm ci` and `npm run build:extension`, then load `dist/`. No server is required.
 
 ### Features
 
@@ -209,7 +238,7 @@ YouTube Gamepad is an independent Manifest V3 extension for Chrome and Edge. It 
 
 1. Download and extract this repository's ZIP, or clone the repository locally.
 2. Open `chrome://extensions` in Chrome or `edge://extensions` in Edge.
-3. Enable **Developer mode**, click **Load unpacked**, and select the project folder containing `manifest.json`.
+3. Run `npm ci` and `npm run build:extension`. Enable **Developer mode**, click **Load unpacked**, and select the generated `dist/` folder.
 4. Open or refresh [YouTube](https://www.youtube.com/) and connect your gamepad.
 5. Click the YouTube page, then press a controller button so the browser can detect it.
 6. Navigate with the D-pad or left stick, press **A** to open a video, and press **Start** for the quick menu.
@@ -243,7 +272,7 @@ Search opens a full-page TV-style interface with a search field, the five most r
 
 To enter Chinese:
 
-1. Open search and choose **中文（拼音）** (Chinese Pinyin) from the language key.
+1. Open search and choose **Chinese (Pinyin)** from the input language key.
 2. Enter Pinyin without tones, such as `nihao`, `zhongguo`, or `dianying`. Use `v` for `ü`.
 3. From the top keyboard row, press up to enter the candidate area. Choose with left/right and confirm with A; use previous/next page controls to browse candidates.
 4. Y or the space key confirms the first candidate. Longer input can be converted one word at a time, leaving the remaining Pinyin available for further selection.
@@ -274,7 +303,7 @@ Previous window states are stored in `chrome.storage.session`, allowing restorat
 - **Header:** Left/right move between items; down enters content or the player.
 - **Player:** Browsing mode navigates control buttons; playback mode uses the dedicated controls above.
 - **Dialogs:** Opening a dialog selects its first available item and confines navigation and confirmation to it. Closing restores the previous external selection. Real YouTube dialog dismissal still needs hands-on verification.
-- **Returning:** The current tab remembers focus and scroll position for the latest 30 routes and attempts restoration once the target loads again. A full refresh clears these records. Cards that have not reappeared in the DOM are not loaded automatically for restoration.
+- **Returning:** The current tab remembers the selected category, card keys and scroll position for the latest 30 routes. Returning from a video reuses YouTube's native list or activates the saved category and waits for its list to load, then restores the original card focus and scroll position. Navigation-time scroll changes cannot overwrite the saved position. Restoration retries for up to five seconds, including scrolling to trigger native lazy loading; a missing card falls back to a surviving neighbor. List contents and continuation tokens remain owned by YouTube, so a refreshed native feed can differ from the earlier list. A full refresh clears these records.
 
 The page stays still while the selected row is fully visible. When the row leaves the viewport, its top is aligned below the fixed search and category bars with a 16-pixel gap. Alignment is immediate to avoid measurement drift during held input. If no candidate is available, the current selection is retained. Selection transitions respect the system's reduced-motion preference.
 
@@ -285,15 +314,15 @@ Default input settings are a `0.35` stick deadzone, `350 ms` initial repeat dela
 | File | Purpose |
 | --- | --- |
 | `manifest.json` | Manifest V3 configuration, YouTube matching, and script loading order |
-| `gamepad.js` | MAIN-world controller polling, standard mapping, deadzone, and held-input repeats; emits actions rather than clicking the page |
-| `core.js` / `navigation.js` | Navigation core, directional rules, sections, focus, dialog scope, and visual overlays |
-| `sites/youtube.js` | YouTube data snapshots, selectors, media/search actions and native dialogs; receives policy via `createNavigationConfig(policy)` |
-| `coordinator.js` | Owns modes, route history, settings and action dispatch; connects the core, site adapter and watch surface |
-| `watch.js` | TV watch surface with independent controls, progress, horizontal recommendations and focus |
-| `keyboard.js` / `menu.js` | On-screen keyboard, search interface, and Shadow DOM quick menu |
-| `pinyin.js` / `pinyin-data.js` | Offline Pinyin candidates and dictionary data |
-| `content.js` | ISOLATED-world settings bridge and independent controller detection |
-| `background.js` | Browser window fullscreen and previous-state restoration |
+| `gamepad.ts` | MAIN-world controller polling, standard mapping, deadzone, and held-input repeats; emits actions rather than clicking the page |
+| `core.ts` / `navigation.ts` | Navigation core, directional rules, sections, focus, dialog scope, and visual overlays |
+| `sites/youtube.ts` | YouTube data snapshots, selectors, media/search actions and native dialogs; receives policy via `createNavigationConfig(policy)` |
+| `coordinator.ts` | Owns modes, route history, settings and action dispatch; connects the core, site adapter and watch surface |
+| `watch.ts` | TV watch surface with independent controls, progress, horizontal recommendations and focus |
+| `keyboard.ts` / `menu.ts` | On-screen keyboard, search interface, and Shadow DOM quick menu |
+| `pinyin.ts` / `pinyin-data.ts` | Offline Pinyin candidates and dictionary data |
+| `content.ts` | ISOLATED-world settings bridge and independent controller detection |
+| `background.ts` | Browser window fullscreen and previous-state restoration |
 | `popup.html` / `popup.js` / `popup.css` | Toolbar popup: enabled switch, connection status and full settings entry |
 | `ui/theme.css` | Shared colors, fonts, radii, spacing and focus tokens; follows YouTube light/dark theme |
 | `theater.css` | Large-screen layout styles |
@@ -312,7 +341,7 @@ node --test tests/*.test.mjs
 
 The first command validates the manifest, script syntax, and popup file. The second runs automated tests. These checks do not replace testing with real YouTube pages and physical controllers.
 
-`tests/module-combinations.test.mjs` loads every MAIN-world module in manifest order in a real browser, using an intercepted YouTube fixture. It checks focus restoration, native layers, route changes, resource disposal, reinjection and repeated search editing. Run `npm ci`, then `npm run verify` for required checks; missing browser dependencies fail verification. Chrome is the default browser. CI installs Chromium and sets `PLAYWRIGHT_CHANNEL=chromium`. After `npm run build`, set `YTG_EXTENSION_ROOT=latest-release` and run `npm run test:browser` to verify the independent release package. Direct legacy test commands may skip browser cases when Playwright is unavailable; those runs do not count as complete release verification.
+`tests/module-combinations.test.mjs` builds the current MAIN composition root with test-only inspection handles for DOM regressions, including focus, native layers, route changes and cleanup. `tests/bundled-runtime.test.mjs` loads production bundles in separate MAIN and ISOLATED worlds, replacing Chrome privileges and physical gamepad sampling, and checks communication, Vue pages and reinjection. Extension E2E tests use actual extension privileges. Run `npm ci`, then `npm run verify`; missing browser dependencies fail verification. Chrome is the default DOM-test browser. CI installs Chromium and sets `PLAYWRIGHT_CHANNEL=chromium`. After `npm run build`, `YTG_EXTENSION_ROOT=latest-release` makes artifact and extension tests load the independent release package. Skipped browser cases do not count as complete release verification.
 
 Recommended manual checks:
 
@@ -341,7 +370,7 @@ Independently written extension code is licensed under **MIT**; see [LICENSE](LI
 
 视频作为全屏背景，顶部展示标题、频道和观看次数；下方是独立进度条及频道头像、说明、订阅、快退、播放、快进、点赞、点踩、评论、保存、字幕、设置按钮。播放按钮居中放大，进度条上方左侧显示当前时间、右侧显示总时长。默认只露出部分推荐卡片，下键进入推荐区后展开完整卡片。视频内容、字幕和原播放器设置仍由 YouTube 提供。
 
-- 上键唤出控制栏，默认选中播放按钮。按钮区左右移动，上键进入进度条，下键进入推荐。各区保留自己的选择，返回按钮区恢复之前的按钮。
+- 上键唤出控制栏，默认选中播放按钮。按钮区左右移动，上键进入进度条，下键进入推荐。进度条未处于调整状态时，再按上键收起面板，回到纯播放。各区保留自己的选择，返回按钮区恢复之前的按钮。
 - 进度条先按 A 开始调整，左右调整 10 秒；A 结束调整并保留进度条焦点，B 先退出调整，再按 B 回按钮区。直播或未知时长不执行固定进度跳转。
 - 推荐区左右选择，A 使用原视频链接播放，B / 上键回按钮区。连续播放推荐后退出视频，返回最初的列表；刷新后不保留这段浏览记录。
 - 设置使用原播放器菜单，B 从子菜单回主菜单，再关闭设置并恢复设置按钮。不会因关闭设置而退出视频。
@@ -351,7 +380,7 @@ Independently written extension code is licensed under **MIT**; see [LICENSE](LI
 
 验证时需检查：默认推荐裁切及展开、进度区与按钮区焦点恢复、设置子菜单逐层返回、评论及回复读取、连续推荐播放后的列表返回。布局和动作可用浏览器模拟检查，实体手柄还需实测。
 
-Focus restoration for temporary layers is centralized in `focus.js`. Owners provide stable item keys, candidate descriptions and DOM focus operations. Closing a layer restores the original key, then a surviving neighbor in its original region, then an index fallback; an empty watch region returns to the play control. Route changes discard the old target and use the active page default. Nested layers restore their parent, and closing a lower layer cannot take focus from a higher menu.
+Focus restoration for temporary layers is centralized in `focus.ts`. Owners provide stable item keys, candidate descriptions and DOM focus operations. Closing a layer restores the original key, then a surviving neighbor in its original region, then an index fallback; an empty watch region returns to the play control. Route changes discard the old target and use the active page default. Nested layers restore their parent, and closing a lower layer cannot take focus from a higher menu.
 
 
 自动隐藏与导航状态：控制栏按钮区域只有在视频播放中、空闲超过 5 秒、没有临时层且没有导航进行中时才收起。临时层包含说明、评论、快捷菜单、帮助和原生弹窗（含淡入阶段）；操作这些层时重置空闲计时。推荐刷新保留目标，目标消失时回到控制栏，弹窗期间不抢焦点。关闭功能清理临时界面，重新开启从播放模式开始。
@@ -360,7 +389,7 @@ Focus restoration for temporary layers is centralized in `focus.js`. Owners prov
 
 ### 交互状态机
 
-交互规则集中在 `state-machine.js` 的纯函数 `transition(state, event)` 中，统一管理播放模式、导航返回链、控制栏/进度/推荐区域、说明和评论面板、菜单、搜索入口及拼音和语言子状态。规则返回新状态和操作指令；播放、页面跳转、DOM 更新及焦点恢复由执行层完成。状态提交后冻结，避免多个模块直接修改同一字段。
+交互规则集中在 `state-machine.ts` 的纯函数 `transition(state, event)` 中，统一管理播放模式、导航返回链、控制栏/进度/推荐区域、说明和评论面板、菜单、搜索入口及拼音和语言子状态。规则返回新状态和操作指令；播放、页面跳转、DOM 更新及焦点恢复由执行层完成。状态提交后冻结，避免多个模块直接修改同一字段。
 
 输入优先级和逐层返回保持现有行为，真实 Escape 与手柄 B 都逐层返回。导航期间重复输入会被阻止；自动隐藏必须同时满足播放、空闲、控制栏区域和没有临时层等条件。`YTGamepadCoordinator.interactionState` 提供完整状态快照，纯转换可脱离网页重放和测试。
 

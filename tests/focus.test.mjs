@@ -31,7 +31,7 @@ function setup() {
   const location = { pathname: '/', search: '' };
   const window = { addEventListener(name, fn) { winEvents[name] = fn; }, scrollBy() {}, scrollTo(pos) { context.scrollX = pos.left; context.scrollY = pos.top; } };
   const context = { window, document, location, scrollX: 0, scrollY: 0, innerWidth: 1000, innerHeight: 800, getComputedStyle: () => ({ visibility: 'visible', display: 'block', opacity: '1' }), requestAnimationFrame: fn => fn(), MutationObserver: class { constructor(fn) { mutation = fn; } observe() {} } };
-  runInNewContext(['app/route-state.js', 'state-machine.js', 'navigation.js', 'focus.js', 'core.js'].map(file => moduleSource(file)).join('\n'), context);
+  runInNewContext(['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/navigation/navigation.ts', 'src/navigation/focus.ts', 'src/navigation/core.ts'].map(file => moduleSource(file)).join('\n'), context);
   // Inject layer policy just as the application coordinator does. The core
   // never reads concrete menu/watch globals itself.
   const registerSite = window.YTGamepad.registerSite;
@@ -47,7 +47,7 @@ function setup() {
 
 test('browse chrome returns to the original card from either peripheral region', () => {
   const s = setup();
-  runInNewContext(moduleSource('navigation.js'), s.context);
+  runInNewContext(moduleSource('src/navigation/navigation.ts'), s.context);
   const card = { ...s.make('original'), region: 'content' };
   const other = { ...s.make('nearer'), region: 'content', getBoundingClientRect: () => ({ left: 220, top: 100, width: 100, height: 60 }) };
   const sidebar = { ...s.make('sidebar'), region: 'sidebar', getBoundingClientRect: () => ({ left: 0, top: 100, width: 80, height: 60 }) };
@@ -330,7 +330,7 @@ test('manual navigation cancels a delayed card restoration', () => {
 test('YouTube adapter deduplicates targets inside one video card', () => {
   let adapter;
   const adapterWindow = {};
-  runInNewContext(moduleSource('sites/youtube.js'), { window: adapterWindow, document: { documentElement: { classList: { contains: () => false } } }, location: { pathname: '/' } });
+  runInNewContext(moduleSource('src/sites/youtube.ts'), { window: adapterWindow, document: { documentElement: { classList: { contains: () => false } } }, location: { pathname: '/' } });
   adapter = adapterWindow.YTGamepadSite.createNavigationConfig({ mode: 'browse' });
   const card = {}, thumbnail = { closest: () => card }, title = { closest: () => card }, other = { closest: () => ({}) };
   const result = adapter.filterCandidates([thumbnail, title, other]);
@@ -358,7 +358,7 @@ test('sidebar confirmation and route change retain focus for the next direction'
 
 test('grid moves by rows, aligns the whole row and stays still at the end', () => {
   const s = setup();
-  runInNewContext(moduleSource('navigation.js'), s.context);
+  runInNewContext(moduleSource('src/navigation/navigation.ts'), s.context);
   const makeCard = (key, left, top, height = 200) => {
     const card = s.make(key);
     card.getBoundingClientRect = () => ({ left, top: top - s.context.scrollY, width: 200, height });

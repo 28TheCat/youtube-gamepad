@@ -1,18 +1,19 @@
 // Repack existing CC-CEDICT data without changing entries or attribution.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-const path = new URL('../src/search/pinyin-data.js', import.meta.url);
+import { legacyModuleSource } from './test-source.mjs';
+const path = new URL('../src/search/pinyin-data.ts', import.meta.url);
 const source = readFileSync(path, 'utf8'), window = {};
-runInNewContext(source, { window });
+runInNewContext(legacyModuleSource('src/search/pinyin-data.ts'), { window });
 const dictionary = window.YTGamepadPinyinData;
 const groups = {};
 for (const key of Object.keys(dictionary).sort()) (groups[key[0]] ||= {})[key] = dictionary[key];
 const packed = Object.fromEntries(Object.entries(groups).map(([key, value]) => [key, JSON.stringify(value)]));
 writeFileSync(path, source.split('// Decode')[0] + `// Decode only the initial-letter shard requested by Chinese input.
 (() => {
-  const packed = ${JSON.stringify(packed)};
-  const shards = Object.create(null), indexes = Object.create(null);
-  function shard(letter) {
+  const packed: Record<string,string> = ${JSON.stringify(packed)};
+  const shards: Record<string,Record<string,string[]>> = Object.create(null), indexes: Record<string,string[]> = Object.create(null);
+  function shard(letter: string) {
     if (!Object.hasOwn(shards, letter)) {
       shards[letter] = Object.hasOwn(packed, letter) ? JSON.parse(packed[letter]) : {};
       delete packed[letter];
@@ -21,7 +22,7 @@ writeFileSync(path, source.split('// Decode')[0] + `// Decode only the initial-l
     return shards[letter];
   }
   const dictionary = new Proxy(Object.create(null), {
-    get(_, key) { return typeof key === 'string' ? shard(key[0])[key] : undefined; },
+    get(_, key) { if (typeof key !== 'string') return undefined; const data = shard(key[0]); return Object.hasOwn(data, key) ? data[key] : undefined; },
     getOwnPropertyDescriptor(_, key) {
       if (typeof key !== 'string') return undefined;
       const data = shard(key[0]);
@@ -32,7 +33,7 @@ writeFileSync(path, source.split('// Decode')[0] + `// Decode only the initial-l
       return Object.values(indexes).flat().sort();
     }
   });
-  window.YTGamepadPinyinData = dictionary;
-  window.YTGamepadPinyinKeys = letter => { shard(letter); return indexes[letter]; };
+  YTGamepadPinyinData = dictionary;
+  YTGamepadPinyinKeys = (letter: string) => { shard(letter); return indexes[letter]; };
 })();
 `);

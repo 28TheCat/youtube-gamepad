@@ -3,9 +3,14 @@
     "strict": true,
     "noEmit": true,
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "lib": ["ES2022", "DOM"]
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowJs": false,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "moduleDetection": "force",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["chrome", "vite/client"]
   },
-  "include": ["types/**/*.d.ts", "tests/types/**/*.ts"]
+  "include": ["types/**/*.d.ts", "tests/types/**/*.ts", "src/**/*.ts"]
 }

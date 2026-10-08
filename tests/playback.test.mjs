@@ -13,7 +13,7 @@ function setup(pathname = '/watch', connected = true) {
   const document = { querySelectorAll: () => [], addEventListener(name, fn) { events[name] = fn; }, querySelector(selector) { return ['.ytp-subtitles-button', '.ytp-play-button', '.ytp-settings-button'].includes(selector) ? button : video; }, documentElement: { dataset: {}, classList: { contains: name => classes.get(name) === true, toggle(name, enabled) { classes.set(name, enabled); } } } };
   const history = { back() { backs++; }, go(delta) { jumps.push(delta); }, pushState(_state, _title, href) { const url = new URL(href, location.origin); location.pathname = url.pathname; location.search = url.search; }, replaceState(_state, _title, href) { if (href) { const url = new URL(href, location.origin); location.pathname = url.pathname; location.search = url.search; } } };
   const context = { URL, window, document, location, history, innerHeight: 800, getComputedStyle: node => ({ display: 'block', position: node?.position || 'static' }) };
-  for (const file of ['app/route-state.js', 'state-machine.js', 'sites/youtube.js', 'coordinator.js']) runInNewContext(moduleSource(file), context);
+  for (const file of ['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/sites/youtube.ts', 'src/app/coordinator.ts']) runInNewContext(moduleSource(file), context);
   return { history, window, document, adapter, video, location, events, classes, jumps, get backs() { return backs; }, get captions() { return captions; }, get menus() { return menus; } };
 }
 
@@ -57,7 +57,7 @@ test('SPA route switches mode; volume and captions work through menu actions', (
 test('watch navigation excludes the masthead and moves up to the preceding recommendation', () => {
   const s = setup();
   const navigationWindow = {};
-  runInNewContext(moduleSource('navigation.js'), { window: navigationWindow });
+  runInNewContext(moduleSource('src/navigation/navigation.ts'), { window: navigationWindow });
   const make = (left, top, header = false) => {
     const container = {};
     const el = { closest(selector) {
@@ -208,7 +208,7 @@ test('progress navigation returns to the native control row', () => {
   const s = setup();
   s.adapter.interceptAction('up');
   const w = {};
-  runInNewContext(moduleSource('navigation.js'), { window: w });
+  runInNewContext(moduleSource('src/navigation/navigation.ts'), { window: w });
   const play = { section: 'controls', rect: { left: 20, top: 730, width: 40, height: 40 } };
   const settings = { section: 'controls', rect: { left: 800, top: 730, width: 40, height: 40 } };
   const progress = { section: 'progress', rect: { left: 20, top: 700, width: 920, height: 15 } };

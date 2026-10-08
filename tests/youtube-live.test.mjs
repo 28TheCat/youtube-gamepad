@@ -23,19 +23,19 @@ test('live YouTube retains storage bridge after refresh and stays inactive witho
   await page.locator('ytd-app').waitFor({ timeout: 20000 });
   await ready(page);
   assert.equal(await page.locator('#yt-gamepad-overlay').count(), 1);
-  assert.equal(await page.evaluate(() => window.YTGamepadInput.connected), false);
+  assert.equal(await page.evaluate(() => window.__testConnected), false);
   await options.locator('#enabled').uncheck();
   await page.waitForFunction(() => window.liveSettings?.enabled === false);
-  await page.waitForFunction(() => !window.YTGamepadCoordinator.state.enabled);
+  await page.waitForFunction(() => document.documentElement.dataset.ytgAdaptation === 'inactive');
   await page.reload({ waitUntil: 'domcontentloaded' });
   await ready(page);
   await page.waitForFunction(() => window.liveSettings?.enabled === false);
-  await page.waitForFunction(() => !window.YTGamepadCoordinator.state.enabled);
+  await page.waitForFunction(() => document.documentElement.dataset.ytgAdaptation === 'inactive');
   await options.locator('#enabled').check();
   await page.waitForFunction(() => window.liveSettings?.enabled === true);
   assert.deepEqual(await page.evaluate(() => ({
-    connected: window.YTGamepadInput.connected,
-    enabled: window.YTGamepadCoordinator.state.enabled
+    connected: window.__testConnected,
+    enabled: (document.documentElement.dataset.ytgAdaptation === 'ready')
   })), { connected: false, enabled: false });
   await page.screenshot({ path: 'output/playwright/youtube-live.png', fullPage: true });
 });

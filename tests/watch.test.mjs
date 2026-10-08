@@ -108,13 +108,13 @@ function setup(integrated = false) {
     prepareVideo(href) { actions.push(href); },
     perform(action) { actions.push(action); if (action === 'playPause') video.paused = !video.paused; if (action === 'seekForward') video.currentTime += 10; return true; }
   };
-  runInNewContext(['app/route-state.js', 'state-machine.js', 'focus.js', 'ui/styles.js', 'ui/watch-view.js', 'ui/watch-panels.js', 'watch.js'].map(file => moduleSource(file)).join('\n'), {
+  runInNewContext(['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/navigation/focus.ts', 'src/ui/styles.ts', 'src/ui/watch-view.ts', 'src/ui/watch-panels.ts', 'src/playback/watch.ts'].map(file => moduleSource(file)).join('\n'), {
     window, document, location, URL, URLSearchParams, Date: { now: () => now }, getComputedStyle: () => ({ display: 'block' }), setTimeout: () => 1, clearTimeout() {}, setInterval(fn) { frame = fn; },
     MutationObserver: class { observe() {} }
   });
   const watch = window.YTGamepadWatch;
   const context = { window, document, location, URL, URLSearchParams, history: { back() {} }, getComputedStyle: () => ({ display: 'block' }) };
-  runInNewContext(moduleSource('sites/youtube.js'), context);
+  runInNewContext(moduleSource('src/sites/youtube.ts'), context);
   const site = window.YTGamepadSite;
   Object.assign(controller, {
     readRoute: site.readRoute, readWatchPage: site.readWatchPage, readPlayback: site.readPlayback,
@@ -126,7 +126,7 @@ function setup(integrated = false) {
     requestAutoHide(idle) { if (watch.state.row === 'controls' && !video.paused && !video.ended && idle > 5000) controller.requestMode('playback'); }
   });
   if (integrated) {
-    runInNewContext(moduleSource('coordinator.js'), context);
+    runInNewContext(moduleSource('src/app/coordinator.ts'), context);
   } else {
     watch.connect(controller);
     const render = watch.sync;

@@ -1,3 +1,6 @@
+import { legacyModuleSource } from '../scripts/test-source.mjs';
+import { mainFixture } from './helpers/main-bundle.mjs';
+import { inlineSettingsFixture } from './helpers/inline-bundle.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -13,6 +16,7 @@ try { ({ chromium } = require('playwright')); } catch {}
 if (!chromium && process.env.REQUIRE_BROWSER_TESTS === '1') {
   throw new Error('Browser verification requires playwright. Run npm ci.');
 }
+const mainSource = chromium ? await mainFixture() : '';
 const repository = new URL('../', import.meta.url);
 const releaseRoot = process.env.YTG_EXTENSION_ROOT === 'latest-release'
   ? JSON.parse(readFileSync(new URL('output/releases/latest.json', repository), 'utf8')).directory
@@ -66,7 +70,7 @@ async function setup(t, pathname = '/', connected = true) {
       : []
   }), connected);
   for (const path of entry.css) await page.addStyleTag({ path: fileURLToPath(new URL(path, root)) });
-  for (const path of entry.js) await page.addScriptTag({ path: fileURLToPath(new URL(path, root)) });
+  await page.addScriptTag({ content: mainSource });
   // Only the extension-side storage/connection bridge is absent. All MAIN modules
   // including gamepad, core, views, site adapter and coordinator are real.
   if (connected) await page.waitForFunction(() => window.YTGamepadCoordinator.state.enabled);
@@ -102,8 +106,14 @@ test('home return restores native category, rebuilt grid, scroll and original ca
     }
     document.body.append(bar);
     window.returnCards = Array.from(grid.children);
+  });
+  await page.locator('#ytg-browse-grid [data-browse-id="video:b"]').waitFor();
+  await page.evaluate(() => {
+    const manager = document.querySelector('ytd-page-manager');
+    const bar = document.querySelector('ytd-feed-filter-chip-bar-renderer');
+    const grid = document.querySelector('#return-grid');
     scrollTo(0, 700);
-    window.YTGamepad.focus(grid.querySelector('a[href="/watch?v=b"]'));
+    window.YTGamepad.focus(document.querySelector('#ytg-browse-grid [data-browse-id="video:b"]'));
     document.dispatchEvent(new Event('yt-navigate-start'));
     history.pushState({}, '', '/watch?v=b'); manager.hidden = true; bar.hidden = true;
     scrollTo(0, 0); document.dispatchEvent(new Event('yt-navigate-finish'));
@@ -115,6 +125,7 @@ test('home return restores native category, rebuilt grid, scroll and original ca
     scrollTo(0, 0); document.dispatchEvent(new Event('yt-navigate-finish'));
   });
   await page.waitForFunction(() => !window.YTGamepad.restoring && window.YTGamepad.current?.getAttribute('href') === '/watch?v=b');
+  assert.equal(await page.evaluate(() => window.YTGamepad.current?.dataset.browseId), 'video:b', 'restoration targets the visible Vue card');
   assert.deepEqual(await page.evaluate(() => ({
     category: document.querySelector('yt-chip-cloud-chip-renderer[selected="true"]').textContent,
     links: Array.from(document.querySelectorAll('#return-grid a')).map(link => link.getAttribute('href')),
@@ -427,7 +438,11 @@ test('live DVR controls support pointer seeking, gamepad return and unavailable 
     window.dvrRanges = [[120, 240]];
     const watch = window.YTGamepadWatch;
     watch.show();
-    for (let i = 0; i < 20; i++) watch.handle('right');
+    const controls = [...document.querySelector('#ytg-watch').shadowRoot.querySelectorAll('[data-action]')];
+    const liveIndex = controls.findIndex(button => button.dataset.action === 'goLive');
+    // Volume controls now follow Go live; reaching the last button is not Go live.
+    for (let i = 0; i < controls.length && watch.state.index < liveIndex; i++) watch.handle('right');
+    if (watch.state.index !== liveIndex) throw new Error('Gamepad did not reach Go live');
     watch.handle('confirm');
   });
   assert.equal(await page.evaluate(() => document.querySelector('video').currentTime), 240);
@@ -513,7 +528,7 @@ test('controller hints switch in open search and watch UI without disturbing inp
 
 test('extension popup and settings reuse controller artwork in their instructions', options, async t => {
   const page = await setup(t);
-  for (const filename of ['popup.html', 'options.html']) {
+  for (const filename of ['src/popup/popup.html', 'src/settings/options.html']) {
     await page.goto('https://www.youtube.com/prompt-fixture');
     const html = readFileSync(new URL(filename, root), 'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '');
     await page.setContent(html);
@@ -523,8 +538,13 @@ test('extension popup and settings reuse controller artwork in their instruction
         storage: { local: { get: async () => ({ bindings: { confirm: 1, back: 0 } }) }, onChanged: { addListener() {}, removeListener() {} } }
       };
     });
-    for (const path of ['ui/theme.css', filename.replace('.html', '.css')]) await page.addStyleTag({ path: fileURLToPath(new URL(path, root)) });
-    for (const path of ['actions.js', 'bindings.js', 'runtime.js', 'ui/styles.js', 'controller-style.js', 'ui/controller-sync.js']) await page.addScriptTag({ path: fileURLToPath(new URL(path, root)) });
+    for (const path of ['src/ui/theme.css', filename.replace('.html', '.css')]) await page.addStyleTag({ path: fileURLToPath(new URL(path, root)) });
+    await page.evaluate(() => {
+      window.chrome.runtime = { getURL: path => 'https://www.youtube.com/' + path };
+      window.chrome.storage.local.set = async () => {};
+    });
+    const bundle = filename.includes('/popup/') ? 'bundles/popup.js' : 'bundles/options.js';
+    await page.addScriptTag({ content: readFileSync(new URL(bundle, releaseRoot ? root : new URL('dist/', repository)), 'utf8') });
     await page.waitForFunction(() => document.documentElement.dataset.ytgController === 'playstation');
     const hints = await page.locator('[data-ytg-hint]').evaluateAll(nodes => nodes.map(node => ({
       text: node.textContent, icons: [...node.querySelectorAll('[data-ytg-icon="true"]')].map(icon => ({ key: icon.textContent, image: getComputedStyle(icon).backgroundImage }))
@@ -534,7 +554,7 @@ test('extension popup and settings reuse controller artwork in their instruction
     assert.ok(hints.every(hint => hint.icons.every(icon => icon.image.startsWith('url("data:image/svg+xml;base64,'))));
     assert.ok(hints.every(hint => !hint.text.includes('Start')));
     assert.ok(hints.some(hint => hint.text.includes('○ Confirm')));
-    await page.evaluate(() => window.YTGamepadRuntime.destroy());
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
   }
 });
 
@@ -561,7 +581,7 @@ test('quick menu settings save inline, recover failures and return one level at 
       dispose?.(); dispose = window.YTGamepadInlineSettings.mount(root, root.querySelector('#inline-settings'));
     });
   });
-  await page.addScriptTag({ path: fileURLToPath(new URL('inline-settings.js', root)) });
+  await page.addScriptTag({ content: await inlineSettingsFixture() });
   const menu = page.locator('#yt-gamepad-menu');
   await page.evaluate(() => window.YTGamepadMenu.handle('help'));
   await menu.getByRole('button', { name: 'All settings', exact: true }).click();
@@ -618,23 +638,23 @@ test('settings shortcuts persist swaps, recover failed writes and fit mobile scr
     return route.fulfill({ contentType: 'image/svg+xml', body: readFileSync(new URL(`assets/controller/${name}`, root)) });
   });
   await page.goto('https://www.youtube.com/settings-fixture');
-  const html = readFileSync(new URL('options.html', root), 'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '');
+  const html = readFileSync(new URL('src/settings/options.html', root), 'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*>/g, '');
   await page.setContent(html);
   await page.evaluate(() => {
     window.storedSettings = { autoFullscreen: true };
     window.storageListeners = []; window.failSave = false;
-    window.chrome = { storage: { local: {
-      get: async defaults => ({ ...defaults, ...window.storedSettings }),
+    window.chrome = { runtime: { getURL: path => 'https://www.youtube.com/' + path }, tabs: { query: async () => [] }, storage: { local: {
+      get: async defaults => ({ ...(Array.isArray(defaults) ? {} : defaults), ...window.storedSettings }),
       set: async values => {
         if (window.failSave) throw new Error('storage unavailable');
         Object.assign(window.storedSettings, values);
         const changes = Object.fromEntries(Object.entries(values).map(([key, newValue]) => [key, { newValue }]));
         for (const listener of window.storageListeners) listener(changes, 'local');
       }
-    }, onChanged: { addListener: listener => window.storageListeners.push(listener) } } };
+    }, onChanged: { addListener: listener => window.storageListeners.push(listener), removeListener: listener => { window.storageListeners = window.storageListeners.filter(value => value !== listener); } } } };
   });
-  for (const path of ['ui/theme.css', 'options.css']) await page.addStyleTag({ path: fileURLToPath(new URL(path, root)) });
-  for (const path of ['actions.js', 'bindings.js', 'runtime.js', 'ui/styles.js', 'controller-style.js', 'options.js', 'options-bindings.js']) await page.addScriptTag({ path: fileURLToPath(new URL(path, root)) });
+  for (const path of ['src/ui/theme.css', 'src/settings/options.css']) await page.addStyleTag({ path: fileURLToPath(new URL(path, root)) });
+  await page.addScriptTag({ content: readFileSync(new URL('bundles/options.js', releaseRoot ? root : new URL('dist/', repository)), 'utf8') });
   await page.waitForFunction(() => !document.getElementById('binding-confirm').disabled);
   await page.locator('[data-category-link="controller"]').click();
   await page.waitForFunction(() => !document.querySelector('#shortcuts').hidden);
@@ -818,12 +838,13 @@ test('native header preserves sidebar and feed geometry across widths and guide 
   await page.evaluate(() => window.YTGamepad.focus(document.querySelector('ytd-masthead #guide-button')));
   await press(page, 'confirm');
   assert.notEqual(await page.locator('ytd-app').getAttribute('expanded'),expanded,'native guide remains usable with gamepad');
+  await page.locator('#ytg-browse-grid [data-browse-id="video:a"]').waitFor();
   await page.evaluate(() => {
-    const card=document.querySelector('a#thumbnail');window.YTGamepad.focus(card);window.YTGamepad.act('left');
+    const card=document.querySelector('#ytg-browse-grid [data-browse-id="video:a"]');window.YTGamepad.focus(card);window.YTGamepad.act('left');
   });
   assert.equal(await page.evaluate(() => window.YTGamepad.current.closest('ytd-mini-guide-renderer') !== null),true);
   await press(page,'right');
-  assert.equal(await page.evaluate(() => window.YTGamepad.current === document.querySelector('a#thumbnail')),true,'right returns to the original card');
+  assert.equal(await page.evaluate(() => window.YTGamepad.current === document.querySelector('#ytg-browse-grid [data-browse-id="video:a"]')),true,'right returns to the original Vue card');
 });
 
 test('native video rows retain independent focus through short rows and DOM replacement', options, async t => {
@@ -1161,7 +1182,7 @@ test('all MAIN modules: destroy clears resources and reinjection creates one wor
     suspended: window.YTGamepadFocus.suspended,
     oldAction: window.retainedCore.act('confirm'), oldRequest: window.retainedCoordinator.request('media', 'playPause')
   })), { resources: [], surfaces: 0, historyRestored: true, suspended: false, oldAction: 'blocked', oldRequest: false });
-  for (const path of entry.js) await page.addScriptTag({ path: fileURLToPath(new URL(path, root)) });
+  await page.addScriptTag({ content: mainSource });
   await press(page, 'search');
   assert.equal((await snapshot(page)).menu, true);
   await press(page, 'back');

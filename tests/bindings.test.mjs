@@ -1,9 +1,10 @@
+import { legacyModuleSource } from '../scripts/test-source.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 const window = {};
-for (const file of ['actions.js', 'bindings.js']) runInNewContext(readFileSync(new URL('../' + file, import.meta.url), 'utf8'), { window });
+for (const file of ['src/shared/actions.ts', 'src/input/bindings.ts']) runInNewContext(legacyModuleSource(file), { window });
 const schema = window.YTGamepadBindings;
 
 test('bindings ignore unknown actions, invalid positions and duplicates', () => {

@@ -10,7 +10,7 @@ function setup() {
   const window = {}, target = {
     addEventListener(type, fn) { listeners.add(fn); }, removeEventListener(type, fn) { listeners.delete(fn); }
   };
-  runInNewContext(moduleSource('runtime.js'), { window,
+  runInNewContext(moduleSource('src/shared/runtime.ts'), { window,
     setTimeout: schedule, clearTimeout: id => tasks.delete(id), setInterval: schedule, clearInterval: id => tasks.delete(id),
     requestAnimationFrame: schedule, cancelAnimationFrame: id => tasks.delete(id),
     MutationObserver: class { observe() {} disconnect() { disconnects++; } },
@@ -61,7 +61,7 @@ test('route disposal preserves a later site wrapper and makes a retained wrapper
   let calls = 0;
   const history = { pushState() { calls++; assert.equal(this, history); } };
   const original = history.pushState;
-  runInNewContext(moduleSource('app/route-controller.js'), { window, URL });
+  runInNewContext(moduleSource('src/app/route-controller.ts'), { window, URL });
   const interaction = window.YTGamepadStateMachine.createStore();
   const routes = window.YTGamepadRouteController.create({ runtime: window.YTGamepadRuntime, interaction, location, history, window: s.target, document: s.target,
     routeNow: () => '/', enabled: () => true, renderMode() {}, onStart() {}, hasTemporaryLayer: () => false

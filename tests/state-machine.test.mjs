@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 
 // No document, location, history, media or clock exists in this context.
 const window = {};
-runInNewContext(['app/route-state.js', 'state-machine.js'].map(file => moduleSource(file)).join('\n'), { window });
+runInNewContext(['src/app/route-state.ts', 'src/app/state-machine.ts'].map(file => moduleSource(file)).join('\n'), { window });
 const { createState, createStore, transition } = window.YTGamepadStateMachine;
 const plain = value => JSON.parse(JSON.stringify(value));
 const effects = result => result.effects.map(effect => effect.type).join(',');

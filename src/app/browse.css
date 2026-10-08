@@ -1,4 +1,7 @@
 /* The category surface owns its ring, avoiding a second native button ring. */
+html.ytg-browse:not([data-ytg-native]) yt-chip-cloud-chip-renderer[data-ytg-category-hidden]{display:none!important}
+html.ytg-browse:not([data-ytg-native]) .ytg-category-list{display:flex!important;align-items:center;flex-wrap:nowrap!important}
+html.ytg-browse:not([data-ytg-native]) .ytg-category-list>yt-chip-cloud-chip-renderer{order:var(--ytg-category-order,0);flex-shrink:0}
 html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected:has(.ytChipShapeChip,#chip-shape-container):is(:focus,:focus-visible),
 html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected button:not(.ytChipShapeChip):not(#chip-shape-container):is(:focus,:focus-visible) {
   outline:none!important;box-shadow:none!important;
@@ -11,14 +14,12 @@ html.ytg-gamepad-input :is(ytd-rich-item-renderer,ytd-video-renderer,ytd-compact
   box-shadow:none!important;
 }
 
-/* Categories use the same focus ring and inverted surface as menu buttons. */
+/* Native fill marks the active filter; gamepad focus adds only an outline. */
 html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected .ytChipShapeChip,
 html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected #chip-shape-container:not(:has(.ytChipShapeChip)),
 html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected:not(:has(.ytChipShapeChip,#chip-shape-container)) {
-  background:var(--ytg-selected-background)!important;
-  color:var(--ytg-selected-text)!important;
   border-radius:var(--ytg-chip-radius);
-  outline:var(--ytg-focus-width) solid var(--ytg-focus-color)!important;
+  outline:var(--ytg-focus-width) solid var(--ytg-text)!important;
   outline-offset:var(--ytg-focus-offset);
 }
 html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected .ytSpecTouchFeedbackShapeStroke,

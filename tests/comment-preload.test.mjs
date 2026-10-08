@@ -20,7 +20,7 @@ function setup() {
     return null;
   }, querySelectorAll: () => Array.from({ length: count }, () => ({ querySelector: () => ({ textContent: 'loaded' }) })) };
   const window = {};
-  runInNewContext(moduleSource('sites/youtube.js'),
+  runInNewContext(moduleSource('src/sites/youtube.ts'),
     { window, document, location, URLSearchParams, Date: { now: () => now } });
   return { classes, location, sync: window.YTGamepadSite.syncCommentPreload,
     get scrolls() { return scrolls; }, count(value) { count = value; }, player(value) { playerId = value; },

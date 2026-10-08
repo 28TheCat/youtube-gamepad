@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowJs": false,
+    "allowImportingTsExtensions": true,
+    "checkJs": false,
+    "skipLibCheck": true,
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "chrome",
+      "vite/client"
+    ]
+  },
+  "include": [
+    "src/entries/popup.ts",
+    "src/entries/options.ts",
+    "src/popup/**/*.ts",
+    "src/popup/**/*.vue",
+    "src/settings/**/*.ts",
+    "src/settings/**/*.vue",
+    "src/shared/settings.ts",
+    "src/shared/page-appearance.ts",
+    "types/**/*.d.ts"
+  ]
+}

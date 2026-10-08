@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 const window = {};
-const source = ['pinyin-data.js', 'pinyin.js'].map(file => moduleSource(file)).join('\n');
+const source = ['src/search/pinyin-data.ts', 'src/search/pinyin.ts'].map(file => moduleSource(file)).join('\n');
 runInNewContext(source, { window });
 const ime = window.YTGamepadPinyin;
 test('full pinyin words and ü normalization work offline', () => {

@@ -32,3 +32,15 @@ window.YTGamepadWatch.connect(watch);
 window.YTGamepadMenu.connect(menu);
 // @ts-expect-error factories require the explicit input observation callback
 window.YTGamepadInputModule.create({ runtime: window.YTGamepadRuntime, controllerStyle: window.YTGamepadControllerStyle });
+
+// Event discriminants must retain their corresponding payload contracts.
+import type { InteractionStore } from '../../types/ports.js';
+declare const interaction: InteractionStore;
+interaction.dispatch({ type: 'MODE', route: '/watch?v=test', value: 'controls' });
+interaction.dispatch({ type: 'MENU_SET_LANGUAGE', value: 'en' });
+// @ts-expect-error fullscreen is a browser state rather than an interaction mode
+interaction.dispatch({ type: 'MODE', route: '/watch?v=test', value: 'fullscreen' });
+// @ts-expect-error watch input requires current collection sizes
+interaction.dispatch({ type: 'WATCH_INPUT', action: 'confirm' });
+// @ts-expect-error search languages are a closed set
+interaction.dispatch({ type: 'MENU_SET_LANGUAGE', value: 'invalid-language' });

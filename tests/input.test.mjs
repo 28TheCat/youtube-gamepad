@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-const source = moduleSource('gamepad.js');
+const source = moduleSource('src/input/gamepad.ts');
 function setup(location = { pathname: '/' }) {
   const actions = [], connections = [], listeners = {}, documentListeners = {}, classes = new Set(), pad = { index: 0, connected: true, mapping: 'standard', axes: [0, 0], buttons: Array.from({ length: 16 }, () => ({ pressed: false })) };
   let frame;

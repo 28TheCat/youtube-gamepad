@@ -1,6 +1,7 @@
 import { readFileSync, lstatSync } from 'node:fs';
 import { resolve, relative, isAbsolute, dirname, posix } from 'node:path';
 import { assertLoadOrder } from './module-graph.mjs';
+import { entries } from './extension-entries.mjs';
 export function safePath(root, file) {
   if (!file || file.includes('\\') || isAbsolute(file) || file.split('/').some(part => !part || part === '..' || part === '.')) {
     throw new Error(`Unsafe release path: ${file}`);
@@ -15,11 +16,13 @@ export function safePath(root, file) {
   }
   return target;
 }
-export function releaseFiles(root) {
+export function releaseFiles(root, { source = false } = {}) {
   const manifest = JSON.parse(readFileSync(resolve(root, 'manifest.json'), 'utf8'));
   if (manifest.manifest_version !== 3) throw new Error('Expected Manifest V3');
   for (const entry of manifest.content_scripts) {
-    assertLoadOrder(entry.js);
+    if (entry.js.every(file => file in entries)) {
+      if (entry.js.length !== 1) throw new Error('Expected one bundle per content world');
+    } else assertLoadOrder(entry.js);
     if (new Set(entry.css || []).size !== (entry.css || []).length) throw new Error('Duplicate manifest stylesheet.');
   }
   const pages = [manifest.action.default_popup, manifest.options_ui?.page].filter(Boolean);
@@ -39,9 +42,14 @@ export function releaseFiles(root) {
   const files = [...new Set(['manifest.json', manifest.background.service_worker, ...pages, ...assets,
     ...Object.values(manifest.icons || {}),
     ...manifest.content_scripts.flatMap(entry => [...entry.js, ...(entry.css || [])]),
-    controllerManifest, ...Object.keys(controllerAssets.files),
-    'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt', 'licenses/kenney-input-prompts-LICENSE.txt'])].sort();
+    controllerManifest, 'assets/controller/layout.svg', ...Object.keys(controllerAssets.files),
+    'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt', 'licenses/kenney-input-prompts-LICENSE.txt',
+    'licenses/vue-LICENSE.txt', 'licenses/pinia-LICENSE.txt'])].sort();
   for (const file of files) {
+    if (source && file in entries) {
+      if (!lstatSync(safePath(root, entries[file])).isFile()) throw new Error(`Missing entry: ${entries[file]}`);
+      continue;
+    }
     if (!lstatSync(safePath(root, file)).isFile()) throw new Error(`Not a release file: ${file}`);
   }
   return { files, version: manifest.version };

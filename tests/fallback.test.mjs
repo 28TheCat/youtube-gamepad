@@ -53,7 +53,7 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
   const context = { window, document, location, URL, URLSearchParams, history: {}, Date: { now: () => now },
     setInterval(fn) { tick = fn; }, setTimeout: () => 1, clearTimeout() {},
     getComputedStyle: () => ({ display: 'block' }) };
-  for (const file of ['app/route-state.js', 'state-machine.js', 'sites/youtube.js', 'coordinator.js']) {
+  for (const file of ['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/sites/youtube.ts', 'src/app/coordinator.ts']) {
     runInNewContext(moduleSource(file), context);
   }
   return { window, document, classes, location, video, player, watch, menu, nodes, get config() { return config; }, get port() { return port; },

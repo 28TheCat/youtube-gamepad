@@ -8,7 +8,7 @@ import { styleSource } from '../scripts/build-styles.mjs';
 
 function setup() {
   const window = {}, document = { documentElement: { dataset: {} }, createElement: node };
-  runInNewContext(moduleSource('controller-style.js'), { window, document });
+  runInNewContext(moduleSource('src/input/controller-style.ts'), { window, document });
   return { window, document, style: window.YTGamepadControllerStyle };
 }
 const node = () => ({ attributes: {}, children: [], text: '',
@@ -50,7 +50,7 @@ test('runtime disposal clears controller globals and can reinject cleanly', () =
   window.YTGamepadRuntime.destroy();
   assert.equal(window.YTGamepadControllerStyle, undefined);
   assert.equal(document.documentElement.dataset.ytgController, undefined);
-  runInNewContext(moduleSource('controller-style.js'), { window, document });
+  runInNewContext(moduleSource('src/input/controller-style.ts'), { window, document });
   assert.equal(window.YTGamepadControllerStyle.family, 'generic');
 });
 

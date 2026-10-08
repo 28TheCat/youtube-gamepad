@@ -1,8 +1,9 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { moduleSource } from './test-source.mjs';
 const dir = new URL('../output/performance/', import.meta.url);
 mkdirSync(dir, { recursive: true });
-const sources = ['src/shared/actions.js', 'src/input/bindings.js', 'src/shared/runtime.js', 'src/ui/styles.js', 'src/input/controller-style.js', 'src/navigation/navigation.js', 'src/navigation/core.js', 'src/sites/youtube.js', 'src/search/pinyin-data.js', 'src/search/pinyin.js']
-  .map(file => readFileSync(new URL('../' + file, import.meta.url), 'utf8').replace(/<\/script/gi, '<\\/script'));
+const sources = ['src/shared/actions.ts', 'src/input/bindings.ts', 'src/shared/runtime.ts', 'src/ui/styles.ts', 'src/input/controller-style.ts', 'src/navigation/navigation.ts', 'src/navigation/core.ts', 'src/sites/youtube.ts', 'src/search/pinyin-data.ts', 'src/search/pinyin.ts']
+  .map(file => moduleSource(file).replace(/<\/script/gi, '<\\/script'));
 writeFileSync(new URL('fixture.html', dir), `<!doctype html><meta charset="utf-8"><title>Gamepad performance fixture</title>
 <style>body{margin:0}#cards{display:grid;grid-template-columns:repeat(5,180px);gap:20px;padding:20px}#cards button{height:80px}</style>
 <div id="cards"></div><div id="movie_player"><div class="ytp-progress-bar"><i></i></div></div>

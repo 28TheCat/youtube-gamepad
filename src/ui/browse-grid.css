@@ -1,0 +1,26 @@
+#ytg-browse-grid{position:fixed;left:var(--ytg-browse-left,0px);right:0;bottom:0;top:var(--ytg-browse-top,112px);z-index:100;background:var(--ytg-background,#0f0f0f);color:var(--ytg-text,#fff);font:16px/1.4 var(--ytg-font-family,system-ui)}
+#ytg-browse-grid[hidden]{display:none!important}
+html.ytg-api-categories yt-chip-cloud-chip-renderer{visibility:hidden!important;pointer-events:none!important}
+#ytg-browse-categories{position:absolute;bottom:100%;left:0;right:0;height:48px;display:flex;align-items:center;gap:12px;overflow-x:auto;background:var(--ytg-background,#0f0f0f);padding:0 24px;box-sizing:border-box}
+#ytg-browse-categories [data-ytg-category]{display:block;flex:none;order:var(--ytg-category-order,0)}
+#ytg-browse-categories [data-ytg-category-hidden]{display:none!important}
+#ytg-browse-categories .ytg-selected button{outline:var(--ytg-focus-width,3px) solid var(--ytg-focus-color,#fff);outline-offset:3px}
+#ytg-browse-categories button{margin:0;padding:6px 12px;white-space:nowrap;border-radius:8px}
+#ytg-browse-categories button[aria-pressed=true]{background:var(--ytg-text,#fff);color:var(--ytg-background,#0f0f0f)}
+#ytg-browse-grid [data-ytg-browse-grid]{height:100%;overflow:auto;box-sizing:border-box;padding:24px;scroll-padding:24px}
+#ytg-browse-grid .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:28px 20px}
+#ytg-browse-grid a{display:flex;flex-direction:column;min-width:0;color:inherit;text-decoration:none;border-radius:var(--ytg-card-radius,14px);padding:8px;outline-offset:2px}
+#ytg-browse-grid img,#ytg-browse-grid .thumbnail-placeholder{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--ytg-card-radius,14px);background:var(--ytg-surface,#222)}
+#ytg-browse-grid strong{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;line-height:1.4;min-height:2.8em;max-height:2.8em;margin-top:10px;overflow-wrap:anywhere}
+#ytg-browse-grid .channel{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.4;min-height:1.4em;color:var(--ytg-muted,#aaa);margin-top:4px}
+#ytg-browse-grid a:focus-visible,#ytg-browse-grid a[data-selected=true]{outline:var(--ytg-focus-width,3px) solid var(--ytg-focus-color,#fff)}
+html.ytg-gamepad-input #ytg-browse-grid a[data-selected=true]{outline:6px solid var(--ytg-text,#fff);outline-offset:4px;background:var(--ytg-surface,#222);box-shadow:0 6px 20px #0003}
+#ytg-browse-grid button{margin:24px 0;padding:12px 20px;font:inherit;background:var(--ytg-surface,#222);color:inherit;border:1px solid var(--ytg-border,#555);border-radius:12px}
+/* Preserve native layout and continuation observers while Vue owns a separate region. */
+html.ytg-custom-browse ytd-page-manager :is(ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model){visibility:hidden!important;pointer-events:none!important}
+
+#ytg-browse-grid .card-copy{display:flex;flex-direction:column;min-width:0}
+#ytg-browse-grid .cards[data-horizontal=true] a{flex-direction:row;align-items:flex-start;gap:14px}
+#ytg-browse-grid .cards[data-horizontal=true] :is(img,.thumbnail-placeholder){width:0;min-width:0;flex:var(--ytg-cover-flex,40) 1 0}
+#ytg-browse-grid .cards[data-horizontal=true] .card-copy{flex:var(--ytg-info-flex,60) 1 0}
+#ytg-browse-grid .cards[data-horizontal=true] strong{margin-top:0}

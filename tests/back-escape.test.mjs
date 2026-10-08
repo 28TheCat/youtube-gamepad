@@ -23,7 +23,7 @@ function setup() {
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     MutationObserver: class { observe() {} }
   };
-  for (const file of ['app/route-state.js', 'state-machine.js', 'gamepad.js', 'core.js']) runInNewContext(moduleSource(file), context);
+  for (const file of ['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/input/gamepad.ts', 'src/navigation/core.ts']) runInNewContext(moduleSource(file), context);
   window.YTGamepad.registerSite({
     ownsKeyboardEvent: event => ['yt-gamepad-menu', 'ytg-watch'].includes(event.target?.id),
     handleBase(action) { actions.push(action); return 'handled'; }

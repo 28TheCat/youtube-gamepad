@@ -3,10 +3,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-const source = moduleSource('background.js');
+const source = moduleSource('src/background/background.ts');
 function setup(state = 'maximized') {
   const session = {}, settings = { enabled: true, theater: true }, calls = [], listeners = {};
   const window = { state };
+  let updateFailure;
   const chrome = {
     runtime: { async openOptionsPage() { calls.push({ options: true }); }, onMessage: { addListener(fn) { listeners.message = fn; } } },
     storage: {
@@ -14,13 +15,13 @@ function setup(state = 'maximized') {
       local: { async get() { return settings; } },
       onChanged: { addListener(fn) { listeners.settings = fn; } }
     },
-    windows: { async get() { return { ...window }; }, async update(id, values) { calls.push({ id, ...values }); Object.assign(window, values); }, onRemoved: { addListener(fn) { listeners.windowRemoved = fn; } } },
+    windows: { async get() { return { ...window }; }, async update(id, values) { if (updateFailure) throw updateFailure; calls.push({ id, ...values }); Object.assign(window, values); }, onRemoved: { addListener(fn) { listeners.windowRemoved = fn; } } },
     tabs: { onRemoved: { addListener(fn) { listeners.tabRemoved = fn; } } }
   };
   const restart = () => runInNewContext(source, { chrome, console });
   restart();
   const sender = { frameId: 0, url: 'https://www.youtube.com/watch?v=test', tab: { id: 3, windowId: 7, active: true } };
-  return { window, calls, settings, listeners, restart, async escape(origin = sender) {
+  return { window, calls, settings, listeners, restart, failUpdate(error) { updateFailure = error; }, async escape(origin = sender) {
     return new Promise(resolve => {
       if (!listeners.message({ type: 'ytg-exit-fullscreen' }, origin, resolve)) resolve(undefined);
     });
@@ -44,6 +45,36 @@ test('window fullscreen survives document reload and worker restart; disconnect 
 test('preexisting F11 fullscreen remains untouched on disconnect', async () => {
   const s = setup('fullscreen'); await s.connect(true); await s.connect(false);
   assert.equal(s.window.state, 'fullscreen'); assert.equal(s.calls.length, 0);
+});
+test('active YouTube tab takes over fullscreen restoration without changing the original state', async () => {
+  const s = setup();
+  await s.connect(true);
+  const other = { frameId: 0, url: 'https://www.youtube.com/', tab: { id: 4, windowId: 7, active: true } };
+  await s.connect(true, other);
+  await s.connect(false, { ...other, tab: { id: 3, windowId: 7, active: false } });
+  assert.equal(s.window.state, 'fullscreen', 'the former tab cannot restore the current owner');
+  await s.connect(false, other);
+  assert.equal(s.window.state, 'maximized');
+});
+test('closing the former fullscreen owner does not interrupt another connected YouTube tab', async () => {
+  const s = setup('normal');
+  await s.connect(true);
+  const other = { frameId: 0, url: 'https://www.youtube.com/', tab: { id: 4, windowId: 7, active: true } };
+  await s.connect(true, other);
+  await s.listeners.tabRemoved(3);
+  assert.equal(s.window.state, 'fullscreen');
+  await s.listeners.tabRemoved(4);
+  assert.equal(s.window.state, 'normal');
+});
+test('failed restoration keeps the original state across a worker restart for retry', async () => {
+  const s = setup();
+  await s.connect(true);
+  s.failUpdate(new Error('Temporary window update failure'));
+  assert.equal((await s.connect(false)).ok, false);
+  s.restart();
+  s.failUpdate(undefined);
+  await s.connect(false);
+  assert.equal(s.window.state, 'maximized');
 });
 test('manual exit is respected and disabling fullscreen restores only extension-owned windows', async () => {
   const s = setup('normal'); await s.connect(true);
@@ -87,7 +118,7 @@ test('new document does not interpret an initial empty gamepad snapshot as disco
   const sent = [], events = {}; let pads = [], tick;
   const window = { addEventListener(name, fn) { events[name] = fn; }, postMessage() {} };
   const chrome = { runtime: { onMessage: { addListener() {} }, async sendMessage(message) { sent.push(message); return { ok: true }; } }, storage: { local: { get(defaults, callback) { callback(defaults); } }, onChanged: { addListener(fn) { events.settings = fn; } } } };
-  runInNewContext(moduleSource('content.js'), {
+  runInNewContext(moduleSource('src/app/content.ts'), {
     window, chrome, console, location: { origin: 'https://www.youtube.com' }, navigator: { getGamepads: () => pads },
     document: { hidden: false, addEventListener(name, fn) { events[name] = fn; } }, setInterval(fn) { tick = fn; }
   });
@@ -109,7 +140,7 @@ test('synthetic Escape cannot request fullscreen exit or report a false disconne
   let tick, frame;
   const window = { addEventListener(name, fn) { events[name] = fn; }, postMessage() {} };
   const chrome = { runtime: { onMessage: { addListener() {} }, async sendMessage(message) { sent.push(message); return { ok: true }; } }, storage: { local: { get(defaults, callback) { callback(defaults); } }, onChanged: { addListener() {} } } };
-  runInNewContext(moduleSource('content.js'), {
+  runInNewContext(moduleSource('src/app/content.ts'), {
     window, chrome, console, location: { origin: 'https://www.youtube.com' }, navigator: { getGamepads: () => [pad] },
     document: { hidden: false, hasFocus: () => true, addEventListener() {} }, setInterval(fn) { tick = fn; }, requestAnimationFrame(fn) { frame = fn; }
   });
@@ -159,7 +190,7 @@ function connectionBridge() {
   };
   // Start with an empty snapshot so each test controls the first request.
   const initialPads = pads; pads = [];
-  runInNewContext(moduleSource('content.js'), {
+  runInNewContext(moduleSource('src/app/content.ts'), {
     window: { addEventListener(name, fn) { events[name] = fn; }, postMessage() {} }, chrome,
     console: { warn(...args) { warnings.push(args); } }, document,
     navigator: { getGamepads: () => pads }, location: { origin: 'https://www.youtube.com' },

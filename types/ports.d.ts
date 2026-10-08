@@ -1,5 +1,5 @@
-/** Development-only contracts. No imports, build step or runtime code are added
- * to the manifest scripts. Snapshots contain data; DOM handles stay in ports. */
+/** Shared source contracts. Snapshots contain data; DOM handles stay in ports.
+ * The Window declarations at the bottom support legacy test fixtures only. */
 export type Mode = 'browse' | 'playback' | 'controls';
 export type Disposition = 'handled' | 'blocked' | 'pass';
 export type Direction = 'up' | 'down' | 'left' | 'right';
@@ -111,13 +111,51 @@ export interface MenuSnapshot {
 export interface InteractionSnapshot { readonly app: AppSnapshot; readonly watch: WatchSnapshot; readonly menu: MenuSnapshot }
 export interface Effect { readonly type: string; readonly value?: string | number | boolean }
 export interface TransitionResult { readonly nextState: InteractionSnapshot; readonly effects: readonly Effect[]; readonly disposition: Disposition }
-/** Payloads are progressively narrowed as individual state rules gain checking. */
-export interface InteractionEvent { type: string; [key: string]: unknown }
-export interface InteractionStore { readonly state: InteractionSnapshot; dispatch(event: InteractionEvent): TransitionResult }
+export type RouteEvent =
+  | { type: 'PREPARE_VIDEO'; target: string; route: string }
+  | { type: 'NAV_START' }
+  | { type: 'HISTORY'; method: string; route: string; changed: boolean }
+  | { type: 'NAV_FINISH' | 'NAV_CANCEL' | 'POPSTATE'; route: string }
+  | { type: 'PAGE_BACK'; route: string; temporaryLayer: boolean };
+export type InteractionEvent = RouteEvent
+  | { type: 'APP_INIT'; route: string }
+  | { type: 'ADAPTATION'; route: string; status: AdaptationSnapshot['status']; reason?: string }
+  | { type: 'MODE'; route: string; value: Mode }
+  | { type: 'ENABLE'; route: string; enabled: boolean }
+  | { type: 'AUTO_HIDE'; playing: boolean; temporaryLayer: boolean; idle: number }
+  | { type: 'INPUT_OWNER'; enabled: boolean; navigating: boolean; menu: boolean; native: boolean; panel: boolean; help: boolean; action: Action }
+  | { type: 'BASE_INPUT'; route: string; action: Action }
+  | { type: 'NATIVE_CONTROLS_INPUT'; route: string; action: Action; progress: boolean }
+  | { type: 'WATCH_RESET'; playIndex?: number }
+  | { type: 'WATCH_SHOW'; target: 'controls' | 'recommendations'; count: number }
+  | { type: 'WATCH_FOCUS'; region: WatchSnapshot['row'] | 'panel'; index?: number }
+  | { type: 'WATCH_PANEL'; panel: WatchSnapshot['panel'] }
+  | { type: 'WATCH_PANEL_COUNT'; count: number }
+  | { type: 'WATCH_EMPTY' }
+  | { type: 'WATCH_INPUT'; action: Action; scrollDelta?: number; commentCount: number; recommendationKey?: string; controlAction?: string; cardColumns?: number; cardCount: number; controlCount: number; availableControls?: number[]; canSeek?: boolean }
+  | { type: 'MENU_OPEN' | 'MENU_CLOSE' | 'MENU_SHIFT' | 'MENU_MAIN' | 'MENU_BACK' }
+  | { type: 'MENU_SEARCH'; selected: number }
+  | { type: 'MENU_SET_LANGUAGE'; value: MenuSnapshot['language'] }
+  | { type: 'MENU_COMPOSE'; value: string }
+  | { type: 'MENU_PAGE'; delta: number }
+  | { type: 'MENU_FRAME'; value: MenuSnapshot['frame'] }
+  | { type: 'MENU_LANGUAGE'; value: boolean }
+  | { type: 'MENU_INPUT'; action: Action };
+export interface InteractionStore {
+  readonly state: InteractionSnapshot;
+  dispatch(event: InteractionEvent): TransitionResult;
+}
 export type Dispose = () => void;
+/** In-process messages only. Consumers supply a discriminated message union. */
+export interface LocalMessage { readonly type: string }
+export interface LocalChannel<Message extends LocalMessage = LocalMessage> {
+  publish(message: Message): void;
+  subscribe(listener: (message: Message) => void): Dispose;
+}
 export interface Scope {
   readonly destroyed: boolean; readonly size: number;
   cleanup(dispose: Dispose): Dispose;
+  listen<K extends keyof WindowEventMap>(target: EventTarget, type: K, listener: (event: WindowEventMap[K]) => void, options?: boolean | AddEventListenerOptions): Dispose;
   listen(target: EventTarget, type: string, listener: EventListener, options?: boolean | AddEventListenerOptions): Dispose;
   timeout(callback: () => void, delay: number): number | undefined;
   clearTimeout(id: number | undefined): void;
@@ -129,20 +167,20 @@ export interface Scope {
 export interface Runtime { scope(name: string): Scope; destroy(): void; readonly resources: Readonly<Record<string, number>> }
 export interface ControllerStyle {
   readonly family: 'xbox' | 'playstation' | 'switch' | 'generic';
-  use(pad: Gamepad | undefined): void;
+  use(pad: Pick<Gamepad, 'id'> | null | undefined): void;
   readonly css: string;
   register(root: ShadowRoot | Document): Dispose;
   hint<T extends HTMLElement>(node: T, text: string): T;
   bind<T extends HTMLElement>(node: T, text: string, attribute?: string): T;
   badge<T extends HTMLElement>(node: T, key: string): T;
-  configureBindings?(raw?: Record<string, number>): void;
+  configureBindings(raw?: unknown): void;
   identify(id?: string): ControllerStyle['family']; format(text: string): string;
 }
 export interface FocusTarget {
   region: string; itemKey?: string | Element; index?: number; scope?: Document | Element; el?: HTMLElement;
   pageScroll?: { x: number; y: number } | null;
 }
-export interface FocusRecord extends FocusTarget { owner: string; routeKey: string; keys: readonly (string | Element)[]; occurrence?: number }
+export interface FocusRecord extends FocusTarget { owner: string; routeKey: string; keys: readonly (string | Element | undefined)[]; occurrence?: number }
 export interface FocusOwner {
   active(): boolean; capture(): FocusTarget | null | undefined;
   items(region: string, target: FocusTarget): readonly FocusTarget[];
@@ -153,16 +191,18 @@ export interface FocusManager {
   readonly suspended: boolean; register(owner: string, adapter: FocusOwner): Dispose;
   capture(preferred?: string): FocusRecord | null;
   restore(target: FocusRecord | null): void;
-  open(token: Element, preferred?: string, priority?: number): void;
-  close(token: Element, apply?: boolean): void;
+  open(token: Document | Element, preferred?: string, priority?: number): void;
+  close(token: Document | Element, apply?: boolean): void;
   isSuspendedScope(scope: Element): boolean;
 }
 export interface DiagnosticState { route?: string; mode?: Mode; adaptation?: string; enabled?: boolean; surfaceReady?: boolean; navigating?: boolean }
 export interface Diagnostics { record(module: string, operation: string, error: unknown, state?: DiagnosticState): void }
-export interface InputDependencies { runtime: Runtime; controllerStyle: ControllerStyle; isSearchOpen(): boolean }
-export interface SiteDependencies { runtime: Runtime; diagnostics?: Diagnostics; focusManager?: FocusManager }
-export interface InputModule { readonly connected: boolean; readonly mode: 'mouse' | 'gamepad'; configure(values: Partial<Settings>): void; destroy(): void }
-export interface MenuModule { readonly opened: boolean; readonly state: MenuSnapshot; connect(port: MenuPort): void; close(): void; openSearch(target?: SearchTarget): void; handle(action: Action): Disposition; destroy(): void }
+export interface ApplicationMessage { source: string; values?: Settings; entry?: unknown }
+export interface ApplicationChannel { publish(message: ApplicationMessage): void; subscribe(listener: (message: ApplicationMessage) => void): Dispose }
+export interface InputDependencies { localChannel?: ApplicationChannel; runtime: Runtime; controllerStyle: ControllerStyle; isSearchOpen(): boolean }
+export interface SiteDependencies { pageAccess?: import("../src/bridge/page-protocol").PageAccess; runtime: Runtime; diagnostics?: Diagnostics; focusManager?: FocusManager }
+export interface InputModule { readonly connected: boolean; readonly mode: 'mouse' | 'gamepad' | 'keyboard'; configure(values: Partial<Settings>): void; destroy(): void }
+export interface MenuModule { readonly opened: boolean; readonly settingsOpened?: boolean; readonly state: MenuSnapshot; connect(port: MenuPort): void; close(): void; openSearch(target?: SearchTarget): void; handle(action: Action): Disposition; destroy(): void }
 export interface WatchModule {
   readonly ownsFocus: boolean;
   readonly state: Pick<WatchSnapshot, 'row' | 'index' | 'adjusting' | 'panel'> & { readonly mode: Mode; readonly recommendations: number };
@@ -178,7 +218,7 @@ export interface NavigationPolicy {
   interceptAction(action: Action, context?: Partial<ActionContext>): boolean;
   handleRegion(action: Action, context: ActionContext): Disposition;
   handleBase(action: Action, context: ActionContext): Disposition;
-  onScopeChange(): void; isNavigating(): boolean; getInputLayer(): string | null;
+  onScopeChange(scope?: Document | Element): void; isNavigating(): boolean; getInputLayer(): string | null;
   handleLayer(action: Action): Disposition;
   getPriorityLayer(): { handle(action: Action): Disposition } | null;
   handleShortcut(action: Action): Disposition; isFocusOwned(): boolean; getFocusOwner(): string;
@@ -190,7 +230,7 @@ export interface SitePort extends WatchDataPort, SearchDataPort {
   hasNativeLayer(): boolean; perform(action: Action): OperationResult | Promise<OperationResult>;
   performWatchAction(action: WatchAction): OperationResult | Promise<OperationResult>;
   showNativeControls(): HTMLElement | null; isProgress(el: Element | null): boolean;
-  createNavigationConfig(policy: NavigationPolicy): object;
+  createNavigationConfig(policy: NavigationPolicy): import('./core').NavigationConfig;
   inspectWatchCapabilities(requireDestinationReady?: boolean): { ready: boolean; failed?: boolean; missing: readonly string[] };
   inspectOptionalCapabilities(): WatchFeatures;
   restoreNativeInterface(): void; syncCommentPreload(active: boolean): void;
@@ -198,28 +238,29 @@ export interface SitePort extends WatchDataPort, SearchDataPort {
   openChannel(beforeNavigate: () => void): boolean;
   expandReplies(key: string): boolean; loadComments(start?: boolean): OperationResult;
   loadRecommendations(): OperationResult;
-  settingsOpen(): boolean; openSettings(): boolean; backSettings(menu?: Element): boolean;
+  settingsOpen(): boolean; openSettings(): boolean; backSettings(menu?: HTMLElement | null): boolean;
   seekTo(time: number): boolean; observePage(onChange: () => void): Dispose;
   readBrowseAccount(): BrowseAccountSnapshot | null; openBrowseAccount(): boolean; destroy(): void;
 }
 export interface RoutePort {
-  runtime: Runtime; interaction: InteractionStore; location: Location; history: History; window: Window; document: Document;
+  remoteHistory?: boolean; runtime: Runtime; interaction: InteractionStore; location: Location; history: History; window: Window; document: Document;
   routeNow(): string; renderMode(): void; hasTemporaryLayer(): boolean; enabled(): boolean;
   pause(): OperationResult; closeMenu(): void; onStart(): void;
 }
 export interface KeyboardKey { label: string; action: string; ariaLabel?: string; text?: string }
 export interface PinyinCandidate { key: string; text: string; consumed: number }
 export interface Pinyin { normalize(value: string): string; lookup(value: string): readonly PinyinCandidate[]; learn(candidate: PinyinCandidate): void }
-export interface Keyboard { rows(frame: MenuSnapshot['frame'], uppercase: boolean): KeyboardKey[][] }
+export interface Keyboard { readonly frames: Map<string, KeyboardKey[][]>; rows(frame: MenuSnapshot['frame'], uppercase: boolean): KeyboardKey[][] }
 export interface SearchPort {
   root: ShadowRoot; host: HTMLElement; readonly controller: MenuPort;
   controllerStyle: ControllerStyle; pinyin: Pinyin; keyboard: Keyboard;
   selected: number; menuState(): MenuSnapshot; send(event: InteractionEvent): TransitionResult;
   buttons(): HTMLButtonElement[]; focus(): void; feedback(text: string): void; close(): void;
 }
-export type MakeNode = (tag: string, className?: string, text?: string) => HTMLElement;
+export type MakeNode = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
 export interface WatchViewDependencies {
   activate(action: string): void; closePanel(): void;
+  seek?(seconds: number): OperationResult | Promise<OperationResult>;
   controllerStyle: ControllerStyle; styles: { watch: string };
 }
 export interface WatchPanelsPort {
@@ -246,19 +287,25 @@ export interface Navigation {
   choose(from: MeasuredItem, items: MeasuredItem[], direction: Direction, sections?: Record<string, NavigationSection>, rowFocus?: RowFocus): MeasuredItem | null;
 }
 export interface SharedDependencies { runtime: Runtime; interaction: InteractionStore; controllerStyle: ControllerStyle; focusManager?: FocusManager }
-export interface CoreDependencies extends SharedDependencies { navigation: Navigation }
+export interface CoreDependencies extends SharedDependencies {
+  navigation: Navigation;
+  mountOverlay?: (root: ShadowRoot, style: ControllerStyle) => import('../src/ui/browse-overlay').BrowseOverlayPresenter;
+}
 export interface CoreModule {
-  registerSite(config: object): void; configure(values: Partial<Settings>): void;
+  registerSite(config: import('./core').NavigationConfig): void; configure(values: Partial<Settings>): void;
   navigate(direction: Direction): void; act(action: Action): Disposition; focus(el: HTMLElement | null): void;
   resetContentFocus(): void; refresh(): void; destroy(): void;
   readonly hasTemporaryLayer: boolean; readonly hasOverlay: boolean;
     readonly current: HTMLElement | null; readonly section: string | undefined;
     readonly restoring: boolean;
 }
-export interface BrowseDependencies { runtime: Runtime; core: CoreModule; isMenuOpen(): boolean }
+export interface BrowseDependencies {
+  runtime: Runtime; core: CoreModule; isMenuOpen(): boolean;
+  mountGrid?: (dependencies: BrowseDependencies) => Dispose;
+}
 export interface SearchInstance {
-  createInput(section: HTMLElement): void;
-  render(section: HTMLElement, container: HTMLElement, message: HTMLElement, instructions: HTMLElement): void;
+  unmount?(): void;
+  render(section: HTMLElement): void;
   navigate(action: Action): Disposition;
   keydown(event: KeyboardEvent): boolean; renderKeys(): void; refreshCandidates(): void;
   focusFirstKey(): void; focusCandidate(): void; keyboardAction(key: Pick<KeyboardKey, 'action'> & Partial<KeyboardKey>): void;
@@ -267,23 +314,26 @@ export interface SearchInstance {
   readonly target: SearchTarget; initializeQuery(): void; destroy(): void;
 }
 export interface MenuDependencies extends SharedDependencies {
+  localChannel?: ApplicationChannel;
   styles: { menu: string };
+  mountQuickMenu?: (container: HTMLElement, interaction: InteractionStore,
+    items: readonly (readonly [string, string])[],
+    onAction: (id: string, button: HTMLButtonElement) => void) => Dispose;
   createSearch(port: Omit<SearchPort, 'controllerStyle' | 'pinyin' | 'keyboard'>): SearchInstance;
 }
 export interface WatchPanels {
   open(action: 'description' | 'comments'): void; hide(): void; close(): void;
   refresh(): void; load(): void; readonly buttons: HTMLElement[]; destroy(): void;
 }
-export type WatchView = Record<'host' | 'surface' | 'title' | 'meta' | 'progress' | 'fill' | 'elapsed' | 'duration'
-  | 'avatarButton' | 'avatarImage' | 'avatarFallback' | 'subscribeButton' | 'playButton' | 'likeButton'
-  | 'dislikeButton' | 'captionsButton' | 'recommendations' | 'empty' | 'dialog' | 'sheet' | 'panelTitle'
-  | 'description' | 'close' | 'status' | 'hint' | 'liveButton', HTMLElement> & {
-    root: ShadowRoot; make: MakeNode; icon(name: string): SVGSVGElement; controls: HTMLElement[];
+export type WatchView = Record<'host' | 'surface' | 'recommendations' | 'dialog' | 'sheet' | 'panelTitle'
+  | 'description' | 'close' | 'status', HTMLElement> & {
+    controls: HTMLButtonElement[]; progress: HTMLButtonElement;
+    root: ShadowRoot; make: MakeNode;
     updateHint(row: WatchSnapshot['row'], adjusting: boolean, canSeek?: boolean): void;
+    presentation: import('../src/ui/playback-presentation').PlaybackPresenter;
   };
 export interface WatchDependencies extends SharedDependencies {
-  createView(port: Omit<WatchViewDependencies, 'styles'>): WatchView;
-  createPanels(port: WatchPanelsPort): WatchPanels;
+  createSurface(callbacks: import('../src/ui/watch-surface').WatchSurfaceCallbacks, lifecycle: Scope): import('../src/ui/watch-surface').WatchSurface;
 }
 export interface CoordinatorModule {
   request: WatchRequest; setMode(mode: Mode): void; prepareVideo(href: string | null): boolean;
@@ -291,17 +341,36 @@ export interface CoordinatorModule {
   readonly adaptation: AdaptationSnapshot; readonly interactionState: InteractionSnapshot;
   readonly state: CoordinatorSnapshot; readonly mode: Mode; readonly navigating: boolean;
 }
+export interface ModuleFactory<Dependencies, Instance> { create(dependencies: Dependencies): Instance }
+export interface StateMachineModule {
+  createState(route?: string): InteractionSnapshot;
+  transition(state: InteractionSnapshot, event: InteractionEvent): TransitionResult;
+  freezeSnapshot(state: InteractionSnapshot): InteractionSnapshot;
+}
+export interface RouteStateModule {
+  handles(type: string): boolean;
+  transition(app: AppSnapshot, event: RouteEvent): { app: AppSnapshot; effects: readonly Effect[]; disposition: Disposition };
+}
+export interface BindingsSchema {
+  defaults: Record<string,number>; keys: Record<number,string>; labels: Record<string,string>; layouts: Record<string,string>;
+  normalize(raw?: unknown): Record<string,number>;
+  normalizeLayouts(raw?: unknown, legacy?: unknown): Record<string,Record<string,number>>;
+  contextLabel(action: string, layout: string): string;
+}
+export interface RouteControllerModule {
+  start(): void; prepareVideo(href: string | null): boolean; pageBack(): void; execute(effect: Effect): void; destroy(): void;
+}
 declare global {
   interface Window {
     YTGamepadRuntime: Runtime; YTGamepadInteraction: InteractionStore;
     YTGamepadStateMachine: {
       createState(route?: string): InteractionSnapshot;
       transition(state: InteractionSnapshot, event: InteractionEvent): TransitionResult;
-      createStore(initial?: InteractionSnapshot): InteractionStore;
+      freezeSnapshot(state: InteractionSnapshot): InteractionSnapshot;
     };
     YTGamepadRouteState: {
       handles(type: string): boolean;
-      transition(app: AppSnapshot, event: InteractionEvent): { app: AppSnapshot; effects: readonly Effect[]; disposition: Disposition };
+      transition(app: AppSnapshot, event: RouteEvent): { app: AppSnapshot; effects: readonly Effect[]; disposition: Disposition };
     };
     YTGamepadFocus: FocusManager; YTGamepadNavigation: Navigation;
     YTGamepadBindings: { defaults: Record<string, number>; keys: Record<number, string>; labels: Record<string, string>; normalize(raw?: unknown): Record<string, number>; layouts: Record<string, string>; normalizeLayouts(raw?: unknown, legacy?: unknown): Record<string, Record<string, number>>; contextLabel(action: string, layout: string): string };
@@ -317,7 +386,6 @@ declare global {
     YTGamepadInputModule: { create(dependencies: InputDependencies): InputModule };
     YTGamepadBrowseModule: { create(dependencies: BrowseDependencies): { destroy(): void } };
     YTGamepadSearch: { create(port: SearchPort): SearchInstance };
-    YTGamepadWatchView: { create(port: WatchViewDependencies): WatchView };
     YTGamepadWatchPanels: { create(port: WatchPanelsPort): WatchPanels };
     YTGamepadRouteController: { create(port: RoutePort): {
       start(): void; prepareVideo(href: string | null): boolean; pageBack(): void; execute(effect: Effect): void; destroy(): void;

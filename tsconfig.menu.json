@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/ui/**/*.vue",
+    "src/ui/**/*.ts",
+    "src/app/interaction-store.ts",
+    "src/playback/**/*.vue",
+    "src/playback/playback-model.ts",
+    "src/search/**/*.vue",
+    "src/search/**/*.ts",
+    "types/**/*.d.ts"
+  ]
+}

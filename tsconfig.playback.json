@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "skipLibCheck": true },
+  "include": [
+    "src/playback/playback-model.ts",
+    "src/playback/Timeline.vue",
+    "src/playback/VolumeControl.vue",
+    "src/ui/Playback*.vue",
+    "src/ui/playback-*.ts",
+    "src/ui/vue-watch-view.ts",
+    "types/**/*.d.ts"
+  ]
+}

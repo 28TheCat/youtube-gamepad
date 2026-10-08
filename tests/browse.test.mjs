@@ -14,9 +14,10 @@ test('browse return restores a category by identity and waits for its native lis
       getAttribute: () => null, click() { clicks++; selected = label; }
     } : null
   }));
-  const document = { querySelectorAll: selector => selector === 'yt-chip-cloud-chip-renderer' ? chips :
+  const document = { documentElement: { classList: { contains: () => false } }, getElementById: () => null, querySelector: () => null,
+    querySelectorAll: selector => selector === 'yt-chip-cloud-chip-renderer,[data-ytg-category]' ? chips :
     feed.map(href => ({ closest: () => null, getAttribute: () => href })) };
-  runInNewContext(moduleSource('sites/youtube.js'), { window, document, location: { pathname: '/' } });
+  runInNewContext(moduleSource('src/sites/youtube.ts'), { window, document, location: { pathname: '/' }, getComputedStyle: () => ({ visibility: 'visible' }) });
   const config = window.YTGamepadSite.createNavigationConfig({}), saved = config.captureBrowseState();
   assert.equal(saved.category, 'Music');
   assert.equal(config.restoreBrowseState(saved, {}), true, 'retained native category/list is reused');
@@ -31,12 +32,35 @@ test('browse return restores a category by identity and waits for its native lis
   assert.equal(config.restoreBrowseState(saved, {}), false, 'wait for chips to be rebuilt');
 });
 
+test('Vue category restoration ignores hidden native chips and waits for API loading', () => {
+  const window = {}; let selected = 'Music', loading = false, feed = ['old'];
+  const native = { isConnected: true, textContent: 'All', closest: () => null,
+    getBoundingClientRect: () => ({ width: 80 }), getAttribute: () => '', native: true };
+  const chips = ['All', 'Music'].map(label => ({ isConnected: true, textContent: label, closest: () => null,
+    getBoundingClientRect: () => ({ width: 80 }),
+    getAttribute: name => name === 'selected' && selected === label ? '' : null,
+    querySelector: selector => selector === 'button,[role="button"]' ? { getAttribute: () => null,
+      click() { selected = label; loading = true; } } : null }));
+  const document = { documentElement: { classList: { contains: () => true } }, querySelector: () => null,
+    getElementById: () => ({ dataset: { feedLoading: String(loading) } }),
+    querySelectorAll: selector => selector.includes('yt-chip') ? [native, ...chips] :
+      feed.map(href => ({ closest: () => null, getAttribute: () => href })) };
+  runInNewContext(moduleSource('src/sites/youtube.ts'), { window, document, location: { pathname: '/' },
+    getComputedStyle: node => ({ visibility: node.native ? 'hidden' : 'visible' }) });
+  const config = window.YTGamepadSite.createNavigationConfig({});
+  const saved = config.captureBrowseState(); assert.equal(saved.category, 'Music');
+  selected = 'All'; const attempt = {};
+  assert.equal(config.restoreBrowseState(saved, attempt), false);
+  feed = ['new']; assert.equal(config.restoreBrowseState(saved, attempt), false);
+  loading = false; assert.equal(config.restoreBrowseState(saved, attempt), true);
+});
+
 test('returning from native sidebar closes only a transient open drawer', () => {
   const window = {};
   let clicks = 0, opened = true, persistent = false;
   const drawer = { get persistent() { return persistent; }, hasAttribute: name => name === 'opened' ? opened : name === 'persistent' && persistent };
   const document = { querySelector: selector => selector === 'tp-yt-app-drawer#guide' ? drawer : { click() { clicks++; opened = false; } } };
-  runInNewContext(moduleSource('sites/youtube.js'), { window, document });
+  runInNewContext(moduleSource('src/sites/youtube.ts'), { window, document });
   const config = window.YTGamepadSite.createNavigationConfig({});
   const sidebar = { closest: selector => selector.includes('ytd-guide-renderer') ? {} : null };
   const card = { closest: selector => selector.includes('ytd-rich-item-renderer') ? {} : null };
@@ -68,7 +92,7 @@ test('shoulders activate adjacent categories, skip hidden chips, and stop at eit
     click() { clicks.push(index); active = index; }
   }));
   const document = { querySelectorAll: () => chips };
-  runInNewContext(moduleSource('sites/youtube.js'), {
+  runInNewContext(moduleSource('src/sites/youtube.ts'), {
     window, document, location, getComputedStyle: () => ({ display: 'block', visibility: 'visible' })
   });
   const config = window.YTGamepadSite.createNavigationConfig({ perform: action => window.YTGamepadSite.perform(action) });
@@ -112,9 +136,9 @@ test('shoulders activate modern chip buttons outside the page manager', () => {
     click() { assert.fail('host clicks do not reach the inner button handler'); }
   }));
   const document = {
-    querySelectorAll: selector => selector === 'yt-chip-cloud-chip-renderer' ? chips : []
+    querySelectorAll: selector => selector === 'yt-chip-cloud-chip-renderer,[data-ytg-category]' ? chips : []
   };
-  runInNewContext(moduleSource('sites/youtube.js'), {
+  runInNewContext(moduleSource('src/sites/youtube.ts'), {
     window, document, location: { pathname: '/' },
     getComputedStyle: () => ({ display: 'block', visibility: 'visible' })
   });
@@ -133,7 +157,7 @@ test('shoulders activate modern chip buttons outside the page manager', () => {
 
 test('category focus ring follows the visible chip face and its smaller corners', () => {
   const window = {};
-  runInNewContext(moduleSource('sites/youtube.js'), { window });
+  runInNewContext(moduleSource('src/sites/youtube.ts'), { window });
   const config = window.YTGamepadSite.createNavigationConfig({});
   const face = {};
   const chip = { matches: () => true, querySelector: selector => selector === '.ytChipShapeChip' ? face : null };
@@ -147,7 +171,7 @@ test('TV account entry forwards to the native account target and rejects unavail
   const window = {};
   let native = null, clicks = 0;
   const document = { querySelector: () => native };
-  runInNewContext(moduleSource('sites/youtube.js'), { window, document });
+  runInNewContext(moduleSource('src/sites/youtube.ts'), { window, document });
   const site = window.YTGamepadSite;
   assert.equal(site.readBrowseAccount(), null);
   assert.equal(site.openBrowseAccount(), false);

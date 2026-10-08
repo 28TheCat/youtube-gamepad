@@ -1,15 +1,16 @@
+import { legacyModuleSource } from '../scripts/test-source.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { moduleSource } from '../scripts/test-source.mjs';
-const source = file => readFileSync(new URL('../' + file, import.meta.url), 'utf8');
+const source = file => legacyModuleSource(file);
 const raw = { module: 'site', operation: 'readPlayback', name: 'Error', reason: 'original failure', stack: 'Error: original failure',
   state: { route: 'watch', mode: 'controls', adaptation: 'ready', enabled: true, title: 'private' } };
 
 test('store bounds count and total size and drops unknown fields and URLs', () => {
   const context = {};
-  runInNewContext(source('diagnostics-store.js'), context);
+  runInNewContext(source('src/diagnostics/diagnostics-store.ts'), context);
   const store = context.YTGamepadDiagnosticStore;
   const entry = store.normalize({ ...raw, reason: 'failed https://www.youtube.com/watch?v=private' }, '0.2.0', 123);
   assert.equal(entry.reason, 'failed [URL]');
@@ -25,7 +26,7 @@ test('collector retains early failures until the bridge is ready and cannot brea
   const listeners = {}, messages = [];
   const window = { addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, postMessage(message) { messages.push(message); } };
   const context = { window, location: { origin: 'https://www.youtube.com' } };
-  runInNewContext(moduleSource('diagnostics.js'), context);
+  runInNewContext(moduleSource('src/diagnostics/diagnostics.ts'), context);
   for (let i = 0; i < 105; i++) window.YTGamepadDiagnostics.record('site', 'read', new Error('failure ' + i), {});
   assert.equal(messages.length, 0);
   for (const fn of listeners.message) fn({ source: window, origin: context.location.origin, data: { source: 'yt-gamepad-settings' } });
@@ -41,7 +42,7 @@ test('worker serializes concurrent tabs, supplies its own version, persists acro
   const chrome = { runtime: { id: 'test', getURL: path => 'chrome-extension://test/' + path, getManifest: () => ({ version: '0.2.0' }), onMessage: { addListener(fn) { listeners.message = fn; } } },
     storage: { local: { async get(key) { return { [key]: structuredClone(saved[key]) }; }, async set(values) { writes++; Object.assign(saved, structuredClone(values)); }, async remove(key) { delete saved[key]; } },
       onChanged: { addListener() {} } }, tabs: { onRemoved: { addListener() {} } }, windows: { onRemoved: { addListener() {} } } };
-  const start = () => runInNewContext(moduleSource('background.js'), { chrome, console, Date: { now: () => now } });
+  const start = () => runInNewContext(moduleSource('src/background/background.ts'), { chrome, console, Date: { now: () => now } });
   start();
   const send = (entry = raw, id = 1, url = 'https://www.youtube.com/watch?v=secret') => new Promise(resolve => {
     const result = listeners.message({ type: 'ytg-diagnostic', entry }, { frameId: 0, tab: { id }, url }, resolve);
@@ -56,7 +57,7 @@ test('worker serializes concurrent tabs, supplies its own version, persists acro
   now += 60000; await send(); assert.equal(writes, 103);
   assert.equal(listeners.message({ type: 'ytg-clear-diagnostics' }, { id: 'test', url: 'https://www.youtube.com/' }, () => {}), undefined);
   const pending = send();
-  await new Promise(resolve => listeners.message({ type: 'ytg-clear-diagnostics' }, { id: 'test', url: chrome.runtime.getURL('options.html') }, resolve));
+  await new Promise(resolve => listeners.message({ type: 'ytg-clear-diagnostics' }, { id: 'test', url: chrome.runtime.getURL('src/settings/options.html') }, resolve));
   await pending; assert.equal(saved['ytg-diagnostics'], undefined);
   await send();
   const inlineRequest = { type: 'ytg-clear-inline-diagnostics' };
@@ -69,21 +70,3 @@ test('worker serializes concurrent tabs, supplies its own version, persists acro
   assert.equal(saved['ytg-diagnostics'], undefined);
 });
 
-test('settings exports persisted JSON only on user action and supports clearing', async () => {
-  const nodes = Object.fromEntries(['diagnosticStatus', 'exportDiagnostics', 'clearDiagnostics'].map(id =>
-    [id, { addEventListener(type, fn) { this[type] = fn; } }]));
-  let blob, clicked = false, removed = false, cleared;
-  const context = { Blob, Date, setTimeout(fn) { fn(); }, URL: { createObjectURL(value) { blob = value; return 'blob:test'; }, revokeObjectURL() {} },
-    chrome: { runtime: { getManifest: () => ({ version: '0.2.0' }), async sendMessage(message) { cleared = message.type; return { ok: true }; } }, storage: { local: {
-      async get() { return { 'ytg-diagnostics': [{ ...raw, timestamp: 123, version: '0.1.0' }] }; }, async remove(key) { cleared = key; }
-    } } }, document: { querySelector: selector => nodes[selector.slice(1)], body: { append() {} }, createElement() {
-      return { click() { clicked = true; }, remove() { removed = true; } };
-    } } };
-  runInNewContext(source('diagnostics-store.js') + '\n' + source('diagnostics-options.js'), context);
-  assert.equal(blob, undefined);
-  await nodes.exportDiagnostics.click();
-  const report = JSON.parse(await blob.text());
-  assert.equal(report.entries[0].reason, raw.reason); assert.equal(report.entries[0].version, '0.1.0');
-  assert.equal(report.extensionVersion, '0.2.0'); assert.ok(clicked && removed);
-  await nodes.clearDiagnostics.click(); assert.equal(cleared, 'ytg-clear-diagnostics');
-});

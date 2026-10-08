@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/app/browse-store.ts", "src/sites/youtube-browse.ts", "src/ui/browse-surface.ts", "src/ui/BrowseGrid.vue", "src/ui/VideoCard.vue", "types/**/*.d.ts"]
+}

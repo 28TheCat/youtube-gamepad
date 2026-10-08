@@ -4,6 +4,7 @@ diagnostic-test-results.txt
 
 # 输出产物与临时文件
 output/
+dist/
 .playwright-cli/
 .workbuddy/
 *.gz

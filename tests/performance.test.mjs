@@ -31,7 +31,7 @@ test('player animation does no recovery work while mixed page mutations still co
 
 test('YouTube filters animated player subtrees while keeping native settings changes', () => {
   const window = {};
-  runInNewContext(moduleSource('sites/youtube.js'), { window });
+  runInNewContext(moduleSource('src/sites/youtube.ts'), { window });
   const ignore = window.YTGamepadSite.createNavigationConfig({}).ignoreMutation;
   const target = { closest: selector => selector === '#movie_player' || selector.includes('caption') ? {} : null };
   assert.equal(ignore({ target }), true);
@@ -45,7 +45,7 @@ test('dictionary shards stay lazy and learned rankings invalidate cached results
   const parsed = [], window = {}, storage = new Map();
   const context = { window, JSON: { parse(value) { parsed.push(value.length); return JSON.parse(value); }, stringify: JSON.stringify },
     localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) } };
-  for (const file of ['pinyin-data.js', 'pinyin.js']) runInNewContext(moduleSource(file), context);
+  for (const file of ['src/search/pinyin-data.ts', 'src/search/pinyin.ts']) runInNewContext(moduleSource(file), context);
   const ime = window.YTGamepadPinyin;
   assert.equal(parsed.length, 0); ime.lookup(''); assert.equal(parsed.length, 0);
   const list = ime.lookup('ni'); assert.equal(parsed.length, 1);

@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 
 function setup() {
   const window = {};
-  runInNewContext(moduleSource('bindings.js'), { window });
+  runInNewContext(moduleSource('src/input/bindings.ts'), { window });
   return window;
 }
 

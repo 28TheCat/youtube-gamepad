@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 export const extensionRoot = process.env.YTG_EXTENSION_ROOT === 'latest-release'
   ? JSON.parse(readFileSync(resolve(repository, 'output/releases/latest.json'), 'utf8')).directory
-  : resolve(process.env.YTG_EXTENSION_ROOT || repository);
+  : resolve(process.env.YTG_EXTENSION_ROOT || resolve(repository, 'dist'));
 
 export async function launchExtension(t) {
   const output = resolve(repository, 'output/playwright');
@@ -19,18 +19,31 @@ export async function launchExtension(t) {
     rmSync(profile, { recursive: true, force: true });
   });
   // Branded Chrome/Edge no longer support command-line extension side-loading.
-  // Use bundled Chromium; branded-browser/hardware acceptance is a separate gate.
+  // Use bundled Chromium by default. An explicit CDP mode supports locally
+  // installed Chrome using its unpacked-extension debugging API.
+  const cdpLoad = process.env.YTG_EXTENSION_CDP_LOAD === '1';
   context = await chromium.launchPersistentContext(profile, {
     channel: 'chromium', headless: true, viewport: { width: 1280, height: 900 },
     ignoreDefaultArgs: ['--disable-extensions'],
     ...(process.env.YTG_BROWSER_EXECUTABLE ? { executablePath: process.env.YTG_BROWSER_EXECUTABLE } : {}),
-    args: [`--disable-extensions-except=${extensionRoot}`, `--load-extension=${extensionRoot}`]
+    args: cdpLoad ? ['--enable-unsafe-extension-debugging']
+      : [`--disable-extensions-except=${extensionRoot}`, `--load-extension=${extensionRoot}`]
   });
+  if (cdpLoad) {
+    const session = await context.browser().newBrowserCDPSession();
+    await session.send('Extensions.loadUnpacked', { path: extensionRoot });
+    await session.detach();
+  }
   const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 15000 });
+  // Observe public events without exposing extension module instances.
+  await context.addInitScript(() => {
+    window.__testConnected = false;
+    window.addEventListener('yt-gamepad-connection', event => { window.__testConnected = event.detail.connected; });
+  });
   const id = new URL(worker.url()).host;
   t.diagnostic(`Browser ${context.browser()?.version()} | extension ${id} | root ${extensionRoot}`);
   const options = await context.newPage();
-  await options.goto(`chrome-extension://${id}/options.html`);
+  await options.goto(`chrome-extension://${id}/src/settings/options.html`);
   await options.locator('fieldset').waitFor({ state: 'visible' });
   await options.waitForFunction(() => !document.querySelector('fieldset').disabled);
   return { context, worker, id, options };
@@ -45,7 +58,7 @@ a,button,input{display:inline-block;padding:24px}
 </body></html>`;
 
 export async function ready(page) {
-  await page.waitForFunction(() => !!window.YTGamepadCoordinator && !!window.YTGamepadInput);
+  await page.waitForFunction(() => !!document.querySelector('#yt-gamepad-overlay') && !!document.documentElement.dataset.ytgInputMode);
 }
 
 // Replace only the physical input source, in BOTH actual manifest worlds.

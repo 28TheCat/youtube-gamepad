@@ -1,35 +1,41 @@
-// Runtime prerequisites checked against the manifest and used by VM fixtures.
+// Compatibility dependencies for legacy VM/DOM fixtures only. Production
+// dependencies are declared by source imports and resolved by Vite.
 // Site and view instances are connected by coordinator; they do not import each other.
 export const dependencies = {
-  'src/shared/actions.js': [],
-  'src/input/bindings.js': ['src/shared/actions.js'],
-  'src/shared/runtime.js': [],
-  'src/diagnostics/diagnostics.js': ['src/shared/runtime.js'],
-  'src/diagnostics/diagnostics-store.js': [],
-  'src/app/route-state.js': [],
-  'src/app/state-machine.js': ['src/app/route-state.js'],
-  'src/app/route-controller.js': ['src/shared/runtime.js', 'src/app/state-machine.js'],
-  'src/input/controller-style.js': ['src/shared/runtime.js', 'src/ui/styles.js', 'src/input/bindings.js'],
-  'src/input/gamepad.js': ['src/shared/runtime.js', 'src/input/controller-style.js'],
-  'src/navigation/navigation.js': [],
-  'src/navigation/focus.js': [],
-  'src/navigation/core.js': ['src/shared/runtime.js', 'src/input/controller-style.js', 'src/app/state-machine.js', 'src/navigation/navigation.js', 'src/navigation/focus.js'],
-  'src/search/keyboard.js': [],
-  'src/search/pinyin-data.js': [],
-  'src/search/pinyin.js': ['src/search/pinyin-data.js'],
-  'src/ui/styles.js': [],
-  'src/search/search.js': ['src/input/controller-style.js', 'src/search/keyboard.js', 'src/search/pinyin.js', 'src/app/state-machine.js'],
-  'src/ui/menu.js': ['src/shared/runtime.js', 'src/ui/styles.js', 'src/search/search.js', 'src/navigation/focus.js', 'src/app/state-machine.js', 'src/input/controller-style.js'],
-  'src/ui/watch-view.js': ['src/input/controller-style.js', 'src/ui/styles.js'],
-  'src/ui/watch-panels.js': ['src/input/controller-style.js'],
-  'src/playback/watch.js': ['src/shared/runtime.js', 'src/app/state-machine.js', 'src/ui/watch-view.js', 'src/ui/watch-panels.js', 'src/navigation/focus.js'],
-  'src/app/browse.js': ['src/shared/runtime.js'],
-  'src/sites/youtube.js': ['src/shared/actions.js', 'src/shared/runtime.js', 'src/navigation/focus.js'],
-  'src/app/coordinator.js': ['src/input/bindings.js', 'src/diagnostics/diagnostics.js', 'src/shared/runtime.js', 'src/app/route-controller.js', 'src/navigation/core.js', 'src/sites/youtube.js'],
-  'src/app/content.js': ['src/input/bindings.js'],
-  'src/settings/inline-settings.js': ['src/input/bindings.js', 'src/diagnostics/diagnostics-store.js'],
-  'src/background/background.js': ['src/diagnostics/diagnostics-store.js'],
-  'src/popup/popup.js': []
+  'src/shared/actions.ts': [],
+  'src/input/bindings.ts': ['src/shared/actions.ts'],
+  'src/shared/runtime.ts': [],
+  'src/diagnostics/diagnostics.ts': ['src/shared/runtime.ts'],
+  'src/diagnostics/diagnostics-store.ts': [],
+  'src/app/route-state.ts': [],
+  'src/app/state-machine.ts': ['src/app/route-state.ts'],
+  'src/app/route-controller.ts': ['src/shared/runtime.ts', 'src/app/state-machine.ts'],
+  'src/input/controller-style.ts': ['src/shared/runtime.ts', 'src/ui/styles.ts', 'src/input/bindings.ts'],
+  'src/input/gamepad.ts': ['src/shared/runtime.ts', 'src/input/controller-style.ts'],
+  'src/navigation/navigation.ts': [],
+  'src/navigation/focus.ts': [],
+  'src/navigation/core.ts': ['src/shared/runtime.ts', 'src/input/controller-style.ts', 'src/app/state-machine.ts', 'src/navigation/navigation.ts', 'src/navigation/focus.ts'],
+  'src/search/keyboard.ts': [],
+  'src/search/pinyin-data.ts': [],
+  'src/search/pinyin.ts': ['src/search/pinyin-data.ts'],
+  'src/ui/styles.ts': [],
+  'src/search/search-text.ts': [],
+  'src/search/search-model.ts': ['src/search/search-text.ts'],
+  'src/search/mount-search.ts': [],
+  'src/search/search.ts': ['src/input/controller-style.ts', 'src/search/keyboard.ts', 'src/search/pinyin.ts', 'src/app/state-machine.ts', 'src/search/search-model.ts', 'src/search/mount-search.ts'],
+  'src/ui/menu.ts': ['src/shared/runtime.ts', 'src/ui/styles.ts', 'src/search/search.ts', 'src/navigation/focus.ts', 'src/app/state-machine.ts', 'src/input/controller-style.ts'],
+  'src/ui/watch-view.ts': ['src/input/controller-style.ts', 'src/ui/styles.ts'],
+  'src/ui/mount-watch-panel.ts': [],
+  'src/ui/watch-panels.ts': ['src/input/controller-style.ts', 'src/ui/mount-watch-panel.ts'],
+  'src/ui/playback-presentation.ts': [],
+  'src/ui/watch-surface.ts': ['src/ui/playback-presentation.ts'],
+  'src/playback/watch.ts': ['src/shared/runtime.ts', 'src/app/state-machine.ts', 'src/ui/watch-view.ts', 'src/ui/watch-panels.ts', 'src/navigation/focus.ts', 'src/ui/watch-surface.ts'],
+  'src/app/browse.ts': ['src/shared/runtime.ts'],
+  'src/sites/youtube.ts': ['src/shared/actions.ts', 'src/shared/runtime.ts', 'src/navigation/focus.ts'],
+  'src/app/coordinator.ts': ['src/input/bindings.ts', 'src/diagnostics/diagnostics.ts', 'src/shared/runtime.ts', 'src/app/route-controller.ts', 'src/navigation/core.ts', 'src/sites/youtube.ts'],
+  'src/app/content.ts': ['src/input/bindings.ts'],
+  'src/settings/inline-settings.ts': ['src/input/bindings.ts', 'src/diagnostics/diagnostics-store.ts'],
+  'src/background/background.ts': ['src/diagnostics/diagnostics-store.ts']
 };
 export function assertLoadOrder(files) {
   const loaded = new Set();
@@ -39,9 +45,9 @@ export function assertLoadOrder(files) {
     for (const dependency of dependencies[file]) {
       if (!loaded.has(dependency)) throw new Error(`${file} requires ${dependency} before it`);
     }
-    if (file === 'src/app/coordinator.js') {
+    if (file === 'src/app/coordinator.ts') {
       for (const module of compositionModules) {
-        if (!loaded.has(module)) throw new Error(`src/app/coordinator.js requires ${module} before assembly`);
+        if (!loaded.has(module)) throw new Error(`src/app/coordinator.ts requires ${module} before assembly`);
       }
     }
     loaded.add(file);
@@ -50,5 +56,5 @@ export function assertLoadOrder(files) {
 
 // Full extension assembly requires these definitions; small VM policy tests can
 // provide module doubles instead of rendering every feature.
-export const compositionModules = ['src/navigation/focus.js', 'src/input/controller-style.js', 'src/input/gamepad.js',
-  'src/ui/menu.js', 'src/playback/watch.js', 'src/app/browse.js', 'src/ui/styles.js', 'src/search/keyboard.js', 'src/search/pinyin.js'];
+export const compositionModules = ['src/navigation/focus.ts', 'src/input/controller-style.ts', 'src/input/gamepad.ts',
+  'src/ui/menu.ts', 'src/playback/watch.ts', 'src/app/browse.ts', 'src/ui/styles.ts', 'src/search/keyboard.ts', 'src/search/pinyin.ts'];
