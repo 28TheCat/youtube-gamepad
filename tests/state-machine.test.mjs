@@ -10,6 +10,15 @@ runInNewContext(['src/app/route-state.ts', 'src/app/state-machine.ts'].map(file 
 const { createState, createStore, transition } = window.YTGamepadStateMachine;
 const plain = value => JSON.parse(JSON.stringify(value));
 const effects = result => result.effects.map(effect => effect.type).join(',');
+test('hidden playback controls allow direct directional seeking without moving invisible focus', () => {
+  const store = createStore(createState('/watch?v=first'));
+  store.dispatch({ type: 'MODE', value: 'playback', route: '/watch?v=first' });
+  for (const [action, media] of [['left', 'seekBack'], ['right', 'seekForward']]) {
+    const result = store.dispatch({ type: 'BASE_INPUT', action, route: '/watch?v=first' });
+    assert.deepEqual(plain(result.effects), [{ type: 'media', value: media }]);
+    assert.equal(store.state.app.mode, 'playback');
+  }
+});
 
 test('recommendation grid moves between rows, clamps a short last row and requests more at the end', () => {
   const store = createStore(createState('/watch?v=first'));

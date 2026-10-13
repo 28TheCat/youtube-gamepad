@@ -25,6 +25,12 @@ function fixture(t) {
   write('licenses/vue-LICENSE.txt', readFileSync(new URL('../licenses/vue-LICENSE.txt', import.meta.url)));
   write('licenses/pinia-LICENSE.txt', readFileSync(new URL('../licenses/pinia-LICENSE.txt', import.meta.url)));
   write('assets/controller/kenney.json', JSON.stringify(controllerAssets));
+  const controllerFont = JSON.parse(readFileSync(new URL('../assets/controller/controller-font/prompts.json', import.meta.url), 'utf8'));
+  for (const file of ['assets/controller/controller-font/prompts.json', 'assets/controller/controller-font/upstream-revision.txt',
+    'assets/controller/controller-font/keymap_keyboard.ttf', 'assets/controller/controller-font/FREEWARE.txt',
+    'licenses/controller-font-FREEWARE.txt', ...Object.keys(controllerFont.files)]) {
+    write(file, readFileSync(new URL('../' + file, import.meta.url)));
+  }
   for (const file of Object.keys(controllerAssets.files)) write(file, readFileSync(new URL('../' + file, import.meta.url)));
   write('assets/controller/layout.svg', readFileSync(new URL('../assets/controller/layout.svg', import.meta.url)));
   const { files } = releaseFiles(root);

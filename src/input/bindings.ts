@@ -33,5 +33,7 @@ export let YTGamepadBindings!: BindingsSchema;
     const watchLabels: Record<string,string> = { confirm: '确认 / 选择', back: '返回 / 关闭', playPause: '播放 / 暂停', search: '搜索视频', seekBack: '后退 10 秒', seekForward: '快进 10 秒', volumeDown: '降低音量', volumeUp: '提高音量', help: '快捷菜单' };
     return watchLabels[action] || labels[action];
   }
-  YTGamepadBindings = { defaults, keys, labels, normalize, layouts, normalizeLayouts, contextLabel };
+  // A separate preset leaves both saved custom layouts intact.
+  const rightHand = Object.freeze({ ...defaults, help: 5, seekForward: 9 });
+  YTGamepadBindings = { defaults, rightHand, keys, labels, normalize, layouts, normalizeLayouts, contextLabel };
 })();

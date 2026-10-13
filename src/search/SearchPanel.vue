@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '../shared/use-i18n';
+const { t } = useI18n();
 import type { ControllerStyle } from '../../types/ports.js';
 import type { SearchView, SearchViewActions } from './search-view';
 import SearchKeyboard from './SearchKeyboard.vue';
@@ -11,7 +13,7 @@ const shortcuts = [['D-pad / left stick', 'Select'], ['A', 'Type'], ['X', 'Delet
 </script>
 
 <template>
-  <input id="query" data-focus-id="query" data-vue-search aria-label="Search query" autocomplete="off" placeholder="Search" :value="view.query"
+  <input id="query" data-focus-id="query" data-vue-search :aria-label="t('Search query')" autocomplete="off" :placeholder="t('Search')" :value="view.query"
     @input="actions.input($event.currentTarget as HTMLInputElement)" @select="actions.input($event.currentTarget as HTMLInputElement)"
     @keyup="actions.input($event.currentTarget as HTMLInputElement)" @click="actions.input($event.currentTarget as HTMLInputElement)"
     @keydown.enter="if (!$event.isComposing) { $event.preventDefault(); actions.submit(); }" />
@@ -21,6 +23,6 @@ const shortcuts = [['D-pad / left stick', 'Select'], ['A', 'Type'], ['X', 'Delet
   </div>
   <p id="message" role="status"></p>
   <p id="shortcuts" class="controls"><span v-for="[key, description] in shortcuts" :key="key" class="shortcut-item">
-    <span class="shortcut-button" v-badge="[controllerStyle, key]"></span><span>{{ view.composing && key === 'Y' ? 'Confirm candidate' : view.composing && key === 'LB / RB' ? 'Change page' : description }}</span>
+    <span class="shortcut-button" v-badge="[controllerStyle, key]"></span><span>{{ t(view.composing && key === 'Y' ? 'Confirm candidate' : view.composing && key === 'LB / RB' ? 'Change page' : description) }}</span>
   </span></p>
 </template>

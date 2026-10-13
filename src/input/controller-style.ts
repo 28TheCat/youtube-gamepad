@@ -3,6 +3,7 @@ import type { ControllerStyle } from '../../types/ports';
 import { YTGamepadRuntime } from '../shared/runtime.ts';
 import { YTGamepadBindings } from './bindings.ts';
 import { YTGamepadStyles } from '../ui/styles.ts';
+import { t } from '../shared/i18n';
 export let YTGamepadControllerStyle: ControllerStyle | undefined;
 // Prompts follow action bindings and the active controller's physical labels.
 (() => {
@@ -28,7 +29,9 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
     return 'generic';
   }
   const keysPattern = /\b(?:Start|LB|RB|LT|RT|L3|R3|A|B|X|Y)\b|[←→↑↓]/g;
-  const format = (text: string) => text.replace(keysPattern, (key: string) => profiles[family][boundKey(key)] || boundKey(key));
+  const navigationText = (text: string) => document.documentElement.dataset.ytgNavigationStick === 'right'
+    ? text.replace(/left stick/gi, 'right stick').replace(/左摇杆/g, '右摇杆') : text;
+  const format = (text: string) => navigationText(text).replace(keysPattern, (key: string) => profiles[family][boundKey(key)] || boundKey(key));
   function repaint() {
     for (const root of roots) for (const node of root.querySelectorAll<HTMLElement>('[data-ytg-key],[data-ytg-text],[data-ytg-title],[data-ytg-aria],[data-ytg-hint]')) paint(node);
   }
@@ -44,7 +47,8 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
       node.setAttribute('data-ytg-icon', parts.every((part) => Object.hasOwn(profiles[family], part) || /^[←→↑↓]$/.test(part)) ? 'true' : 'false');
       node.setAttribute('aria-label', format(key));
     }
-    const hint = node.getAttribute('data-ytg-hint');
+    const sourceHint = node.getAttribute('data-ytg-hint');
+    const hint = sourceHint === null ? null : navigationText(t(sourceHint));
     if (hint !== null) {
       const pieces = [], matches = hint.matchAll(keysPattern);
       let offset = 0;
@@ -63,8 +67,8 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
     for (const [marker, attribute] of [['data-ytg-text', null], ['data-ytg-title', 'title'], ['data-ytg-aria', 'aria-label']] as const) {
       const template = node.getAttribute(marker);
       if (template == null) continue;
-      if (attribute) node.setAttribute(attribute, format(template));
-      else node.textContent = format(template);
+      if (attribute) node.setAttribute(attribute, format(t(template)));
+      else node.textContent = format(t(template));
     }
   }
   function bind<T extends HTMLElement>(node: T, template: string, attribute?: string) {
@@ -93,6 +97,8 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
     }
   };
   document.documentElement.dataset.ytgController = family;
+  lifecycle.listen(document, 'ytg-language-changed', repaint);
+  lifecycle.listen(window, 'yt-gamepad-navigation-stick', repaint);
   const published = YTGamepadControllerStyle;
   lifecycle.cleanup(() => { roots.clear(); delete document.documentElement.dataset.ytgController; if (YTGamepadControllerStyle === published) YTGamepadControllerStyle = undefined; });
 })();

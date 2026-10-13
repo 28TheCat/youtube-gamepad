@@ -4,12 +4,53 @@ import type { NavigationConfig, InteractiveElement } from '../../types/core';
 type Mutable<T> = {-readonly [K in keyof T]: T[K]};
 
 import { YTGamepadActions } from '../shared/actions.ts';
+import { YTGamepadSeeking } from '../playback/seek';
 export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFactory<SiteDependencies,SitePort>;
 (() => {
   /** @param {import('../../types/ports.js').SiteDependencies} dependencies */
   function create({ runtime, diagnostics, focusManager, pageAccess = undefined }: import('../../types/ports.js').SiteDependencies) {
   const lifecycle = runtime.scope('site');
   const getVideo = () => document.querySelector<HTMLVideoElement>('video.html5-main-video') || document.querySelector<HTMLVideoElement>('video');
+  let speedSession: { video: HTMLVideoElement; rate: number; applied: number; route: string; source: string } | undefined;
+  let speedInterrupted = false;
+  function restoreSpeed() {
+    const saved = speedSession;
+    speedSession = undefined;
+    if (saved) speedInterrupted = true;
+    // Respect a new speed chosen through YouTube while our override was active.
+    if (saved && saved.video.playbackRate === saved.applied) {
+      try { saved.video.playbackRate = saved.rate; } catch (error) { diagnostics?.record('site', 'restoreSpeed', error); }
+    }
+  }
+  function temporarySpeed(held: boolean): number | false {
+    if (!held) { restoreSpeed(); speedInterrupted = false; return false; }
+    if (speedInterrupted) return false;
+    const video = getVideo(), route = location.pathname + location.search;
+    if (speedSession) {
+      if (video !== speedSession.video || route !== speedSession.route || video?.currentSrc !== speedSession.source ||
+          video.isConnected === false || video.paused || video.ended || video.playbackRate !== speedSession.applied) {
+        restoreSpeed(); return false;
+      }
+      return speedSession.applied;
+    }
+    if (location.pathname !== '/watch' || !video || video.paused || video.ended || video.isConnected === false ||
+        !Number.isFinite(video.duration) || video.duration <= 0 || readTimeline(video).isLive ||
+        !Number.isFinite(video.playbackRate) || video.playbackRate <= 0 || video.playbackRate >= 2) return false;
+    speedSession = { video, rate: video.playbackRate, applied: 2, route, source: video.currentSrc };
+    try { video.playbackRate = 2; }
+    catch { restoreSpeed(); return false; }
+    return 2;
+  }
+  lifecycle.cleanup(restoreSpeed);
+  for (const event of ['yt-navigate-start', 'yt-navigate-finish']) lifecycle.listen(document, event, restoreSpeed);
+  for (const event of ['pause', 'ended', 'emptied', 'loadstart']) lifecycle.listen(document, event, e => {
+    if (e.target === speedSession?.video) restoreSpeed();
+  }, true);
+  lifecycle.listen(document, 'ratechange', e => {
+    if (e.target === speedSession?.video && speedSession.video.playbackRate !== speedSession.applied) restoreSpeed();
+  }, true);
+  for (const event of ['blur', 'pagehide', 'popstate']) lifecycle.listen(window, event, restoreSpeed);
+  lifecycle.listen(document, 'visibilitychange', () => { if (document.hidden) restoreSpeed(); });
   const progressSelector = '.ytp-progress-bar';
   // Keep preview handling in the site adapter: never pause the main watch player.
   const cardSelector = 'ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model';
@@ -64,9 +105,11 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       }, true);
     }
   }
+  let seekRun: { video: HTMLVideoElement; route: string; action: string; time: number; distance: number } | undefined;
   function perform(action: string) {
     const video = getVideo();
     if (!video) return false;
+    if (action !== 'seekBack' && action !== 'seekForward') seekRun = undefined;
     if (action === 'pause') video.pause();
     else if (action === 'playPause') { if (video.paused) return Promise.resolve(video.play()).then(() => true); else video.pause(); }
     else if (action === 'captions') {
@@ -76,8 +119,15 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
     }
     else if (action === 'mute') video.muted = !video.muted;
     else if (action === 'seekBack' || action === 'seekForward') {
-      const step = YTGamepadActions.get(action)!.parameter!.default;
-      return seekTo(video.currentTime + (action === 'seekBack' ? -step : step));
+      const time = Date.now(), route = location.pathname + location.search;
+      const distance = seekRun?.video === video && seekRun.route === route && seekRun.action === action && time - seekRun.time < 600
+        ? seekRun.distance : 0;
+      // Keep the familiar single-tap step; accelerate only a continuous run.
+      const step = YTGamepadSeeking.step(distance, YTGamepadActions.get(action)!.parameter!.default);
+      const before = video.currentTime;
+      const ok = seekTo(before + (action === 'seekBack' ? -step : step));
+      seekRun = ok ? { video, route, action, time, distance: distance + Math.abs(video.currentTime - before) } : undefined;
+      return ok;
     }
     else if (action === 'goLive') {
       const timeline = readTimeline(video);
@@ -465,7 +515,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       below.scrollTop += target.getBoundingClientRect().top - below.getBoundingClientRect().top;
     }
   }
-  const getSearchTarget = () => document.querySelector?.<HTMLInputElement>('input#search,input[name="search_query"],input.ytSearchboxComponentInput');
+  const getSearchTarget = () => document.querySelector?.<HTMLInputElement>('#ytg-search-host:not([hidden]) input') || document.querySelector?.<HTMLInputElement>('input#search,input[name="search_query"],input.ytSearchboxComponentInput');
   function browseAccountTarget() {
     return document.querySelector?.<HTMLElement>('ytd-masthead #avatar-btn,ytd-masthead a[href*="accounts.google.com"],ytd-masthead a[href^="/signin"]');
   }
@@ -570,7 +620,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       rememberRegionReturn: () => location.pathname !== '/watch' && !location.pathname.startsWith('/shorts/') && !document.documentElement?.hasAttribute?.('data-ytg-native') && document.documentElement?.classList?.contains?.('ytg-theater') === true,
       onSelectionChange(el, scope) {
         if (el?.matches?.('yt-chip-cloud-chip-renderer,[data-ytg-category]')) el.setAttribute('tabindex', '-1');
-        const inSidebar = scope === document && Boolean(el?.closest<HTMLElement>('ytd-guide-renderer,ytd-mini-guide-renderer'));
+        const inSidebar = scope === document && Boolean(el?.closest<HTMLElement>('#ytg-browse-sidebar,ytd-guide-renderer,ytd-mini-guide-renderer'));
         const card = el?.closest<HTMLElement>('ytd-rich-item-renderer,ytd-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model');
         if (sidebarSelected && scope === document && card) {
           const drawer = document.querySelector?.<HTMLElement>('tp-yt-app-drawer#guide');
@@ -581,6 +631,10 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       },
       beforeActivate(el) {
         if (controller.navigating) return true;
+        if (el.matches?.('[data-ytg-category]')) {
+          el.querySelector<HTMLButtonElement>('button')?.click();
+          return true;
+        }
         if (el.matches?.('input#search,input[name="search_query"],input.ytSearchboxComponentInput')) {
           controller.openSearch(el as HTMLInputElement);
           return true;
@@ -590,15 +644,21 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       },
       defaultSection: 'content',
       sections: {
-        sidebar: { axis: 'vertical', exits: { right: ['content', 'player'], up: ['header'] } },
-        header: { layout: 'grid', alignRows: false, exits: { down: ['content', 'player', 'sidebar'], left: ['sidebar'] } },
-        content: { layout: 'grid', retainRowFocus: true, exits: { left: ['sidebar'], up: ['header', 'player'] } },
+        sidebar: { axis: 'vertical', exits: { right: ['content', 'player', 'categories', 'header'], up: ['header'] } },
+        header: { axis: 'horizontal', exits: { down: ['categories', 'content', 'player', 'sidebar'], left: ['sidebar'], right: ['settings'] } },
+        searchEntry: { exits: { down: ['content', 'player'], left: ['categories', 'sidebar'], right: ['header', 'settings'] } },
+        categories: { axis: 'horizontal', exits: { up: ['searchEntry', 'header'], down: ['content', 'player'], left: ['sidebar'], right: ['searchEntry', 'settings'] } },
+        settings: { exits: { left: ['content', 'categories', 'header'], up: ['header'], down: ['content'] } },
+        content: { layout: 'grid', retainRowFocus: true, exits: { left: ['sidebar'], right: ['settings'], up: ['categories', 'header', 'player'] } },
         player: { axis: 'horizontal', exits: { down: ['content'], up: ['header'], left: ['sidebar'], right: ['content'] } },
         controls: { axis: 'horizontal', exits: { up: ['progress'] } },
         progress: { exits: { down: ['controls'] } }
       },
       getSection(el) {
-        if (el?.closest<HTMLElement>('ytd-guide-renderer,ytd-mini-guide-renderer,ytd-guide-entry-renderer,ytd-mini-guide-entry-renderer')) return 'sidebar';
+        if (el?.matches?.('[data-ytg-search-entry]')) return 'searchEntry';
+        if (el?.id === 'yt-gamepad-settings-launcher') return 'settings';
+        if (el?.closest<HTMLElement>('yt-chip-cloud-chip-renderer,[data-ytg-category]')) return 'categories';
+        if (el?.closest<HTMLElement>('#ytg-browse-sidebar,ytd-guide-renderer,ytd-mini-guide-renderer,ytd-guide-entry-renderer,ytd-mini-guide-entry-renderer')) return 'sidebar';
         if (el?.closest<HTMLElement>('#ytg-browse-top,ytd-masthead,ytd-feed-filter-chip-bar-renderer,yt-chip-cloud-chip-renderer,[data-ytg-category]')) return 'header';
         if (el?.closest<import('../../types/core').YouTubePlayer>('#movie_player')) return controller.mode === 'controls' ? (el.matches?.(progressSelector) ? 'progress' : 'controls') : 'player';
         return 'content';
@@ -617,6 +677,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
         return { top: Math.min(top, innerHeight - 32), bottom: innerHeight - 16 };
       },
       getKey(el) {
+        if (el?.dataset?.sidebarId) return `sidebar:${el.dataset.sidebarId}`;
         if (el?.dataset?.browseId) return el.dataset.browseId;
         const label = el?.closest?.<HTMLElement>('.ytp-settings-menu') && el?.querySelector?.<HTMLElement>('.ytp-menuitem-label');
         return label?.textContent?.trim() || el?.getAttribute('href') || el?.id || el?.getAttribute('aria-label') || undefined;
@@ -635,6 +696,8 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       filterCandidates(list) {
         const seen = new Set();
         return list.filter((el) => {
+          // A category wrapper paints focus; its inner button performs the action.
+          if (el.matches?.('button') && el.closest<HTMLElement>('[data-ytg-category]')) return false;
           // Native dialogs still own their targets; controls mode confines page focus to the player.
           if (controller.mode === 'controls' && !el.closest<import('../../types/core').YouTubePlayer>('#movie_player') && !el.closest<HTMLElement>(nativeLayerSelector)) return false;
           if (controller.mode !== 'controls' && el.matches?.(progressSelector)) return false;
@@ -646,7 +709,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
           seen.add(card); return true;
         });
       },
-      selectors: '#ytg-browse-grid a[data-browse-id],#ytg-browse-grid button,#ytg-browse-top button,yt-chip-cloud-chip-renderer,[data-ytg-category],a#thumbnail[href],a#video-title[href],a#video-title-link[href],yt-lockup-view-model a[href^="/watch?"],yt-lockup-view-model a[href^="/shorts/"],ytd-guide-entry-renderer a[href],ytd-mini-guide-entry-renderer a[href],ytd-masthead button,input#search,input[name="search_query"],input.ytSearchboxComponentInput,.ytp-button,.ytp-progress-bar,[role="dialog"] button,tp-yt-paper-dialog button,ytd-menu-popup-renderer [role="menuitem"]',
+      selectors: '#yt-gamepad-settings-launcher,#ytg-browse-sidebar a[href],#ytg-browse-grid a[data-browse-id],#ytg-browse-grid button,#ytg-browse-top button,yt-chip-cloud-chip-renderer,[data-ytg-category],a#thumbnail[href],a#video-title[href],a#video-title-link[href],yt-lockup-view-model a[href^="/watch?"],yt-lockup-view-model a[href^="/shorts/"],ytd-guide-entry-renderer a[href],ytd-mini-guide-entry-renderer a[href],ytd-masthead button,input#search,input[name="search_query"],input.ytSearchboxComponentInput,.ytp-button,.ytp-progress-bar,[role="dialog"] button,tp-yt-paper-dialog button,ytd-menu-popup-renderer [role="menuitem"]',
       overlays: nativeLayerSelector,
       overlayItems: 'a[href],button,input,[role="slider"],[role="button"],[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],tp-yt-paper-item,.ytp-panel-back',
       isSlider: (el) => el?.matches?.('input[type="range"],[role="slider"]') === true,
@@ -668,10 +731,11 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       getContainer(el) { return el?.closest<HTMLElement>('ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model') || el; },
       getSelectionTarget(el) {
         if (el?.matches?.('yt-chip-cloud-chip-renderer,[data-ytg-category]')) return el.querySelector<HTMLElement>('.ytChipShapeChip') || el.querySelector<HTMLElement>('#chip-shape-container') || el;
+        if (el?.matches?.('[data-browse-id]')) return el.querySelector<HTMLElement>('.card-cover,img,.thumbnail-placeholder') || el;
         const card = el?.closest<HTMLElement>('ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model');
         return card?.querySelector<HTMLElement>('a#thumbnail,yt-thumbnail-view-model,ytd-thumbnail,.yt-lockup-view-model__content-image') || el;
       },
-      ownsSelectionPaint: (el) => Boolean(el?.closest<HTMLElement>('#ytg-browse-grid,#ytg-browse-top,yt-chip-cloud-chip-renderer,[data-ytg-category]')),
+      ownsSelectionPaint: (el) => Boolean(el?.closest<HTMLElement>('#ytg-browse-sidebar,#ytg-browse-categories,#ytg-browse-top,yt-chip-cloud-chip-renderer,[data-ytg-category]')),
       getSelectionRadius(el) {
         if (el?.matches?.('yt-chip-cloud-chip-renderer,[data-ytg-category]')) return 'var(--ytg-chip-radius, 8px)';
         return el?.closest<HTMLElement>('#ytg-browse-top') ? 'var(--ytg-pill-radius, 28px)' : 'var(--ytg-card-radius, 14px)';
@@ -711,7 +775,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
         (!inert || focusManager?.isSuspendedScope(inert));
     });
   }
-  YTGamepadSite = { destroy: lifecycle.destroy, hasNativeLayer, perform, showNativeControls, isProgress: el => el?.matches?.(progressSelector) === true, createNavigationConfig,
+  YTGamepadSite = { destroy: lifecycle.destroy, temporarySpeed, hasNativeLayer, perform, showNativeControls, isProgress: el => el?.matches?.(progressSelector) === true, createNavigationConfig,
     inspectWatchCapabilities, inspectOptionalCapabilities, readWatchFeatures: () => ({ ...watchFeatures }), restoreNativeInterface, syncCommentPreload,
     readRoute, readPlayback, readWatchPage, readComments, openRecommendation, loadRecommendations, openChannel, performWatchAction, expandReplies, loadComments,
     settingsOpen, openSettings, backSettings, seekTo, getSearchTarget, readSearch, syncSearch, submitSearch, moveSearchCursor, readTheme, observePage,

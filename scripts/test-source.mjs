@@ -54,6 +54,14 @@ export function legacyModuleSource(file) {
     window.YTGamepadInteraction ||= window.YTGamepadStateMachine.createStore();`;
   if (file === 'src/app/coordinator.ts') source += '\nstartCoordinator({ interaction: window.YTGamepadInteraction, createWatchView: port => window.YTGamepadWatchView.create(port) });';
   if (file === 'src/app/content.ts') source += '\nstartContent();';
+  // These VM fixtures strip ESM imports. Keep the real translation dependency
+  // scoped to its consumer rather than replacing it with a test-only stub.
+  if (['src/input/controller-style.ts', 'src/app/content.ts', 'src/app/coordinator.ts'].includes(file)) {
+    const locale = fixtureSource(new URL('../src/shared/locales.ts', import.meta.url)).replace(/^export /gm, '');
+    const i18n = fixtureSource(new URL('../src/shared/i18n.ts', import.meta.url)).replace(/^import[^\n]*\n/gm, '').replace(/^export /gm, '');
+    const grid = file === 'src/app/content.ts' ? fixtureSource(new URL('../src/shared/video-grid.ts', import.meta.url)).replace(/^export /gm, '') : '';
+    source = `(function() {\n${locale}\n${i18n}\n${grid}\n${source}\n})();`;
+  }
   return source;
 }
 export function legacyMainSource() {

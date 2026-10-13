@@ -32,12 +32,12 @@ test('theater layout follows controller connection and respects manual settings'
   assert.equal(s.classes.get('ytg-theater'), false);
 });
 
-test('playback left and right show controls without changing the playback position', () => {
-  for (const action of ['left', 'right']) {
+test('playback left and right seek with boundary clamping and keep controls hidden', () => {
+  for (const [action, time] of [['left', 85], ['right', 100]]) {
     const s = setup();
     assert.equal(s.adapter.interceptAction(action), true);
-    assert.equal(s.video.currentTime, 95);
-    assert.equal(s.window.YTGamepadCoordinator.mode, 'controls');
+    assert.equal(s.video.currentTime, time);
+    assert.equal(s.window.YTGamepadCoordinator.mode, 'playback');
   }
 });
 test('playback confirm pauses and up enters controls without opening the quick menu', () => {

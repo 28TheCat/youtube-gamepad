@@ -117,9 +117,9 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
     const section = document.createElement('section');
     section.setAttribute('role', 'dialog');
     section.setAttribute('aria-modal', 'true');
-    section.setAttribute('aria-label', title);
+    controllerStyle.bind(section, title, 'aria-label');
     const heading = document.createElement('h2');
-    heading.textContent = title;
+    controllerStyle.bind(heading, title);
     if (menuState().view !== 'search') section.append(heading);
     else section.className = 'search-panel' + (search.target ? ' native-search' : '');
     const container = document.createElement('div');
@@ -138,11 +138,11 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
       section.className = 'settings-panel';
       const dismiss = document.createElement('button');
       dismiss.className = 'settings-close'; dismiss.textContent = '×';
-      dismiss.setAttribute('aria-label', 'Close settings');
+      controllerStyle.bind(dismiss, 'Close settings', 'aria-label');
       dismiss.addEventListener('click', close); section.append(dismiss);
       const panel = document.createElement('div'); panel.id = 'inline-settings';
       root.querySelector<HTMLElement>('#items')!.append(panel);
-      const back = document.createElement('button'); back.textContent = 'Back to quick menu';
+      const back = document.createElement('button'); controllerStyle.bind(back, 'Back to quick menu');
       back.addEventListener('click', () => {
         stopSettings();
         render(); selected = 5; focus();
@@ -151,7 +151,7 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
       publish({ source: 'yt-gamepad-open-settings' });
     } else {
       for (const [action, label] of main) {
-        const button = document.createElement('button'); button.textContent = label;
+        const button = document.createElement('button'); controllerStyle.bind(button, label);
         button.addEventListener('click', () => activate(action, button)); root.querySelector<HTMLElement>('#items')!.append(button);
       }
     }

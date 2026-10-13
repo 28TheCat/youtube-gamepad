@@ -7,9 +7,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const mode = process.argv[2] || 'unit';
 if (!['unit', 'browser', 'extension', 'live', 'all'].includes(mode)) throw new Error(`Unknown test mode: ${mode}`);
 const groups = {
+  'i18n-extension.test.mjs': 'extension',
   'category-settings.test.mjs': 'extension',
   'module-combinations.test.mjs': 'browser', 'bundled-runtime.test.mjs': 'browser',
   'browse-vue.test.mjs': 'browser',
+  'search-bar.test.mjs': 'browser',
   'extension-e2e.test.mjs': 'extension', 'video-grid-extension.test.mjs': 'extension', 'settings-pages.test.mjs': 'extension',
   'inline-settings-vue.test.mjs': 'extension', 'quick-menu-vue.test.mjs': 'extension', 'search-vue.test.mjs': 'extension',
   'playback-vue.test.mjs': 'browser', 'watch-panels-vue.test.mjs': 'browser', 'watch-surface.test.mjs': 'browser',

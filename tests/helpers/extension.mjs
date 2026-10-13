@@ -82,7 +82,7 @@ export async function virtualPad(context, page) {
     const result = await cdp.send('Runtime.evaluate', { contextId: world.id, expression: `
       Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => {
         const state = JSON.parse(document.documentElement.getAttribute('data-test-pad') || '{}');
-        return state.connected ? [{ connected:true, mapping:'standard', index:0, axes:[state.x || 0,0],
+        return state.connected ? [{ connected:true, mapping:'standard', index:0, axes:[state.x || 0,state.y || 0,state.rx || 0,state.ry || 0],
           buttons:Array.from({length:17},(_,i)=>({pressed:state.button===i,value:state.button===i?1:0})) }] : [];
       } });` });
     if (result.exceptionDetails) throw new Error('Failed to install virtual input');

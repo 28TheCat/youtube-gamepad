@@ -3,6 +3,7 @@ import type { Dispose, Settings } from '../../types/ports';
 import type { DisposerHost } from '../../types/core';
 import { YTGamepadBindings } from '../input/bindings.ts';
 import { YTGamepadInlineSettings } from '../settings/inline-settings.ts';
+import { applyLanguage, languageDefault } from '../shared/i18n';
 export function startContent(localChannel?: import("../../types/ports").ApplicationChannel, onInvalidated?: Dispose) {
   const publish = (message: import("../../types/ports").ApplicationMessage) => {
     if (localChannel) localChannel.publish(message);
@@ -74,13 +75,14 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
       catch (other) { return Promise.reject(other); }
     }
   }
-  const defaults = { ...videoGridDefaults, enabled: true, theater: true, deadzone: 0.35, repeatDelay: 350, repeatInterval: 140, bindings: {}, bindingLayouts: null };
+  const defaults = { ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, deadzone: 0.35, repeatDelay: 350, repeatInterval: 140, bindings: {}, bindingLayouts: null };
   // Production settings stay inside the isolated module graph.
   const send = (raw: Record<string,unknown>) => {
     if (lifecycle.destroyed) return;
-    const { bindingLayouts: _layouts, ...initialValues } = defaults;
+    applyLanguage(raw?.uiLanguage);
+    const { bindingLayouts: _layouts, uiLanguage: _language, ...initialValues } = defaults;
     const values: Settings = initialValues;
-    for (const key of ['enabled', 'theater'] as const) if (typeof raw?.[key] === 'boolean') values[key] = raw[key];
+    for (const key of ['enabled', 'theater', 'rightHandMode'] as const) if (typeof raw?.[key] === 'boolean') values[key] = raw[key];
     for (const [key, min, max] of [['deadzone', .15, .75], ['repeatDelay', 150, 1000], ['repeatInterval', 80, 500]] as const) {
       if (typeof raw?.[key] === 'number' && Number.isFinite(raw[key])) values[key] = Math.min(max, Math.max(min, raw[key]));
     }
@@ -163,7 +165,10 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
   const onStorageChanged = (changes: Record<string,chrome.storage.StorageChange>, area: string) => {
     if (lifecycle.destroyed) return;
     if (area === 'local') {
-      const pageSettingsChanged = Object.keys(changes).some(key => key in defaults);
+      if (changes.uiLanguage) applyLanguage(changes.uiLanguage.newValue);
+      // UI language does not change input policy. Avoid reapplying disabled
+      // controls, which would otherwise close an open search during translation.
+      const pageSettingsChanged = Object.keys(changes).some(key => key !== 'uiLanguage' && key in defaults);
       if (pageSettingsChanged) void readSettings();
       if (pageSettingsChanged || changes.autoFullscreen) reportConnection(true);
     }

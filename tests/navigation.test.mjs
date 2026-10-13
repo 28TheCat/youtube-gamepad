@@ -12,6 +12,16 @@ const sections = {
   sidebar: { axis: 'vertical', exits: { right: ['content'] } },
   header: { axis: 'horizontal', exits: { down: ['content'] } }
 };
+test('explicit region exits remain usable after scrolling moves their destination behind the source', () => {
+  const sidebar = item('sidebar', 0, 600), card = item('content', 200, 100);
+  const category = item('categories', 200, 50), search = item('header', 200, 0);
+  const rules = { ...sections, content: { layout: 'grid', exits: { up: ['categories', 'header'] } } };
+  assert.equal(choose(sidebar, [sidebar, card], 'right', rules), card);
+  // An offscreen first row can sit above a pinned category bar.
+  card.rect.top = -100;
+  assert.equal(choose(card, [card, category, search], 'up', rules), category);
+  assert.equal(choose(card, [card, search], 'up', rules), search);
+});
 test('region exits prefer substantial overlap over a barely intersecting diagonal', () => {
   const from = item('sidebar', 0, 100, 80, 100);
   const diagonal = item('content', 100, 199, 100, 100);
@@ -86,14 +96,16 @@ test('oversized row aligns to the safe top and does not keep scrolling', () => {
 
 const rowRules = { ...sections, content: { ...sections.content, retainRowFocus: true } };
 const video = (key, left, top) => ({ ...item('content', left, top), key });
-test('each video row restores its last selected card after horizontal movement in another row', () => {
+test('vertical navigation follows the current column instead of the previous selection in that row', () => {
   const focus = window.YTGamepadNavigation.createRowFocus();
   const a = video('a', 200, 100), b = video('b', 400, 100);
   const c = video('c', 200, 300), d = video('d', 400, 300), cards = [a, b, c, d];
   assert.equal(choose(b, cards, 'down', rowRules, focus), d);
   assert.equal(choose(d, cards, 'left', rowRules, focus), c);
-  assert.equal(choose(c, cards, 'up', rowRules, focus), b);
-  assert.equal(choose(b, cards, 'down', rowRules, focus), c);
+  assert.equal(choose(c, cards, 'up', rowRules, focus), a);
+  assert.equal(choose(a, cards, 'down', rowRules, focus), c);
+  assert.equal(choose(a, cards, 'right', rowRules, focus), b);
+  assert.equal(choose(b, cards, 'down', rowRules, focus), d);
 });
 
 test('a short row does not erase the preferred column when entering an unvisited row', () => {
@@ -106,7 +118,7 @@ test('a short row does not erase the preferred column when entering an unvisited
   assert.equal(choose(short, cards, 'down', rowRules, focus), bottom[2]);
 });
 
-test('replaced cards restore by key and a removed selection falls back to the preferred column', () => {
+test('DOM replacement and removed cards preserve vertical column navigation', () => {
   const focus = window.YTGamepadNavigation.createRowFocus();
   const a = video('a', 200, 100), b = video('b', 400, 100);
   const c = video('c', 200, 300), d = video('d', 400, 300);
@@ -114,7 +126,9 @@ test('replaced cards restore by key and a removed selection falls back to the pr
   choose(d, [a, b, c, d], 'left', rowRules, focus);
   choose(c, [a, b, c, d], 'up', rowRules, focus);
   const replacement = video('c', 200, 300);
-  assert.equal(choose(b, [a, b, replacement, d], 'down', rowRules, focus), replacement);
+  assert.equal(choose(a, [a, b, replacement, d], 'down', rowRules, focus), replacement);
+  choose(a, [a, b, replacement, d], 'right', rowRules, focus);
+  assert.equal(choose(b, [a, b, replacement, d], 'down', rowRules, focus), d);
   assert.equal(choose(b, [a, b, d], 'down', rowRules, focus), d);
   focus.reset();
   assert.equal(choose(b, [a, b, replacement, d], 'down', rowRules, focus), d);

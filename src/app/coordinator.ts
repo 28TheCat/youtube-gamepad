@@ -19,6 +19,8 @@ import { YTGamepadInput, YTGamepadInputModule } from '../input/gamepad.ts';
 import { YTGamepadBrowseModule } from './browse.ts';
 import { YTGamepadRouteController } from './route-controller.ts';
 import { YTGamepadBindings } from '../input/bindings.ts';
+import { YTGamepadSeeking } from '../playback/seek';
+import { currentLanguage, t } from '../shared/i18n';
 
 export let YTGamepadCoordinator: CoordinatorModule | undefined;
 // Application policy: mode transitions, route history and module coordination.
@@ -44,11 +46,14 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       createPanels: port => panelsFactory.create(port)
     }, callbacks, lifecycle) });
   const input = YTGamepadInput || YTGamepadInputModule?.create({ ...shared, localChannel,
+    canRepeatMedia,
+    temporarySpeed,
     isSearchOpen: () => !!(menu?.opened && menu.state.view === 'search') });
   YTGamepadBrowseModule?.create({ runtime, core, isMenuOpen: () => !!menu?.opened, mountGrid: mountBrowseGrid });
   const routeFactory = YTGamepadRouteController;
   const lifecycle = runtime.scope('coordinator');
   let site: SitePort, watch: WatchModule;
+  let heldSeek: { route: string; action: Action; origin: number; target: number; distance: number } | null = null;
   const appState = () => interaction.state.app;
   const send = (event: InteractionEvent) => interaction.dispatch(event);
   send({ type: 'APP_INIT', route: location.pathname + location.search });
@@ -56,12 +61,13 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   // Connection is a mandatory gate, independent of the saved enable switch.
   let preferences = { ...savedPreferences, enabled: false };
   const routeNow = () => location.pathname + location.search;
-  let adaptationSince = 0, rendering = false, checking = false, notice: {host:HTMLElement;message:HTMLElement} | undefined, loading: HTMLElement | undefined;
+  let adaptationSince = 0, rendering = false, checking = false, notice: {host:HTMLElement;message:HTMLElement;retry:HTMLButtonElement} | undefined, loading: HTMLElement | undefined;
   const adaptation = (): AdaptationSnapshot => appState().adaptation || { status: 'inactive', reason: '' };
   const surfaceReady = () => adaptation().status === 'ready' && adaptation().route === routeNow();
   const visibleMode = () => location.pathname === '/watch' && surfaceReady() ? appState().mode : 'browse';
   function syncLoading() {
     const app = appState();
+    document.documentElement.classList.toggle('ytg-watch-layout', preferences.enabled && location.pathname === '/watch');
     const destinationReady = surfaceReady() && app.navigation?.target === routeNow();
     const active = preferences.enabled && (app.openingVideo && !!app.navigation && !destinationReady ||
       location.pathname === '/watch' && (adaptation().status === 'waiting' || app.returning));
@@ -90,19 +96,28 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     if (typeof document.createElement !== 'function') return;
     if (!notice) {
       const host = document.createElement('div'); host.id = 'ytg-fallback-notice';
-      host.setAttribute('lang', 'en');
+      host.setAttribute('lang', currentLanguage());
       const root = host.attachShadow({ mode: 'open' });
       const style = document.createElement('style');
-      style.textContent = ':host{position:fixed;right:20px;bottom:20px;z-index:2147483647;max-width:min(460px,90vw);font:14px/1.5 system-ui;color:#fff;background:#202020;padding:14px 18px;border-radius:12px;box-shadow:0 4px 20px #0006}:host([hidden]){display:none}button{margin-left:12px;padding:6px 12px;font:inherit;cursor:pointer}';
+      style.textContent = ':host{position:fixed;right:20px;bottom:20px;z-index:2147483647;max-width:min(460px,90vw);font:18px/1.6 system-ui;color:#fff;background:#202020;padding:18px 22px;border:1px solid #f5b942;border-radius:12px;box-shadow:0 4px 20px #0006}:host([hidden]){display:none}button{display:block;margin-top:12px;padding:8px 16px;font:inherit;cursor:pointer}button:focus-visible{outline:3px solid #f5b942;outline-offset:3px}';
       const message = document.createElement('span'); message.setAttribute('role', 'status');
-      const retry = document.createElement('button'); retry.textContent = 'Try again';
+      const retry = document.createElement('button'); retry.textContent = t('Try again');
       retry.addEventListener('click', retryAdaptation);
       root.append(style, message, retry); document.documentElement.append(host);
-      notice = { host, message };
+      notice = { host, message, retry };
     }
-    notice.message.textContent = 'YouTube interface restored: ' + adaptation().reason;
+    const reason = adaptation().reason;
+    const details = reason.startsWith('Missing:')
+      ? t('Missing: {capabilities}', { capabilities: reason.slice('Missing:'.length).trim().split(', ').map(value => t(value)).join(', ') })
+      : t(reason);
+    notice.host.setAttribute('lang', currentLanguage());
+    notice.message.textContent = t('Player adaptation failed. Switched to the YouTube interface. Reason: {reason}', { reason: details });
+    notice.retry.textContent = t('Try again');
     notice.host.hidden = false;
   }
+  lifecycle.listen(document, 'ytg-language-changed', () => {
+    if (notice && !notice.host.hidden) showFallbackNotice();
+  });
   function diagnose(operation: string, error: unknown, module = 'coordinator') {
     try {
       diagnostics?.record(module, operation, error, {
@@ -113,6 +128,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     } catch (_) {}
   }
   function restoreNative() {
+    cancelHeldSeek();
     // Establish the CSS safety gate before attempting any potentially faulty view work.
     document.documentElement.dataset.ytgNative = 'true';
     document.documentElement.dataset.ytgMode = 'browse';
@@ -148,11 +164,12 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
         adaptationSince = Date.now(); setAdaptation('waiting');
         if (notice) notice.host.hidden = true;
       }
-      // Player failures require explicit retry. A missing MAIN adapter can
-      // recover once it answers the handshake, without retrying a broken player
-      // on every poll or trusting a page-created ready event.
+      // Recover late capabilities when they become ready. Actual player or
+      // render failures still require retry; the MAIN handshake is checked live.
       if (adaptation().status === 'fallback') {
-        if (!adaptation().reason.includes('page interface') || !pageAccess?.ping?.()) return;
+        const missingCapabilities = adaptation().reason.startsWith('Missing:');
+        if (!missingCapabilities && (!adaptation().reason.includes('page interface') || !pageAccess?.ping?.())) return;
+        if (missingCapabilities && !site.inspectWatchCapabilities(opening).ready) return;
         adaptationSince = Date.now(); setAdaptation('waiting');
         if (notice) notice.host.hidden = true;
       }
@@ -171,6 +188,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     } catch (error) { diagnose('checkAdaptation', error, 'site'); failAdaptation(); }
     finally {
       checking = false;
+      if (heldSeek && (!canRepeatMedia() || heldSeek.route !== routeNow())) cancelHeldSeek();
       syncLoading();
       try {
         site.syncCommentPreload?.(preferences.enabled && surfaceReady() && visibleMode() !== 'browse' &&
@@ -195,8 +213,34 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   function hasTemporaryLayer() {
     return !!(core.hasTemporaryLayer || focusManager?.suspended || menu?.opened || watch?.state.panel || site.hasNativeLayer?.());
   }
+  let speedHint: HTMLElement | undefined;
+  function temporarySpeed(held: boolean) {
+    let rate: number | false = false;
+    try {
+      const allowed = held && !lifecycle.destroyed && preferences.enabled && surfaceReady() &&
+        location.pathname === '/watch' && visibleMode() === 'playback' && !appState().navigation && !appState().returning && !hasTemporaryLayer();
+      rate = siteInstance.temporarySpeed?.(allowed) ?? false;
+    } catch (error) {
+      siteInstance.temporarySpeed?.(false);
+      diagnose('temporarySpeed', error);
+    }
+    if (rate && !speedHint && typeof document.createElement === 'function') {
+      speedHint = document.createElement('div'); speedHint.id = 'ytg-temporary-speed';
+      speedHint.setAttribute('role', 'status'); speedHint.setAttribute('aria-live', 'polite');
+      document.documentElement.append(speedHint);
+    }
+    if (speedHint) {
+      if (speedHint.hidden !== !rate) speedHint.hidden = !rate;
+      if (rate) {
+        const label = t('Temporary speed · {rate}×', { rate });
+        if (speedHint.textContent !== label) speedHint.textContent = label;
+      }
+    }
+    return !!rate;
+  }
+  lifecycle.cleanup(() => { siteInstance.temporarySpeed?.(false); speedHint?.remove(); });
   function requestAutoHide(idle: number) {
-    if (!surfaceReady()) return;
+    if (!surfaceReady() || heldSeek) return;
     try {
     const video = site.readPlayback().video;
     const result = send({ type: 'AUTO_HIDE', idle, playing: !!video && !video.paused && !video.ended,
@@ -217,8 +261,48 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   }
   // Every view command shares the same enablement and navigation policy.
   // Views read this state; their render notifications cannot write it back.
+  function canRepeatMedia() {
+    return !lifecycle.destroyed && preferences.enabled && location.pathname === '/watch' && surfaceReady() &&
+      !appState().navigation && !appState().returning && !hasTemporaryLayer() &&
+      !document.hidden && (document.hasFocus?.() ?? true);
+  }
+  function cancelHeldSeek() {
+    if (!heldSeek) return;
+    heldSeek = null;
+    watch?.seekPreview?.(null);
+    input?.cancelSeeking?.();
+  }
+  function previewHeldSeek(action: Action) {
+    const video = site.readPlayback().video;
+    if (!canRepeatMedia() || !video || !Number.isFinite(video.currentTime)) { cancelHeldSeek(); return false; }
+    if (heldSeek?.route !== routeNow()) cancelHeldSeek();
+    const previous = heldSeek;
+    const origin = previous?.origin ?? video.currentTime;
+    const distance = previous?.action === action ? previous.distance : 0;
+    const step = YTGamepadSeeking.step(distance);
+    const before = previous?.target ?? origin;
+    const target = YTGamepadSeeking.target(video.timeline, before + (action === 'seekBack' ? -step : step));
+    if (target === null) { cancelHeldSeek(); return false; }
+    heldSeek = { route: routeNow(), action, origin, target, distance: distance + Math.abs(target - before) };
+    watch?.seekPreview?.({ target, delta: target - origin, start: video.timeline.start, end: video.timeline.end });
+    return true;
+  }
+  function finishHeldSeek(action: Action, cancelled: boolean) {
+    if (!heldSeek || heldSeek.action !== action) return;
+    if (cancelled || !canRepeatMedia() || heldSeek.route !== routeNow()) { cancelHeldSeek(); return; }
+    const pending = heldSeek;
+    heldSeek = null;
+    watch?.seekPreview?.(null);
+    try {
+      const video = site.readPlayback().video;
+      const target = video && YTGamepadSeeking.target(video.timeline, pending.target);
+      if (target === null || target === undefined) return;
+      if (site.seekTo(target)) watch?.mediaFeedback?.(action, target - pending.origin);
+    } catch (error) { diagnose('heldSeek.commit', error, 'site'); failAdaptation('Playback action failed'); }
+  }
   function performMedia(action: Action) {
     const route = routeNow();
+    const seeking = action === 'seekBack' || action === 'seekForward';
     const failed = (error: unknown) => {
       diagnose('media.' + action, error, 'site');
       if (!lifecycle.destroyed && preferences.enabled && routeNow() === route) {
@@ -227,9 +311,15 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       return false;
     };
     try {
+      if (seeking && input?.isHeld?.(action)) return previewHeldSeek(action);
+      cancelHeldSeek();
+      const before = seeking ? site.readPlayback().video?.currentTime : undefined;
       const result = site.perform(action);
       const completed = (ok: OperationResult) => {
-        if (ok && !lifecycle.destroyed && preferences.enabled && routeNow() === route) watch?.mediaFeedback?.(action);
+        if (ok && !lifecycle.destroyed && preferences.enabled && routeNow() === route) {
+          const after = seeking ? site.readPlayback().video?.currentTime : undefined;
+          watch?.mediaFeedback?.(action, before === undefined || after === undefined ? undefined : after - before);
+        }
         return ok;
       };
       return result && typeof result === 'object' && typeof result.then === 'function' ? Promise.resolve(result).then(completed).catch(failed) : completed(result as OperationResult);
@@ -285,7 +375,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   const routes = routeFactory.create({ runtime, interaction, routeNow, renderMode, hasTemporaryLayer,
     location, history, remoteHistory, window, document, enabled: () => preferences.enabled,
     pause: () => { void site.perform('pause'); }, closeMenu: () => menu?.close(),
-    onStart: () => site.syncCommentPreload?.(false)
+    onStart: () => { cancelHeldSeek(); site.syncCommentPreload?.(false); }
   });
   const prepareVideo = routes.prepareVideo, pageBack = routes.pageBack;
   function setMode(value: Mode) {
@@ -319,7 +409,11 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       switch (effect.type) {
         case 'media': request('media', effect.value as Action); break;
         case 'mode': setMode(effect.value as Mode); break;
-        case 'pageBack': pageBack(); break;
+        case 'pageBack':
+          if (document.fullscreenElement) {
+            void document.exitFullscreen().catch(error => diagnose('exitFullscreen', error));
+          } else pageBack();
+          break;
         case 'showControls': showControls(effect.value as 'controls'|'recommendations'); break;
         case 'moveFocus': if (watch) watch.handle(effect.value as Action); else core.navigate?.(effect.value as Direction); break;
         case 'nativeControlFocus': core.navigate?.('down'); break;
@@ -412,6 +506,9 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       if (surfaceReady()) { try { watch?.refresh(); } catch (error) { diagnose('refresh', error, 'watch'); failAdaptation(); } }
     }));
     if (typeof setInterval === 'function') lifecycle.interval(checkAdaptation, 500);
+    lifecycle.listen(document, 'ended', event => {
+      if ((event.target as HTMLElement | null)?.tagName === 'VIDEO' && surfaceReady()) watch?.refresh();
+    }, true);
     for (const type of ['loadeddata', 'canplay', 'playing']) {
       lifecycle.listen(document, type, event => {
         if ((event.target as HTMLElement | null)?.tagName === 'VIDEO') checkAdaptation();
@@ -433,6 +530,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       if (!raw || typeof raw !== 'object') return;
       const values = {
         enabled: raw.enabled !== false,
+        rightHandMode: raw.rightHandMode === true,
         theater: raw.theater !== false,
         deadzone: Number.isFinite(raw.deadzone) ? Math.min(.75, Math.max(.15, raw.deadzone)) : .35,
         repeatDelay: Number.isFinite(raw.repeatDelay) ? Math.min(1000, Math.max(150, raw.repeatDelay)) : 350,
@@ -458,12 +556,27 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   const published = YTGamepadCoordinator;
   published.destroy = lifecycle.destroy;
   lifecycle.cleanup(() => { if (YTGamepadCoordinator === published) YTGamepadCoordinator = undefined; });
+  lifecycle.listen(window, 'yt-gamepad-button-end', event => {
+    const { action, cancelled } = (event as CustomEvent<{ action?: string; cancelled?: boolean }>).detail || {};
+    if (action === 'seekBack' || action === 'seekForward') finishHeldSeek(action, cancelled !== false);
+  });
+  lifecycle.listen(window, 'yt-gamepad-action', event => {
+    const { action } = (event as CustomEvent<{ action?: string }>).detail || {};
+    if (!['seekBack', 'seekForward'].includes(action ?? '')) cancelHeldSeek();
+  });
+  lifecycle.listen(window, 'yt-gamepad-input-mode', event => {
+    const { mode } = (event as CustomEvent<{ mode?: string }>).detail || {};
+    if (mode !== 'gamepad') cancelHeldSeek();
+  });
+  lifecycle.listen(window, 'blur', cancelHeldSeek);
+  lifecycle.listen(document, 'visibilitychange', () => { if (document.hidden) cancelHeldSeek(); });
+  lifecycle.cleanup(cancelHeldSeek);
   lifecycle.cleanup(() => {
     preferences = { ...preferences, enabled: false };
     send({ type: 'ENABLE', enabled: false, route: routeNow() }); routes.destroy(); restoreNative();
     notice?.host.remove?.();
     loading?.remove?.();
-    document.documentElement.classList.remove('ytg-playback', 'ytg-controls', 'ytg-theater', 'ytg-settings-open', 'ytg-player-pending');
+    document.documentElement.classList.remove('ytg-playback', 'ytg-controls', 'ytg-theater', 'ytg-settings-open', 'ytg-player-pending', 'ytg-watch-layout');
     delete document.documentElement.dataset.ytgAdaptation;
   });
   lifecycle.listen(window, 'pagehide', event => { if (!event.persisted) runtime.destroy(); });

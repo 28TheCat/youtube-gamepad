@@ -34,8 +34,15 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   }, lifecycle);
   const snapshot = () => view.snapshot();
   let recommendationStart = 0;
+  let playbackEnded = false;
   function clearFeedback() { lifecycle.clearTimeout(timer); view.feedback(null); }
-  function mediaFeedback(action: Action) {
+  function seekPreview(value: import('../ui/playback-presentation').SeekPreview | null) {
+    if (!value) { clearFeedback(); return; }
+    lastActivity = Date.now();
+    lifecycle.clearTimeout(timer);
+    view.feedback({ label: '', seek: value }, value.delta < 0 ? 'seekBack' : 'seekForward');
+  }
+  function mediaFeedback(action: Action, seekDelta?: number) {
     if (!enabled() || !controller.readRoute().isWatch || mode() === 'browse' || controller.hasTemporaryLayer?.()) return;
     const playback = controller.readPlayback().video;
     if (!playback || !['seekBack', 'seekForward', 'volumeDown', 'volumeUp', 'mute', 'playPause'].includes(action)) return;
@@ -44,7 +51,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     else {
       const volume = ['volumeDown', 'volumeUp', 'mute'].includes(action);
       const percentage = Math.round(Math.max(0, Math.min(1, playback.volume ?? 0)) * 100);
-      view.feedback({ label: volume ? (playback.muted ? 'Muted' : 'Volume ' + percentage + '%') : (action === 'seekBack' ? '−' : '+') + YTGamepadActions.get(action)!.parameter!.default + ' seconds', ...(volume ? { level: playback.muted ? 0 : percentage } : {}) }, action);
+      view.feedback({ label: volume ? (playback.muted ? 'Muted' : 'Volume ' + percentage + '%') : (action === 'seekBack' ? '−' : '+') + Math.round(Math.abs(seekDelta ?? YTGamepadActions.get(action)!.parameter!.default)) + ' seconds', ...(volume ? { level: playback.muted ? 0 : percentage } : {}) }, action);
     }
     timer = lifecycle.timeout(() => {
       if (!view.closeFeedback()) { clearFeedback(); return; }
@@ -101,6 +108,16 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     const playback = controller.readPlayback();
     controller.observePlayback(playback);
     view.playback(playback);
+    const ended = playback.video?.ended === true;
+    const justEnded = ended && !playbackEnded;
+    playbackEnded = ended;
+    if (justEnded && enabled() && controller.state.surfaceReady !== false && mode() !== 'browse' &&
+        !controller.navigating && !hasTemporaryLayer()) {
+      lastActivity = Date.now();
+      send({ type: 'WATCH_SHOW', target: 'recommendations', count: snapshot().recommendations.length });
+      controller.request('mode', 'controls');
+      focus();
+    }
     const data = snapshot(), canSeek = data.canSeek;
     if (!watchState().panel && ((watchState().row === 'progress' && !canSeek) ||
         (watchState().row === 'controls' && (data.controls[watchState().index]?.available === false)))) {
@@ -150,6 +167,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
       const nextRoute = controller.readRoute().key;
       if (nextRoute !== route) {
         route = nextRoute; recommendationKey = ''; send({ type: 'WATCH_RESET', playIndex });
+        playbackEnded = false;
         clearFeedback(); recommendationStart = 0;
         view.reset();
       }
@@ -220,7 +238,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   }
   YTGamepadWatch = { destroy: lifecycle.destroy,
     /** @param {import('../../types/ports.js').WatchPort} port */
-    connect(port: import('../../types/ports.js').WatchPort) { controller = port; }, sync, show, handle, handleInput, mediaFeedback, refresh: readPage,
+    connect(port: import('../../types/ports.js').WatchPort) { controller = port; }, sync, show, handle, handleInput, mediaFeedback, seekPreview, refresh: readPage,
     get ownsFocus() { return enabled() && view.visible && mode() === 'controls'; },
     get state() { return { mode: mode(), row: watchState().row, index: watchState().index, adjusting: watchState().adjusting, panel: watchState().panel, recommendations: snapshot().recommendations.length }; } };
   lifecycle.listen(document, 'visibilitychange', () => {

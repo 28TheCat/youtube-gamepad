@@ -53,6 +53,26 @@ export function createYouTubeFeedService() {
   const endpoints = new Map<string, ReturnType<typeof feedEndpoint>>();
   const pages = new Map<string, { path: 'browse' | 'search'; body: Node; route: string }>();
   let route = '', sequence = 0;
+  const historyKey = 'ytGamepadBrowsePages';
+  function restorePages() {
+    if (typeof history === 'undefined') return;
+    const saved = history.state?.[historyKey];
+    if (!Array.isArray(saved)) return;
+    for (const entry of saved.slice(-200)) {
+      if (!Array.isArray(entry) || entry.length !== 2) continue;
+      const [id, value] = entry;
+      if (typeof id !== 'string' || !/^\d+$/.test(id) || !value || value.route !== route ||
+        !['browse', 'search'].includes(value.path) || typeof value.body?.continuation !== 'string') continue;
+      pages.set(id, { path: value.path, body: { continuation: value.body.continuation }, route });
+      sequence = Math.max(sequence, Number(id));
+    }
+  }
+  function savePages() {
+    if (typeof history === 'undefined') return;
+    try {
+      history.replaceState({ ...history.state, [historyKey]: [...pages].filter(([, value]) => value.route === route).slice(-200) }, '');
+    } catch { /* Browsing still works if the browser cannot save history state. */ }
+  }
   const requests = new Set<AbortController>();
   const initialRoute = location.pathname + location.search;
   function categories(): FeedCategory[] {
@@ -80,6 +100,7 @@ export function createYouTubeFeedService() {
   function cancel() { for (const controller of requests) controller.abort(); requests.clear(); }
   async function request(category: string, page?: string) {
     categories();
+    restorePages();
     const savedPage = page ? pages.get(page) : undefined;
     const requestRoute = route;
     const endpoint = page ? (savedPage?.route === requestRoute ? savedPage : undefined) : endpoints.get(category);
@@ -114,6 +135,7 @@ export function createYouTubeFeedService() {
         nextPage = `${++sequence}`;
         pages.set(nextPage, { path: endpoint.path, body: { continuation: parsed.continuation }, route: requestRoute });
         if (pages.size > 200) pages.delete(pages.keys().next().value!);
+        savePages();
       }
       return { items: parsed.items, nextPage };
     } finally { clearTimeout(timeout); requests.delete(controller); }

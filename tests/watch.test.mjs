@@ -113,7 +113,7 @@ function setup(integrated = false) {
     MutationObserver: class { observe() {} }
   });
   const watch = window.YTGamepadWatch;
-  const context = { window, document, location, URL, URLSearchParams, history: { back() {} }, getComputedStyle: () => ({ display: 'block' }) };
+  const context = { window, document, location, URL, URLSearchParams, Date: { now: () => now }, history: { back() {} }, getComputedStyle: () => ({ display: 'block' }) };
   runInNewContext(moduleSource('src/sites/youtube.ts'), context);
   const site = window.YTGamepadSite;
   Object.assign(controller, {
@@ -379,6 +379,37 @@ test('closing native settings restores watch controls through the coordinator po
   assert.equal(s.shadow.activeElement.dataset.action, 'seekForward');
 });
 
+test('video completion opens gamepad recommendations once and can open them again after replay', () => {
+  const s = setup(true);
+  assert.equal(s.watch.state.mode, 'playback');
+  const finish = () => {
+    s.video.ended = true; s.video.paused = true;
+    s.events.ended({ target: { tagName: 'VIDEO' } });
+  };
+  finish();
+  assert.equal(s.watch.state.mode, 'controls');
+  assert.equal(s.watch.state.row, 'recommendations');
+  s.watch.handle('back');
+  s.watch.handle('back');
+  s.watch.refresh();
+  assert.equal(s.watch.state.mode, 'playback', 'a refresh must not reopen dismissed recommendations');
+  s.video.ended = false; s.video.paused = false;
+  s.watch.refresh();
+  finish();
+  assert.equal(s.watch.state.mode, 'controls');
+  assert.equal(s.watch.state.row, 'recommendations');
+});
+
+test('video completion preserves an open gamepad panel', () => {
+  const s = setup(true); s.watch.show();
+  for (let i = 0; i < 3; i++) s.watch.handle('left');
+  s.watch.handle('confirm');
+  assert.equal(s.watch.state.panel, 'description');
+  s.video.ended = true; s.video.paused = true;
+  s.events.ended({ target: { tagName: 'VIDEO' } });
+  assert.equal(s.watch.state.panel, 'description');
+});
+
 test('auto-hide requires idle controls, playing video and no temporary layer or navigation', () => {
   for (const blocker of ['paused', 'ended', 'recommendations', 'progress', 'panel', 'menu', 'nativeDialog', 'navigating']) {
     const s = setup(true); s.watch.show();
@@ -503,12 +534,42 @@ test('adapter clears stale recommendations while the player belongs to the previ
 });
 
 
-test('left and right in playback reveal controls and move focus without seeking', () => {
-  for (const [action, expected] of [['left', 3], ['right', 5]]) {
+test('left and right in playback seek directly while keeping controls hidden', () => {
+  for (const [action, expected] of [['left', 0], ['right', 20]]) {
     const s = setup(true);
     s.adapter.interceptAction(action);
-    assert.equal(s.watch.state.mode, 'controls');
-    assert.equal(s.watch.state.index, expected);
-    assert.equal(s.video.currentTime, 10);
+    assert.equal(s.watch.state.mode, 'playback');
+    assert.equal(s.watch.state.index, 4);
+    assert.equal(s.video.currentTime, expected);
   }
+});
+
+test('continuous seeking accelerates and resets on idle, reversal, route change and other media actions', () => {
+  const s = setup(); s.video.duration = 10000; s.video.currentTime = 1000;
+  const forward = () => { const before = s.video.currentTime; s.site.perform('seekForward'); return s.video.currentTime - before; };
+  assert.deepEqual(Array.from({ length: 8 }, forward), [10, 10, 10, 10, 15, 15, 30, 30]);
+  s.advance(600); assert.equal(forward(), 10);
+  Array.from({ length: 5 }, forward);
+  const before = s.video.currentTime; s.site.perform('seekBack');
+  assert.equal(s.video.currentTime - before, -10);
+  assert.equal(forward(), 10);
+  Array.from({ length: 5 }, forward);
+  s.site.perform('playPause'); assert.equal(forward(), 10);
+  Array.from({ length: 5 }, forward);
+  s.location.search = '?v=changed'; assert.equal(forward(), 10);
+  assert.ok(Array.from({ length: 30 }, forward).every(step => step <= 60));
+  s.video.currentTime = 9998; assert.equal(forward(), 2);
+  assert.equal(forward(), 0);
+});
+
+test('B hides controls before exiting page fullscreen and does not navigate in the same press', async () => {
+  const s = setup(true); let exits = 0;
+  s.document.fullscreenElement = {};
+  s.document.exitFullscreen = async () => { exits++; s.document.fullscreenElement = null; };
+  s.watch.show();
+  s.adapter.interceptAction('back');
+  assert.equal(s.watch.state.mode, 'playback'); assert.equal(exits, 0);
+  s.adapter.interceptAction('back');
+  await Promise.resolve();
+  assert.equal(exits, 1); assert.equal(s.video.paused, false);
 });

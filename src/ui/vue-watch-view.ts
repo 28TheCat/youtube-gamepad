@@ -4,6 +4,7 @@ import PlaybackFeedback from './PlaybackFeedback.vue';
 import type { WatchView, WatchViewDependencies } from '../../types/ports';
 import type { PlaybackPresentation, PlaybackPresenter } from './playback-presentation';
 import { createPlaybackModel } from '../playback/playback-model';
+import { currentLanguage } from '../shared/i18n';
 
 export function createVueWatchView({ activate, seek, closePanel, controllerStyle, styles }: WatchViewDependencies): WatchView {
   const host = document.createElement('div'); host.id = 'ytg-watch'; host.hidden = true; host.lang = 'en';
@@ -19,6 +20,10 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
   const surface = make('div', 'surface'), container = make('div'); container.style.display = 'contents'; surface.append(container);
   const dialog = make('div', 'dialog'); dialog.hidden = true; dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', 'Video description');
   const sheet = make('section', 'sheet'), panelTitle = make('h2', '', 'Video description'), description = make('div', 'description'), close = make('button', 'control', 'Back');
+  controllerStyle.bind(close, 'Back'); controllerStyle.bind(panelTitle, 'Video description'); controllerStyle.bind(dialog, 'Video description', 'aria-label');
+  host.lang = currentLanguage();
+  const languageObserver = new MutationObserver(() => { host.lang = currentLanguage(); });
+  languageObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-ytg-language'] });
   close.addEventListener('click', closePanel); sheet.append(panelTitle, description, close); dialog.append(sheet);
   const status = make('div', 'status'); status.setAttribute('role', 'status');
   root.append(style, surface, dialog, status); document.body.append(host);
@@ -41,7 +46,7 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
     feedback(value) { if (!destroyed) render(h(PlaybackFeedback, { value }), status); },
     cards() { return Array.from(container.querySelectorAll<HTMLButtonElement>('.card')); },
     reset() { model.reset(); patch({ page: { ...view.page, recommendations: [] }, selected: '', start: 0 }); },
-    destroy() { if (destroyed) return; destroyed = true; model.destroy(); render(null, container); render(null, status); }
+    destroy() { if (destroyed) return; destroyed = true; languageObserver.disconnect(); model.destroy(); render(null, container); render(null, status); }
   };
   paint();
   const node = <T extends HTMLElement = HTMLElement>(selector: string): T => {

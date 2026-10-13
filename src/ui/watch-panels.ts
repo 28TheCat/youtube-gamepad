@@ -63,10 +63,10 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     if (action === 'description' || action === 'comments') focusManager?.open(dialog, 'watch');
     if (action === 'description') {
       sheet.replaceChildren(panelTitle, description, close);
-      send({ type: 'WATCH_PANEL', panel: action }); panelTitle.textContent = 'Video description'; dialog.setAttribute('aria-label', 'Video description'); paint('description'); dialog.hidden = false; focus();
+      send({ type: 'WATCH_PANEL', panel: action }); controllerStyle.bind(panelTitle, 'Video description'); controllerStyle.bind(dialog, 'Video description', 'aria-label'); paint('description'); dialog.hidden = false; focus();
     } else if (action === 'comments') {
       sheet.replaceChildren(panelTitle, close, description); sheet.scrollTop = 0;
-      send({ type: 'WATCH_PANEL', panel: action }); commentKey = ''; panelTitle.textContent = 'Comments'; dialog.setAttribute('aria-label', 'Comments');
+      send({ type: 'WATCH_PANEL', panel: action }); commentKey = ''; controllerStyle.bind(panelTitle, 'Comments'); controllerStyle.bind(dialog, 'Comments', 'aria-label');
       dialog.classList.add('comments'); surface.classList.add('comments-open');
       document.documentElement.classList.add('ytg-comments'); dialog.hidden = false;
       port.controller.request('comments', true);

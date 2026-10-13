@@ -8,10 +8,12 @@ export interface PlaybackPresentation {
   row: WatchSnapshot['row'];
   start: number;
 }
+export interface SeekPreview { target: number; delta: number; start: number; end: number }
 export interface PlaybackFeedback {
   label: string;
   icon?: string;
   level?: number;
+  seek?: SeekPreview;
 }
 /** Distinguish repeated videos while keeping identity independent of list position. */
 export function recommendationFocusId(items: readonly { key: string }[], index: number) {

@@ -28,11 +28,16 @@ export function browseIdentity(raw: string, origin = 'https://www.youtube.com') 
 // Native renderers and continuation remain YouTube-owned. Return data only.
 export function createYouTubeBrowseAdapter(doc = document) {
   const sources = new Map<string, HTMLAnchorElement>();
+  function visiblePages() {
+    return Array.from(doc.querySelectorAll<HTMLElement>(
+      'ytd-page-manager ytd-browse,ytd-page-manager ytd-search'
+    )).filter(page => !page.closest('[hidden],[aria-hidden="true"],[inert]'));
+  }
   function read(): BrowseSnapshot {
     sources.clear();
     const items: BrowseItem[] = [];
-    const page = doc.querySelector('ytd-page-manager');
-    for (const card of page?.querySelectorAll<HTMLElement>(cards) || []) {
+    const pages = visiblePages();
+    for (const card of pages.flatMap(page => Array.from(page.querySelectorAll<HTMLElement>(cards)))) {
       if (card.closest('[hidden],[aria-hidden="true"]')) continue;
       const anchor = card.querySelector<HTMLAnchorElement>('a#thumbnail[href],a#video-title[href],a#video-title-link[href],a[href^="/watch?"],a[href^="/shorts/"]');
       const identity = browseIdentity(anchor?.getAttribute('href') || '');
@@ -61,10 +66,11 @@ export function createYouTubeBrowseAdapter(doc = document) {
         channel: card.querySelector('#channel-name,#byline-container,.yt-content-metadata-view-model__metadata-row')?.textContent?.trim() || '' });
     }
     return { route: location.pathname + location.search, items,
-      canLoadMore: !!page?.querySelector('ytd-continuation-item-renderer:not([hidden])') };
+      canLoadMore: pages.some(page => page.querySelector('ytd-continuation-item-renderer:not([hidden])')) };
   }
   function loadMore() {
-    const sentinel = doc.querySelector<HTMLElement>('ytd-page-manager ytd-continuation-item-renderer:not([hidden])');
+    const sentinel = visiblePages().map(page => page.querySelector<HTMLElement>('ytd-continuation-item-renderer:not([hidden])'))
+      .find((candidate): candidate is HTMLElement => !!candidate && !candidate.closest('[hidden],[aria-hidden="true"],[inert]'));
     if (!sentinel) return false;
     sentinel.scrollIntoView({ block: 'end', behavior: 'instant' });
     sentinel.querySelector<HTMLElement>('button')?.click();

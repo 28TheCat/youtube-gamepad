@@ -2,12 +2,15 @@ import { videoGridDefaults, normalizeVideoGrid, type VideoGridSettings, type Vid
 import { nextTick, reactive } from 'vue';
 import { YTGamepadBindings as schema } from '../input/bindings.ts';
 import { YTGamepadDiagnosticStore as diagnostics } from '../diagnostics/diagnostics-store.ts';
+import { t, applyLanguage, languageDefault, normalizeLanguage, type UILanguage } from '../shared/i18n';
 
 type Layout = 'watch' | 'browse';
 type Category = '' | 'general' | 'display' | 'controller' | 'help';
 type Bindings = Record<string, number>;
 interface Settings extends VideoGridSettings {
+  uiLanguage: UILanguage;
   enabled: boolean;
+  rightHandMode: boolean;
   theater: boolean;
   autoFullscreen: boolean | null;
   deadzone: number;
@@ -36,7 +39,7 @@ export const adjustments = [
   { key: 'repeatInterval', label: 'Repeat interval', min: 80, max: 500, step: 10, suffix: ' ms' }
 ] as const;
 const defaults = {
-  ...videoGridDefaults, enabled: true, theater: true, autoFullscreen: null, deadzone: .35,
+  ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, autoFullscreen: null, deadzone: .35,
   repeatDelay: 350, repeatInterval: 140, bindings: {}, bindingLayouts: null
 };
 
@@ -54,7 +57,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
   const feedback = (text: string) => {
     if (disposed) return;
     const message = root.querySelector<HTMLElement>('#message');
-    if (message) message.textContent = text;
+    if (message) { message.setAttribute?.('data-ytg-text', text); message.textContent = t(text); }
   };
   const activeId = () => (root.activeElement as HTMLElement | null)?.dataset.setting;
   const ownsFocus = () => container.contains(root.activeElement);
@@ -72,10 +75,11 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
   function apply(stored: Record<string, unknown>) {
     const values: Settings = {
       ...defaults, ...normalizeVideoGrid(stored),
+      uiLanguage: normalizeLanguage(stored.uiLanguage),
       bindings: schema.normalize(stored.bindings),
       bindingLayouts: schema.normalizeLayouts(stored.bindingLayouts, stored.bindings)
     };
-    for (const key of ['enabled', 'theater'] as const) {
+    for (const key of ['enabled', 'theater', 'rightHandMode'] as const) {
       values[key] = typeof stored[key] === 'boolean' ? stored[key] : defaults[key];
     }
     values.autoFullscreen = typeof stored.autoFullscreen === 'boolean' ? stored.autoFullscreen : values.theater;
@@ -85,8 +89,9 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
         ? Math.min(max, Math.max(min, value)) : defaults[key];
     }
     state.values = values;
+    if (values.rightHandMode) state.bindingAction = '';
   }
-  const currentBindings = () => state.values!.bindingLayouts[state.layout];
+  const currentBindings = () => state.values!.rightHandMode ? schema.rightHand : state.values!.bindingLayouts[state.layout];
   const bindingUpdate = (next: Bindings) => {
     const bindingLayouts = { ...state.values!.bindingLayouts, [state.layout]: next };
     return { bindingLayouts, bindings: bindingLayouts.watch };
@@ -99,6 +104,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
       await chrome.storage.local.set(next);
       if (disposed) return;
       apply({ ...state.values, ...next });
+      if (next.uiLanguage) applyLanguage(state.values!.uiLanguage);
       feedback(text);
     } catch { feedback('Could not save settings. Please try again.'); }
     finally {
@@ -117,7 +123,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     state.layout = layout; void focus(`layout-${layout}`);
   }
   function selectAction(action: string) {
-    if (state.saving) return;
+    if (state.saving || state.values?.rightHandMode) return;
     state.bindingAction = action; void focus(String(currentBindings()[action]));
   }
   function back() {
@@ -127,17 +133,17 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     else state.category = '';
     void focus(previous);
   }
-  function toggle(key: 'enabled' | 'theater' | 'autoFullscreen') {
+  function toggle(key: 'enabled' | 'theater' | 'autoFullscreen' | 'rightHandMode') {
     if (state.values) void save({ [key]: !state.values[key] }, key);
   }
   function bind(index: number) {
-    if (!state.values || !state.bindingAction) return;
+    if (!state.values || state.values.rightHandMode || !state.bindingAction) return;
     const next = { ...currentBindings() }, previous = next[state.bindingAction];
     const conflict = Object.keys(next).find(action => action !== state.bindingAction && next[action] === index);
     if (conflict) next[conflict] = previous;
     next[state.bindingAction] = index;
     void save(bindingUpdate(next), String(index), conflict
-      ? `Saved. Swapped buttons with “${schema.labels[conflict]}”.` : 'Button bindings saved.');
+      ? t('Saved. Swapped buttons with “{label}”.', { label: t(schema.labels[conflict]) }) : 'Button bindings saved.');
   }
   function adjust(item: typeof adjustments[number], delta: number, label: string) {
     if (!state.values) return;
@@ -163,7 +169,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
       link.href = url;
       link.download = 'youtube-gamepad-diagnostics-' + new Date().toISOString().slice(0, 10) + '.json';
       document.body.append(link); link.click(); link.remove();
-      feedback(`Exported ${entries.length} records.`);
+      feedback(t('Exported {count} records.', { count: entries.length }));
     } catch { feedback('Export failed. Please try again.'); }
     finally { if (url) setTimeout(() => URL.revokeObjectURL(url!), 1000); }
   }
@@ -204,6 +210,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
   const layouts = [{ id: 'watch', label: schema.layouts.watch }, { id: 'browse', label: schema.layouts.browse }] as const;
   const actions = Object.keys(schema.labels);
   return { state, schema, layouts, actions, start, dispose, open, selectLayout, selectAction, back, toggle, bind, adjust,
+    setLanguage: (language: UILanguage) => save({ uiLanguage: normalizeLanguage(language) }, `language-${language}`),
     clearDiagnostics, exportDiagnostics,
     saveGrid: (next: Partial<VideoGridSettings>, id: string) => save(next, id),
     resetGrid: () => save(Object.fromEntries(Object.entries(videoGridDefaults).filter(([key]) => key.startsWith("gridColumns"))), "resetVideoGrid"),

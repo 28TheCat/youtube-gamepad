@@ -142,7 +142,8 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       host.removeAttribute?.('data-feedback'); status.classList.remove('media-feedback'); status.classList.remove('feedback-closing'); status.removeAttribute?.('aria-label');
       presentation.feedback(value);
       if (action) {
-        host.setAttribute('data-feedback', action); status.classList.add('media-feedback'); status.setAttribute('aria-label', value?.label || '');
+        host.setAttribute('data-feedback', action); status.classList.add('media-feedback');
+        if (value?.label) status.setAttribute('aria-label', value.label);
         if (!repeated || action === 'playPause') animate(status, [{ opacity: 0, scale: '.96', translate: '0 6px' }, { opacity: 1, scale: '1', translate: '0 0' }], 100);
       }
     },

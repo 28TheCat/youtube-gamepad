@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '../shared/use-i18n';
+const { t } = useI18n();
 import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
 import { categorySettingsKey, categoryCatalogKey, defaultCategories, normalizeCategoryPreferences,
   normalizeCategoryCatalog, orderedCategories, type CategoryPreferences } from '../shared/browse-categories';
@@ -85,30 +87,30 @@ onBeforeUnmount(() => { disposed = true; chrome.storage.onChanged.removeListener
 </script>
 <template>
   <div ref="panel" class="category-settings">
-    <div class="category-settings-heading"><h3>分类栏内容调整</h3>
+    <div class="category-settings-heading"><h3>{{ t("分类栏内容调整") }}</h3>
       <button type="button" data-setting="category-reset" :disabled="!ready || saving"
-        @click="save({ order: [], hidden: [] }, 'category-reset')">↺ 重置</button></div>
-    <p>开关控制显示，拖动左侧手柄或使用上下按钮调整顺序。更改会自动保存。</p>
-    <p class="category-settings-note">分类由 YouTube 提供，仅在当前页面可用时显示。“全部”始终保留；正在使用的分类切换后才会隐藏。重置恢复 YouTube 原有顺序。</p>
-    <ol aria-label="分类显示与排序">
+        @click="save({ order: [], hidden: [] }, 'category-reset')">{{ t("↺ 重置") }}</button></div>
+    <p>{{ t("开关控制显示，拖动左侧手柄或使用上下按钮调整顺序。更改会自动保存。") }}</p>
+    <p class="category-settings-note">{{ t("分类由 YouTube 提供，仅在当前页面可用时显示。“全部”始终保留；正在使用的分类切换后才会隐藏。重置恢复 YouTube 原有顺序。") }}</p>
+    <ol :aria-label="t('分类显示与排序')">
       <li v-for="(item, index) in items" :key="item.id" :data-category-id="item.id"
         :data-visible="!preferences.hidden.includes(item.id)" @dragover.prevent @drop.prevent="drop(item.id)">
-        <span class="category-drag" :draggable="ready && !saving" title="拖动排序" aria-hidden="true"
+        <span class="category-drag" :draggable="ready && !saving" :title="t('拖动排序')" aria-hidden="true"
           @dragstart="startDrag($event, item.id)" @dragend="dragged = ''">⠿</span>
         <span class="category-label">{{ item.label }}</span>
         <div class="category-actions">
-          <button type="button" :data-setting="`category-up-${item.id}`" :aria-label="`上移${item.label}`"
+          <button type="button" :data-setting="`category-up-${item.id}`" :aria-label="t('Move up {label}', { label: item.label })"
             :disabled="!ready || saving || index === 0" @click="move(item.id, -1)">↑</button>
-          <button type="button" :data-setting="`category-down-${item.id}`" :aria-label="`下移${item.label}`"
+          <button type="button" :data-setting="`category-down-${item.id}`" :aria-label="t('Move down {label}', { label: item.label })"
             :disabled="!ready || saving || index === items.length - 1" @click="move(item.id, 1)">↓</button>
           <button type="button" class="category-toggle" role="switch" :data-setting="`category-${item.id}`"
-            :aria-label="`显示${item.label}`" :aria-checked="!preferences.hidden.includes(item.id)"
+            :aria-label="t('Show {label}', { label: item.label })" :aria-checked="!preferences.hidden.includes(item.id)"
             :disabled="!ready || saving || item.id === 'all'" @click="toggle(item.id)">
-            <span>{{ preferences.hidden.includes(item.id) ? '隐藏' : '显示' }}</span><span class="category-switch" aria-hidden="true"></span>
+            <span>{{ preferences.hidden.includes(item.id) ? t('隐藏') : t('显示') }}</span><span class="category-switch" aria-hidden="true"></span>
           </button>
         </div>
       </li>
     </ol>
-    <p role="status" aria-live="polite">{{ message }}</p>
+    <p role="status" aria-live="polite">{{ t(message) }}</p>
   </div>
 </template>

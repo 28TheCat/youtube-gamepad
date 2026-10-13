@@ -5,7 +5,7 @@ export type BindingAction = 'confirm' | 'back' | 'playPause' | 'search' | 'seekB
 export type Bindings = Record<BindingAction, number>;
 export type BindingLayouts = Record<Layout, Bindings>;
 export const schema = YTGamepadBindings as unknown as {
-  defaults: Bindings; keys: Record<number, string>; labels: Record<BindingAction, string>;
+  defaults: Bindings; rightHand: Bindings; keys: Record<number, string>; labels: Record<BindingAction, string>;
   layouts: Record<Layout, string>;
   normalizeLayouts(raw?: unknown, legacy?: unknown): BindingLayouts;
   contextLabel(action: BindingAction, layout: Layout): string;

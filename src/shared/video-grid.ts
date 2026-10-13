@@ -4,8 +4,8 @@ export type GridLayoutMode = "adaptive" | "oneColumn" | "twoColumns";
 export const videoGridDefaults = {
   gridLayout: "adaptive" as GridLayoutMode, gridAutoSwitch: true, gridSwitchWidth: 640,
   gridSingleCover: 40, gridDoubleCover: 50,
-  gridColumns0: 4, gridColumns640: 4, gridColumns768: 4,
-  gridColumns1024: 4, gridColumns1280: 4, gridColumns1536: 4
+  gridColumns0: 1, gridColumns640: 2, gridColumns768: 3,
+  gridColumns1024: 4, gridColumns1280: 4, gridColumns1536: 5
 };
 export type VideoGridSettings = typeof videoGridDefaults;
 export type VideoGridKey = keyof VideoGridSettings;

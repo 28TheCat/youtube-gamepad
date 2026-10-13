@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
-function setup({ missing = '', throwing = false, pathname = '/watch', connected = true } = {}) {
+function setup({ missing = '', throwing = false, pathname = '/watch', connected = true, language = 'en' } = {}) {
   let now = 0, tick, port, refresh, config;
   const classes = new Set(), events = new Map(), nodes = new Map();
   const listeners = (name, callback) => {
@@ -30,6 +30,7 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
     add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name),
     toggle(name, on) { on ? classes.add(name) : classes.delete(name); }
   };
+  root.getAttribute = name => name === 'data-ytg-language' ? language : null;
   const document = { documentElement: root, body: node(), createElement: node, addEventListener: listeners,
     querySelector(selector) {
       if (throwing) throw new Error('changed DOM');
@@ -147,7 +148,7 @@ test('connection gates the entire UI across settings, navigation, disconnect and
   s.event('yt-gamepad-connection');
   assert.equal(coordinator.state.enabled, false);
   assert.equal(s.menu.opened, false);
-  for (const name of ['ytg-theater', 'ytg-playback', 'ytg-controls', 'ytg-watch-active']) assert.equal(s.classes.has(name), false);
+  for (const name of ['ytg-theater', 'ytg-playback', 'ytg-controls', 'ytg-watch-active', 'ytg-watch-layout']) assert.equal(s.classes.has(name), false);
   s.window.YTGamepadInput.connected = true;
   s.event('yt-gamepad-connection');
   assert.equal(coordinator.state.enabled, true, 'idle reconnection reactivates the UI');
@@ -156,17 +157,32 @@ test('connection gates the entire UI across settings, navigation, disconnect and
   assert.equal(coordinator.state.enabled, false, 'connection cannot override the saved off switch');
 });
 
-test('missing player shows TV loading and restores native UI after a five second timeout', () => {
+test('missing player keeps the gamepad layout through loading and timeout', () => {
   const s = setup({ missing: 'player' });
   assert.equal(s.status, 'waiting'); assert.equal(s.port.state.mode, 'browse');
   assert.equal(s.classes.has('ytg-playback'), false); assert.equal(s.classes.has('ytg-watch-active'), false);
   assert.equal(s.document.documentElement.dataset.ytgNative, 'true');
   assert.equal(s.nodes.get('ytg-watch-loading').hidden, false);
+  assert.equal(s.classes.has('ytg-watch-layout'), true);
   s.advance(4999); assert.equal(s.status, 'waiting');
   s.advance(1); assert.equal(s.status, 'fallback');
+  assert.equal(s.classes.has('ytg-watch-layout'), true);
   assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
   const notice = s.nodes.get('ytg-fallback-notice');
   assert.equal(notice.hidden, false); assert.match(notice.shadow.children[1].textContent, /Missing: player/);
+});
+
+test('failed adaptation explains the missing capability in Chinese and clears after recovery', () => {
+  const s = setup({ missing: 'player', language: 'zh-CN' });
+  s.advance(5000);
+  const notice = s.nodes.get('ytg-fallback-notice');
+  assert.equal(notice.hidden, false);
+  assert.match(notice.shadow.children[1].textContent, /播放器适配未通过.*原生界面.*尚未就绪：播放器/);
+  assert.equal(notice.shadow.children[2].textContent, '重试');
+  s.setMissing('');
+  notice.shadow.children[2].click();
+  assert.equal(s.status, 'ready');
+  assert.equal(notice.hidden, true);
 });
 
 test('normal async loading takes over only once all essential capabilities arrive', () => {
@@ -254,22 +270,22 @@ test('canceling controller navigation or disabling controls clears TV loading', 
   assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
 });
 
-test('losing the video after takeover closes custom layers and restores all native layout', () => {
+test('losing the video closes custom layers while retaining the gamepad player layout', () => {
   const s = setup(); assert.equal(s.status, 'ready');
   s.window.YTGamepadCoordinator.setMode('controls'); s.watch.state.panel = 'comments'; s.menu.opened = true;
   for (const name of ['ytg-comments', 'ytg-settings-open', 'ytg-recommendations']) s.classes.add(name);
   s.setMissing('video'); s.advance(500);
   assert.equal(s.status, 'fallback'); assert.equal(s.menu.opened, false); assert.equal(s.watch.state.panel, '');
+  assert.equal(s.classes.has('ytg-watch-layout'), true);
   for (const name of ['ytg-playback', 'ytg-controls', 'ytg-watch-active', 'ytg-comments', 'ytg-settings-open', 'ytg-recommendations']) assert.equal(s.classes.has(name), false, name);
   assert.equal(s.port.state.mode, 'browse'); assert.equal(s.config.shouldShowSelection({ scope: s.document }), true);
   assert.equal(s.window.YTGamepadCoordinator.request('mode', 'controls'), false);
   assert.equal(s.video.paused, false);
 });
 
-test('fallback remains stable until a manual retry or a new video route', () => {
+test('late capabilities automatically restore custom playback after a loading timeout', () => {
   const s = setup({ missing: 'video' }); s.advance(5000);
-  s.setMissing(''); s.advance(1000); assert.equal(s.status, 'fallback');
-  s.nodes.get('ytg-fallback-notice').shadow.children[2].click();
+  s.setMissing(''); s.advance(1000);
   assert.equal(s.status, 'ready'); assert.equal(s.nodes.get('ytg-fallback-notice').hidden, true);
   s.setMissing('video'); s.advance(500); assert.equal(s.status, 'fallback');
   s.setMissing(''); s.location.search = '?v=next'; s.event('yt-navigate-finish');

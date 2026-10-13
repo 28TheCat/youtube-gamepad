@@ -184,7 +184,21 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
         update(); return;
       }
     }
-    if (!config.getPriorityLayer?.() && !(activeScope === document && config.isFocusOwned?.()) && current && (!current || !visible(current) || !scope().contains(current))) select(initial(candidates()));
+    if (!config.getPriorityLayer?.() && !(activeScope === document && config.isFocusOwned?.()) && current && (!visible(current) || !scope().contains(current))) {
+      // Repair within the selected region before falling back to the page.
+      // The previous order survives DOM replacement and removed cards.
+      const list = candidates(), saved = memories.get(route);
+      const region = saved && list.filter(el => config.getSection?.(el) === saved.section);
+      let target = region?.filter(el => config.getKey?.(el) === saved?.key)[saved?.occurrence || 0];
+      const keys = saved?.keys || [], position = keys.indexOf(saved?.key);
+      for (let distance = 1; !target && position >= 0 && distance < keys.length; distance++) {
+        for (const key of [keys[position + distance], keys[position - distance]]) {
+          target = region?.find(el => key != null && config.getKey?.(el) === key);
+          if (target) break;
+        }
+      }
+      select(target || region?.[Math.max(0, Math.min(position, region.length - 1))] || initial(list));
+    }
     // Recheck after layout changes or returning to controller input. Wheel
     // scrolling only refreshes the ring; it must never snap the page back.
     if (alignGamepad && !navigating && current && activeScope === document &&
@@ -281,7 +295,9 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     if (!from) return;
     let best = navigation.choose(from, items, direction, activeScope === document ? config.sections : { overlay: {} }, rowFocus);
     if (activeScope === document && config.rememberRegionReturn?.() &&
-      ((from.section === 'sidebar' && direction === 'right') || (from.section === 'header' && direction === 'down'))) {
+      ((from.section === 'sidebar' && direction === 'right') ||
+       (['header', 'searchEntry', 'categories'].includes(from.section) && direction === 'down') ||
+       (from.section === 'settings' && direction === 'left'))) {
       const saved = returnToContent(list);
       if (saved && (!best || best.section === 'content')) best = items.find((item) => item.el === saved) ?? null;
     }
@@ -297,7 +313,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
       if (action === 'left' || action === 'right') { config.adjustSlider?.(current, action === 'left' ? -1 : 1); return 'handled'; }
       return 'blocked';
     }
-    if (action === 'back' && activeScope === document && config.rememberRegionReturn?.() && ['sidebar', 'header'].includes(config.getSection?.(current) || '')) {
+    if (action === 'back' && activeScope === document && config.rememberRegionReturn?.() && ['sidebar', 'header', 'searchEntry', 'categories', 'settings'].includes(config.getSection?.(current) || '')) {
       const list = candidates();
       const target = returnToContent(list) || list.find((el) => config.getSection?.(el) === 'content' && inViewport(el));
       if (target) { select(target); return 'handled'; }

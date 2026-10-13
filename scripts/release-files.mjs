@@ -2,6 +2,7 @@ import { readFileSync, lstatSync } from 'node:fs';
 import { resolve, relative, isAbsolute, dirname, posix } from 'node:path';
 import { assertLoadOrder } from './module-graph.mjs';
 import { entries } from './extension-entries.mjs';
+import { controllerAssets as loadControllerAssets } from './controller-assets.mjs';
 export function safePath(root, file) {
   if (!file || file.includes('\\') || isAbsolute(file) || file.split('/').some(part => !part || part === '..' || part === '.')) {
     throw new Error(`Unsafe release path: ${file}`);
@@ -38,11 +39,13 @@ export function releaseFiles(root, { source = false } = {}) {
       });
   });
   const controllerManifest = 'assets/controller/kenney.json';
-  const controllerAssets = JSON.parse(readFileSync(safePath(root, controllerManifest), 'utf8'));
+  const controllerAssets = loadControllerAssets(root);
   const files = [...new Set(['manifest.json', manifest.background.service_worker, ...pages, ...assets,
     ...Object.values(manifest.icons || {}),
     ...manifest.content_scripts.flatMap(entry => [...entry.js, ...(entry.css || [])]),
-    controllerManifest, 'assets/controller/layout.svg', ...Object.keys(controllerAssets.files),
+    controllerManifest, 'assets/controller/controller-font/prompts.json', 'assets/controller/controller-font/upstream-revision.txt',
+    'assets/controller/controller-font/keymap_keyboard.ttf', 'assets/controller/controller-font/FREEWARE.txt',
+    'licenses/controller-font-FREEWARE.txt', 'assets/controller/layout.svg', ...Object.keys(controllerAssets.files),
     'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt', 'licenses/kenney-input-prompts-LICENSE.txt',
     'licenses/vue-LICENSE.txt', 'licenses/pinia-LICENSE.txt'])].sort();
   for (const file of files) {

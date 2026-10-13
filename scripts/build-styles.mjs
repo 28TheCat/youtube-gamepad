@@ -2,9 +2,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { controllerAssets } from './controller-assets.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export function styleSource() {
-  const assets = JSON.parse(readFileSync(resolve(root, 'assets/controller/kenney.json'), 'utf8'));
+  const assets = controllerAssets(root);
   const images = new Map();
   const image = path => {
     if (!images.has(path)) {

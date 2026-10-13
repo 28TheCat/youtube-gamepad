@@ -5,6 +5,8 @@ import { moduleSource } from '../scripts/test-source.mjs';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { styleSource } from '../scripts/build-styles.mjs';
+import { controllerAssets } from '../scripts/controller-assets.mjs';
+import { fileURLToPath } from 'node:url';
 
 function setup() {
   const window = {}, document = { documentElement: { dataset: {} }, createElement: node };
@@ -75,11 +77,26 @@ test('button artwork is original third-party SVG data with preserved source and 
     const bytes = readFileSync(new URL('../' + path, import.meta.url));
     assert.equal(createHash('sha256').update(bytes).digest('hex'), record.sha256, path);
     assert.match(record.source, /\/Vector\/.*\.svg$/);
-    assert.ok(generated.includes(bytes.toString('base64')), path);
   }
   assert.match(readFileSync(new URL('../licenses/kenney-input-prompts-LICENSE.txt', import.meta.url), 'utf8'), /Creative Commons Zero, CC0/);
   assert.equal(assets.profiles.switch.A, 'assets/controller/switch_button_b.svg');
   assert.equal(assets.profiles.playstation.A, 'assets/controller/playstation_button_color_cross.svg');
+  const active = controllerAssets(fileURLToPath(new URL('..', import.meta.url)));
+  for (const path of new Set(Object.values(active.profiles).flatMap(keys => Object.values(keys)))) {
+    const bytes = readFileSync(new URL('../' + path, import.meta.url));
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), active.files[path].sha256);
+    assert.ok(generated.includes(bytes.toString('base64')), path);
+  }
+  const controllerFont = JSON.parse(readFileSync(new URL('../assets/controller/controller-font/prompts.json', import.meta.url), 'utf8'));
+  for (const [path, record] of Object.entries(controllerFont.files)) {
+    assert.equal(createHash('sha256').update(readFileSync(new URL('../' + path, import.meta.url))).digest('hex'), record.sha256);
+  }
+  assert.equal(active.profiles.xbox.A, 'assets/controller/controller-font/xbox-a.svg');
+  assert.equal(active.profiles.playstation.A, 'assets/controller/controller-font/playstation-a.svg');
+  assert.equal(active.profiles.generic.A, active.profiles.xbox.A);
+  assert.equal(active.profiles.switch.A, assets.profiles.switch.A);
+  assert.equal(controllerFont.files[active.profiles.playstation.A].codepoint, 'U+E0A0');
+  assert.match(readFileSync(new URL('../licenses/controller-font-FREEWARE.txt', import.meta.url), 'utf8'), /Dean Tersigni/);
 });
 
 test('remapped prompts update text, physical artwork keys and controller labels', () => {
@@ -93,4 +110,16 @@ test('remapped prompts update text, physical artwork keys and controller labels'
   style.use({ id: 'DualSense' });
   assert.equal(badge.textContent, '○');
   assert.equal(hint.textContent, '○ 确认 · × 返回');
+});
+
+
+test('right-hand navigation hints update visible text and accessible labels', () => {
+  const { style, document } = setup();
+  document.documentElement.dataset.ytgNavigationStick = 'right';
+  const hint = style.hint(node(), 'D-pad / left stick: Select · A: Open');
+  assert.match(hint.textContent, /right stick/);
+  assert.match(hint.getAttribute('aria-label'), /right stick/);
+  document.documentElement.dataset.ytgNavigationStick = 'left';
+  style.hint(hint, 'D-pad / left stick: Select · A: Open');
+  assert.match(hint.textContent, /left stick/);
 });

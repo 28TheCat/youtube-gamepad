@@ -108,3 +108,19 @@ h2{font-size:20px}.section-heading p{line-height:1.65}
 @media(max-width:760px){.settings-layout{grid-template-columns:1fr;gap:20px}.settings-navigation{position:static;display:grid;grid-template-columns:1fr 1fr;padding:8px}.navigation-label{display:none}.settings-navigation a{padding:12px}}
 @media(max-width:600px){main{padding:24px 16px 72px}.page-header{align-items:flex-start;flex-direction:column;gap:14px}.page-header h1{font-size:28px}.settings-navigation a{font-size:14px}.settings-navigation a span{font-size:11px}section{padding:20px}.shortcut-heading{align-items:flex-start;flex-direction:column}.binding-grid{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+/* Live gamepad detection and deadzone preview. */
+.gamepad-test-status{padding:14px 16px;background:var(--ytg-surface);border-radius:10px;margin:20px 0}
+#testDevice{display:block;width:100%;max-width:100%;margin:8px 0 20px;padding:10px;border:1px solid var(--ytg-border);border-radius:8px;background:var(--ytg-background);color:var(--ytg-text);font:inherit}
+.gamepad-test-info{display:grid;gap:10px;margin:20px 0}.gamepad-test-info>div{display:grid;grid-template-columns:160px minmax(0,1fr);gap:12px}#gamepadTest dt{color:var(--ytg-muted)}#gamepadTest dd{margin:0;overflow-wrap:anywhere}
+#gamepadTest h3{font-size:16px;margin:24px 0 8px}#gamepadTest h4{margin:0 0 12px}#gamepadTest p{line-height:1.65}
+.gamepad-test-buttons{display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:10px;margin:16px 0}
+.gamepad-test-button{display:grid;gap:5px;border:2px solid var(--ytg-border);border-radius:10px;padding:12px;font-size:12px;background:var(--ytg-surface)}
+.gamepad-test-button[data-pressed=true]{border-color:var(--ytg-focus-color);background:var(--ytg-selected-background);color:var(--ytg-selected-text)}#gamepadTest meter{width:100%;height:12px}#gamepadTest output,.gamepad-test-values{font-variant-numeric:tabular-nums}
+.gamepad-test-sticks{display:flex;flex-wrap:wrap;gap:24px;margin:20px 0}.gamepad-test-stick{text-align:center;min-width:170px;font-size:13px}
+.gamepad-test-plot{position:relative;width:150px;height:150px;margin:auto;border:1px solid var(--ytg-border);background:linear-gradient(transparent calc(50% - .5px),var(--ytg-border) 50%,transparent calc(50% + .5px)),linear-gradient(90deg,transparent calc(50% - .5px),var(--ytg-border) 50%,transparent calc(50% + .5px));border-radius:8px}
+.gamepad-test-zone{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--ytg-surface);border:1px dashed var(--ytg-muted);box-sizing:border-box}
+.gamepad-test-dot{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--ytg-muted);transform:translate(-50%,-50%)}.gamepad-test-dot[data-outside=true]{background:var(--ytg-focus-color)}
+.gamepad-test-calibration{border-top:1px solid var(--ytg-border);margin-top:24px}.gamepad-test-adjust{display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin:16px 0}.gamepad-test-adjust input{flex:1;min-width:120px;accent-color:var(--ytg-focus-color)}.gamepad-test-actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}#gamepadTest progress{width:100%;accent-color:var(--ytg-focus-color)}
+.gamepad-test-note{font-size:12px;color:var(--ytg-muted);margin-top:20px}
+@media(max-width:600px){.gamepad-test-info>div{grid-template-columns:1fr;gap:2px}.gamepad-test-stick{min-width:150px}}

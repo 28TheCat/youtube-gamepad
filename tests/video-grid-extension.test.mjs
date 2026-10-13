@@ -34,10 +34,10 @@ test('grid preferences save, resize the real browse surface and reset independen
   await page.waitForFunction(() => document.querySelector('#ytg-browse-grid .cards')?.style.getPropertyValue('--ytg-cover-width') === '65%');
   await options.locator('[data-setting="gridLayout-adaptive"]').click();
   await page.setViewportSize({ width: 1072, height: 900 });
-  await page.waitForFunction(() => document.querySelector('#ytg-browse-grid .cards')?.style.gridTemplateColumns === 'repeat(4, minmax(0px, 1fr))');
+  await page.waitForFunction(() => document.querySelector('#ytg-browse-grid .cards')?.style.gridTemplateColumns === 'repeat(3, minmax(0px, 1fr))');
   assert.equal(await cards.getAttribute('data-horizontal'), 'false');
   await options.locator('[data-setting="resetVideoGrid"]').click();
-  await options.waitForFunction(() => document.querySelector('#gridColumns640').value === '4' && !document.querySelector('fieldset').disabled);
+  await options.waitForFunction(() => document.querySelector('#gridColumns640').value === '2' && !document.querySelector('fieldset').disabled);
   assert.equal(await options.locator('#gridDoubleCover').inputValue(), '65');
   assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('autoFullscreen')).autoFullscreen), false);
   await options.screenshot({ path: 'output/playwright/video-grid-settings.png', fullPage: true });

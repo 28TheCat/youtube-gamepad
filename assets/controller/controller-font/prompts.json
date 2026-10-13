@@ -1,0 +1,166 @@
+{
+  "source": "https://github.com/xfangfang/wiliwili",
+  "revision": "88e5876bea9502d06f46a8656e3530684d3aaf7d",
+  "author": "Dean Tersigni; modified by wiliwili",
+  "license": "Freeware; see licenses/controller-font-FREEWARE.txt",
+  "profiles": {
+    "xbox": {
+      "A": "assets/controller/controller-font/xbox-a.svg",
+      "B": "assets/controller/controller-font/xbox-b.svg",
+      "X": "assets/controller/controller-font/xbox-x.svg",
+      "Y": "assets/controller/controller-font/xbox-y.svg",
+      "LB": "assets/controller/controller-font/xbox-lb.svg",
+      "RB": "assets/controller/controller-font/xbox-rb.svg",
+      "LT": "assets/controller/controller-font/xbox-lt.svg",
+      "RT": "assets/controller/controller-font/xbox-rt.svg",
+      "L3": "assets/controller/controller-font/xbox-l3.svg",
+      "R3": "assets/controller/controller-font/xbox-r3.svg",
+      "Start": "assets/controller/controller-font/xbox-start.svg",
+      "Select": "assets/controller/controller-font/xbox-select.svg"
+    },
+    "playstation": {
+      "A": "assets/controller/controller-font/playstation-a.svg",
+      "B": "assets/controller/controller-font/playstation-b.svg",
+      "X": "assets/controller/controller-font/playstation-x.svg",
+      "Y": "assets/controller/controller-font/playstation-y.svg",
+      "LB": "assets/controller/controller-font/playstation-lb.svg",
+      "RB": "assets/controller/controller-font/playstation-rb.svg",
+      "LT": "assets/controller/controller-font/playstation-lt.svg",
+      "RT": "assets/controller/controller-font/playstation-rt.svg",
+      "L3": "assets/controller/controller-font/playstation-l3.svg",
+      "R3": "assets/controller/controller-font/playstation-r3.svg",
+      "Start": "assets/controller/controller-font/playstation-start.svg",
+      "Select": "assets/controller/controller-font/playstation-select.svg"
+    }
+  },
+  "files": {
+    "assets/controller/controller-font/keymap_xbox.ttf": {
+      "sha256": "2e5941fb505e9d4b12eabbc240d11972212820dcfefc68e73e12d2e6dc21488f",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf"
+    },
+    "assets/controller/controller-font/xbox-a.svg": {
+      "sha256": "78223296dbca0de4b35ae5863ade18fff9ce80a17a8ec309979deaaca0ece0b2",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0A0"
+    },
+    "assets/controller/controller-font/xbox-b.svg": {
+      "sha256": "2d22786b25bdd6811c98e0449c33f684381776f6955f42afad7ecaf9751fe8a6",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0A1"
+    },
+    "assets/controller/controller-font/xbox-x.svg": {
+      "sha256": "2254500f8879c887d3e56f62edfdd07ea95021ad50648c9cfb64122fc0370214",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0A2"
+    },
+    "assets/controller/controller-font/xbox-y.svg": {
+      "sha256": "89994b5b7ee521356b1bbe8142d21c2533bb7f1ece659e5e04c61bf4d6d9ccd3",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0A3"
+    },
+    "assets/controller/controller-font/xbox-lb.svg": {
+      "sha256": "82cc9cac1ccabcd4c7c15cbb52d87460a3df9c808f945fa33e957b37fd8fec75",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0A4"
+    },
+    "assets/controller/controller-font/xbox-rb.svg": {
+      "sha256": "882776a61bb606868a92d32f112da215a67bf0c3b2baa47ae470f554e772bf46",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0A5"
+    },
+    "assets/controller/controller-font/xbox-lt.svg": {
+      "sha256": "93964080ed32b521316caa0d103d3d5f0ee854dc0140381c44fd30f34dafb7c4",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0A6"
+    },
+    "assets/controller/controller-font/xbox-rt.svg": {
+      "sha256": "36d6d4f3b60e027830b84d465aaeb7ca4c29585cd58b6162e7d15dfdfc09e854",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0A7"
+    },
+    "assets/controller/controller-font/xbox-l3.svg": {
+      "sha256": "8de48425d2ae059f79c7cba604296f4ee9694b9a933006684d96ee1dfa8738fd",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0C4"
+    },
+    "assets/controller/controller-font/xbox-r3.svg": {
+      "sha256": "05f89b8b42c8511b6ee6a7162163c4de45dc1e5730a2274f83a4b1160bc004f3",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0C5"
+    },
+    "assets/controller/controller-font/xbox-start.svg": {
+      "sha256": "a12137372fb3f8cd456fa13ac09d838fe8c09deb572fa15849aa1287d22fc2dc",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0EF"
+    },
+    "assets/controller/controller-font/xbox-select.svg": {
+      "sha256": "ccd7bbacccd32ec66554aeda1b3091e954b0fe7cebf4487b50cf2bddeb8e8b4d",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_xbox.ttf",
+      "codepoint": "U+E0F0"
+    },
+    "assets/controller/controller-font/keymap_ps.ttf": {
+      "sha256": "60bf963e55a8deab38a8263fa5eab421c2e4d3520c08e3d8f58a7abf2c23905b",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf"
+    },
+    "assets/controller/controller-font/playstation-a.svg": {
+      "sha256": "8cdc44d4d70a9c77b8393806c648fec5d2e6db5d7c4fa8d6eea16b37a7b25100",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0A0"
+    },
+    "assets/controller/controller-font/playstation-b.svg": {
+      "sha256": "2735f2378017bbde4584f232a457d6535f95ab3939eed16ab5f9845d831781f1",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0A1"
+    },
+    "assets/controller/controller-font/playstation-x.svg": {
+      "sha256": "273185872ce198f92cdc95cc13e6233ef78d5addac27db178afa2d5779bb91a5",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0A2"
+    },
+    "assets/controller/controller-font/playstation-y.svg": {
+      "sha256": "c3f9f87c8b6217b08be8ce76d4bb4876c90b9fe7f43a23d5abc82aa740e63a93",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0A3"
+    },
+    "assets/controller/controller-font/playstation-lb.svg": {
+      "sha256": "3a06d76243f0d22ee0138533ce4091eb88902b2b3d2f28c0f7596fffd7fa6b69",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0A4"
+    },
+    "assets/controller/controller-font/playstation-rb.svg": {
+      "sha256": "79e45095d5af88fbd1adbe5299a7c41cfe6137730b27bbb165615073c7263c84",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0A5"
+    },
+    "assets/controller/controller-font/playstation-lt.svg": {
+      "sha256": "2fda9cc4097a5df4dd534d2803684e61e865ec74c2075df2f03afd23c743d2f7",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0A6"
+    },
+    "assets/controller/controller-font/playstation-rt.svg": {
+      "sha256": "fbff5fbb50cb479ca78a37e3ac8aed2bf9fb156986a08f81c87039a1e6ab2daf",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0A7"
+    },
+    "assets/controller/controller-font/playstation-l3.svg": {
+      "sha256": "54a267115f7dd5aa67019e09f8c3a553cf8ec9acab174b21c023d6cd1b998b66",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0C4"
+    },
+    "assets/controller/controller-font/playstation-r3.svg": {
+      "sha256": "486ac2e4464ba3f11b6593ae6806168f899515e944e77fe7e19f80bc541dc4f6",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0C5"
+    },
+    "assets/controller/controller-font/playstation-start.svg": {
+      "sha256": "be56f8326eaea0174dc95c5361fc2ca40c7154a2fe98c6654035be3974bbbb31",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0EF"
+    },
+    "assets/controller/controller-font/playstation-select.svg": {
+      "sha256": "57099ca2df2da6146079fbcb3bfdf6a62e1cf858e0198e66c5b98579d38acb97",
+      "source": "https://github.com/xfangfang/wiliwili/blob/88e5876bea9502d06f46a8656e3530684d3aaf7d/resources/font/keymap_ps.ttf",
+      "codepoint": "U+E0F0"
+    }
+  }
+}

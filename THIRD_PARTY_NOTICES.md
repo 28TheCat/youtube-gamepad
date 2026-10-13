@@ -38,4 +38,12 @@ Playback and search language icons use unmodified filled paths from Google Mater
 
 Author: Kenney (https://kenney.nl). Source: https://kenney.nl/assets/input-prompts . Package version: 1.5A, downloaded 2026-10-04. License: Creative Commons Zero (CC0 1.0), https://creativecommons.org/publicdomain/zero/1.0/ . The original package license is included in `licenses/kenney-input-prompts-LICENSE.txt`.
 
-`assets/controller/` contains 53 unmodified SVG files for Xbox, PlayStation, and Nintendo Switch button, shoulder, trigger, stick-press, direction, view/share/minus and menu prompts. `kenney.json` records the original package paths and SHA-256 hashes. The style builder embeds these exact SVG bytes into `ui/styles.js` for offline use. Only display size and surrounding UI layout are controlled by the extension; no icon artwork is redrawn. These are third-party Kenney assets, not manufacturer-provided artwork.
+`assets/controller/` retains the original SVG files and `kenney.json` records their original paths and SHA-256 hashes. Switch prompts and direction icons still use these assets. These are third-party Kenney assets, not manufacturer-provided artwork.
+
+## Controller Font
+
+Source: https://github.com/xfangfang/wiliwili/tree/yoga/resources/font . The pinned upstream revision is in `assets/controller/controller-font/upstream-revision.txt`.
+
+Xbox and PlayStation fonts were modified by wiliwili from Controller Font by Dean Tersigni, copyright 2020, described upstream as freeware. The original notice is retained in `licenses/controller-font-FREEWARE.txt` and alongside the original fonts. The keyboard font is also retained as a reusable asset; the current UI continues to display keyboard labels as text.
+
+`scripts/extract-controller-glyphs.py` extracts the original Xbox/PS glyph outlines into 64×64 SVGs, centering and scaling them with white fill. These locally embedded images replace Xbox/PS button prompts, including the generic Xbox fallback. No font download is required at runtime. `prompts.json` records source URLs, codepoints and SHA-256 hashes. Switch retains Kenney artwork because upstream `switch_icons.ttf` is an empty placeholder.

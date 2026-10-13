@@ -144,7 +144,7 @@ export function createSearchModel(port: SearchPort, mount: MountSearch) {
   function render(section: HTMLElement) {
     unmount();
     renderer = mount(section, snapshot(), {
-      input() { rememberCursor(); syncSearch(); },
+      input() { rememberCursor(); syncSearch(); updateView(); },
       focus(button) { port.selected = buttons().indexOf(button); },
       key: keyboardAction, candidate: commitCandidate,
       page(delta) { pageCandidates(delta); focusCandidate(); },

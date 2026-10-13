@@ -27,6 +27,15 @@ Browse YouTube, control video playback, and search in English or Chinese with a 
 - 离线中文拼音输入，支持候选翻页与本地学习。
 - 返回列表时尝试恢复原卡片焦点与滚动位置。
 - 可调整摇杆死区、长按首次重复延迟与连续移动间隔。
+- 手柄检测与校准：显示浏览器识别到的标准和非标准设备、实时按钮/扳机读数、摇杆轴及死区预览；静止采样后可主动应用建议死区。
+
+### 手柄检测与校准
+
+点击扩展工具栏弹窗的“手柄检测与校准”，或进入独立完整设置页的“手柄检测”。此入口无需先打开 YouTube，也不要求启用手柄操作。连接手柄后点击检测页并按一下手柄按键；浏览器可能需要这次操作才暴露设备。多个设备可通过下拉框切换。
+
+按键测试显示浏览器原始输入编号、按下/触碰状态和扳机数值；摇杆图显示所有轴、实时位置及方形死区，与导航使用的逐轴阈值一致。测量摇杆漂移时，松开当前导航摇杆并保持检测页活动 3 秒；普通模式采样左摇杆，右手模式采样右摇杆。建议值按最大静止偏移加 0.05 余量，向上取 0.05 的倍数并限制在 0.15–0.75；需主动应用才保存。手动预览同样需点击“应用预览值”，设置对所有支持的手柄生效。设备切换、断连或页面失去焦点会中断正在进行的测量。
+
+非标准映射设备目前仅支持检测，尚未接入 YouTube 导航或按设备自定义映射。实时读数不保存或上传；实体手柄的识别、轴顺序和漂移仍需在目标设备实测。
 
 ### 安装
 
@@ -97,7 +106,7 @@ MAIN world 脚本通过 Manifest V3 静态声明加载，避免手动插入脚�
 
 「手柄快捷键」可为确认、返回、播放、搜索、快进快退、音量、快捷菜单及搜索键盘功能分配标准手柄按键。选择已占用的按键会自动交换两项功能，支持恢复默认按键；方向键和左摇杆保留导航用途。修改自动保存在本机，已打开的 YouTube 页面和按键提示同步更新。按键菜单使用项目现有的 Kenney CC0 图标和 Xbox / PlayStation 物理位置对照；菜单内的图标跟随当前手柄类型，Switch 以相同物理位置为准。
 
-界面会根据当前使用的标准映射手柄自动切换按键图标和提示：Xbox 显示彩色 A / B / X / Y，PlayStation 显示 × / ○ / □ / △ 和 L1 / R1 / L2 / R2，Switch 显示对应位置的 B / A / Y / X 和 L / R / ZL / ZR。图标直接使用 [Kenney Input Prompts](https://kenney.nl/assets/input-prompts) 的原版 SVG（CC0），不自行绘制；来源和授权见 [第三方说明](THIRD_PARTY_NOTICES.md)。素材随扩展本地打包，使用时无需联网加载。整体界面配色仍跟随 YouTube 主题。搜索、菜单和播放提示在手柄切换时实时更新；多个手柄连接时跟随正在操作的手柄。无法识别的型号使用通用 Xbox 命名，识别依赖浏览器报告的设备名称；按键动作仍采用 Gamepad API 标准位置。
+界面会根据当前使用的标准映射手柄自动切换按键图标和提示：Xbox 显示 A / B / X / Y，PlayStation 显示 × / ○ / □ / △ 和 L1 / R1 / L2 / R2，Switch 显示对应位置的 B / A / Y / X 和 L / R / ZL / ZR。Xbox 和 PlayStation 按键复用 [Controller Font 手柄图标](https://github.com/xfangfang/wiliwili/tree/yoga/resources/font)，提取原始字形轮廓为本地 SVG；Switch 和方向键沿用 [Kenney Input Prompts](https://kenney.nl/assets/input-prompts) 的原版 SVG（CC0）。来源和授权见 [第三方说明](THIRD_PARTY_NOTICES.md)。素材随扩展本地打包，使用时无需联网加载。整体界面配色仍跟随 YouTube 主题。搜索、菜单和播放提示在手柄切换时实时更新；多个手柄连接时跟随正在操作的手柄。无法识别的型号使用通用 Xbox 命名，识别依赖浏览器报告的设备名称；按键动作仍采用 Gamepad API 标准位置。
 
 浏览模式：方向键 / 左摇杆移动选择，A 打开，B 关闭弹窗或返回。LB / RB 直接切换到上一个 / 下一个分类，无需先选中分类栏；到达两端时停止。
 
@@ -182,15 +191,19 @@ B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返�
 
 ### 手柄播放流程
 
+纯播放状态下，按住右摇杆按钮（R3）350 毫秒可临时以 2× 播放，并显示倍速提示；松开后恢复按住前的倍速（例如 1.5×）。打开菜单、搜索、控制栏或弹窗，暂停、切换视频、切换输入方式、失焦、断开手柄或关闭扩展时结束加速；松开后重新按住才能再次触发。搜索中的 R3 继续切换候选词。R3 已绑定其他普通操作时优先执行用户绑定；直播、暂停和原倍速不低于 2× 时不启动临时加速。通过 YouTube 修改倍速时尊重新选择的倍速。
+
 主页或搜索结果中按 A 打开视频后，立即显示电视加载画面，播放器就绪后直接进入铺满窗口的播放布局，不展示电脑端详情页。手柄打开推荐视频沿用同一过渡；导航取消或关闭手柄操作时清除加载画面。窗口全屏由后台独立管理，播放模式不调用网页 Fullscreen API。扩展菜单可覆盖在视频上。
 
 播放模式：A 暂停或继续，左右唤出控制栏并移动焦点，Start 打开快捷菜单，上键显示电视式播放面板，下键进入推荐卡片。控制栏内左右移动焦点，上键进入进度条，下键回到按钮；选中进度条时按 A 开始调整，左右快退或快进 10 秒，A 结束调整并保留进度条焦点，保持原播放或暂停状态。B 按层级返回：设置子菜单 → 设置主菜单 → 播放面板 → 纯播放 → 原列表；退出视频时暂停，由导航核心恢复原卡片和滚动位置。直接打开视频链接时退出视频返回首页。快捷菜单仍优先接收输入。
 
 当前 YouTube 标签检测到标准手柄后自动进入 F11 式窗口全屏；搜索、视频跳转、刷新和 B 返回不退出窗口全屏。断开手柄、关闭自动全屏或关闭手柄操作时，恢复扩展开启全屏前的普通或最大化状态；用户原本自行开启的全屏不退出。自动全屏与大屏布局在完整设置页的“显示”分组独立控制。大屏布局在列表页只替换顶栏，在播放页提供电视式控件，不改变浏览器窗口状态；视频铺满页面也与浏览器全屏分开处理。旧版合并开关的偏好会保留为两个开关的初始值。整页跳转后，浏览器可能需要一次手柄按键才能重新暴露 Gamepad API；初始空快照不会被当成断开。
 
-### 紧凑主页导航
+### 客户端首页布局
 
-连接标准手柄并开启大屏布局后，列表页面只替换顶部导航：左侧圆角搜索入口，右侧 YouTube 标识；菜单按钮转发原站的侧栏展开、收起操作。侧栏沿用 YouTube 原有入口、顺序和布局，焦点进入不会自动展开。视频区保留原生卡片尺寸、列数、间距、字号、头像和菜单，只增加手柄方向导航与缩略图上的轻量焦点框。分类栏由 Vue 渲染，切换直接请求 YouTube 分类接口，并兼容原分类栏的布局位置；关闭大屏布局或断开手柄后恢复原站顶栏。
+首页搜索栏在手柄模式下是整条可选中的入口，显示搜索文字和当前搜索快捷键提示。确认或搜索快捷键打开现有电视键盘，关闭后恢复入口焦点；按下进入视频区，按左进入分类栏，最右分类按右进入搜索入口。按键提示跟随手柄型号及用户绑定更新。鼠标模式使用可直接输入的搜索框。
+
+连接标准手柄并开启大屏布局后，列表页面使用完整客户端布局：顶部为 YouTube Gamepad 标识、搜索和账号入口；左侧为首页、订阅、个人内容与探索导航；右侧为分类栏和独立滚动的视频网格。视频标题、频道信息、卡片间距和焦点反馈采用统一主题变量，支持明暗主题。窄屏侧栏收为图标导航，保留可访问名称；默认列数随内容区宽度调整为 1 / 2 / 3 / 4 / 4 / 5 列，用户自定义列数继续生效。搜索、账号入口和侧栏操作连接原站能力，分类由 Vue 管理并请求 YouTube 接口；关闭大屏布局或断开手柄后恢复原站界面。
 
 视频区左边界按左进入侧边栏，按右或 B 回到原卡片；顶部边界按上进入分类或搜索，按下返回视频区时恢复原卡片，B 直接返回视频区。切换分类后等待新列表加载，再选择第一张卡片。页面跳转保留既有的返回列表与滚动恢复机制。搜索继续使用原有电视式键盘。
 
@@ -252,7 +265,7 @@ Button names follow the Xbox layout. The browser must recognize the controller u
 | Button | Browsing / general action | Playback mode |
 | --- | --- | --- |
 | D-pad / left stick | Move selection | Left/right: show controls and move focus; up: show controls; down: browse recommendations |
-| A | Open or confirm | Play/pause |
+| A | Open or confirm | Show controls when hidden; activate the focused control when visible |
 | B | Close a dialog or go back | Go back through UI layers; pause and return to the list when leaving the video |
 | X | Play/pause | Play/pause |
 | Y | Open search mode | Open search mode |
@@ -261,6 +274,8 @@ Button names follow the Xbox layout. The browser must recognize the controller u
 | Start | Open/close the quick menu | Open/close the quick menu |
 
 **Native controls:** Move between buttons with left/right, press up to select the progress bar, and down to return to the buttons. On the progress bar, A starts adjustment; left/right then seek 10 seconds, and A ends adjustment while keeping progress focused. B exits adjustment first, then returns to the controls. B goes back through settings submenu → settings menu → player controls → playback mode → original list. Leaving a video opened directly returns to the home page. Pausing a video keeps playback mode active.
+
+**Playback controls:** When the controls are hidden, A shows them. Use the D-pad to move through controls and the timeline, then press A to activate a control or adjust progress. B hides the controls first; another B follows the usual fullscreen or video-return behavior.
 
 **Quick menu:** Navigate with the D-pad, confirm with A, and go back with B. The menu provides search, playback, captions, and volume controls. When open, it takes priority over the underlying page.
 
@@ -396,3 +411,10 @@ Focus restoration for temporary layers is centralized in `focus.ts`. Owners prov
 
 焦点与状态：当前页面保留侧栏底色；字幕、订阅、点赞等已开启状态显示勾选标记；手柄焦点使用外框，互不覆盖。滑块调整中使用黄色外框及操作提示，方向键只在调整中改变数值。搜索或设置关闭后恢复入口焦点；目标已移除时沿用同区域邻项与默认项的恢复规则。
 
+
+
+### 右手单手操作预设
+
+在完整设置或页面内设置的“手柄与按键”中开启“右手单手操作预设”。右摇杆取代左摇杆移动焦点，十字键仍可使用；按 Xbox 物理位置，A 确认、B 返回、X 播放/暂停、Y 搜索、RB 打开快捷菜单，原 RB 快进移至 Menu/Start。提示图标继续跟随手柄型号。主页、播放、搜索和设置共用此预设，音量、进度及搜索键盘功能可通过右摇杆选择界面控件完成。
+
+预设默认关闭，不覆盖原有主页与播放页自定义绑定。开启时按键编辑暂时禁用，关闭立即恢复原有绑定和左摇杆导航。切换模式、切换页面或失焦后需先松开按键并让当前导航摇杆回中，避免误操作。评论沿用既有方向导航，尚未增加右摇杆独立连续滚动或用户自定义组合键。

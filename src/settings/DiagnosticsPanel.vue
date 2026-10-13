@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '../shared/use-i18n';
+const { t } = useI18n();
 import { ref } from 'vue';
 import { YTGamepadDiagnosticStore } from '../diagnostics/diagnostics-store.ts';
 const store = YTGamepadDiagnosticStore;
@@ -14,7 +16,7 @@ async function exportDiagnostics() {
     const link = document.createElement('a'); link.href = url;
     link.download = `youtube-gamepad-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.append(link); link.click(); link.remove();
-    status.value = `Exported ${entries.length} ${entries.length === 1 ? 'record' : 'records'}`;
+    status.value = t('Exported {count} records', { count: entries.length });
   } catch { status.value = 'Export failed. Please try again.'; }
   finally { if (url) { const resource = url; setTimeout(() => URL.revokeObjectURL(resource), 1000); } exporting.value = false; }
 }
@@ -29,8 +31,8 @@ async function clearDiagnostics() {
 }
 </script>
 <template>
-  <div class="section-heading"><h2 id="diagnosticsTitle">Local diagnostics</h2><p>Keeps recent errors locally, up to 100 records and 32,768 characters. Older records are removed when these limits are reached. Export them to review or share.</p></div>
-  <p>Records include the time, extension version, module, error, stack trace, and interface state. Video titles, comments, and full page addresses are excluded. URLs in error text are hidden.</p>
-  <div class="diagnostic-actions"><button id="exportDiagnostics" type="button" :disabled="exporting || clearing" @click="exportDiagnostics">Export diagnostics JSON</button><button id="clearDiagnostics" type="button" :disabled="exporting || clearing" @click="clearDiagnostics">Clear diagnostic records</button></div>
-  <output id="diagnosticStatus" role="status" aria-live="polite">{{ status }}</output>
+  <div class="section-heading"><h2 id="diagnosticsTitle">{{ t("Local diagnostics") }}</h2><p>{{ t("Keeps recent errors locally, up to 100 records and 32,768 characters. Older records are removed when these limits are reached. Export them to review or share.") }}</p></div>
+  <p>{{ t("Records include the time, extension version, module, error, stack trace, and interface state. Video titles, comments, and full page addresses are excluded. URLs in error text are hidden.") }}</p>
+  <div class="diagnostic-actions"><button id="exportDiagnostics" type="button" :disabled="exporting || clearing" @click="exportDiagnostics">{{ t("Export diagnostics JSON") }}</button><button id="clearDiagnostics" type="button" :disabled="exporting || clearing" @click="clearDiagnostics">{{ t("Clear diagnostic records") }}</button></div>
+  <output id="diagnosticStatus" role="status" aria-live="polite">{{ t(status) }}</output>
 </template>

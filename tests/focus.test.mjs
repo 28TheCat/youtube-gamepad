@@ -45,6 +45,20 @@ function setup() {
   return { nodes, make, events, location, window, context, ring: created.find(node => node.id === 'ring'), refresh: () => mutation([{ target: document.body }]), show(value) { overlay = value; }, open(items) { overlay = { ...make('dialog'), querySelectorAll: () => items, contains: el => items.includes(el) }; return overlay; } };
 }
 
+test('refresh keeps a replacement card and repairs a removed selection to its previous neighbour', () => {
+  const s = setup();
+  const a = s.make('a'), b = s.make('b'), c = s.make('c');
+  s.nodes.push(a, b, c);
+  s.window.YTGamepad.focus(b);
+  b.isConnected = false;
+  const replacement = s.make('b');
+  s.nodes.splice(1, 1, replacement); s.refresh();
+  assert.equal(s.window.YTGamepad.current, replacement);
+  replacement.isConnected = false;
+  s.nodes.splice(1, 1); s.refresh();
+  assert.equal(s.window.YTGamepad.current, c);
+});
+
 test('browse chrome returns to the original card from either peripheral region', () => {
   const s = setup();
   runInNewContext(moduleSource('src/navigation/navigation.ts'), s.context);
@@ -392,7 +406,7 @@ test('grid moves by rows, aligns the whole row and stays still at the end', () =
   assert.equal(s.context.scrollY, 0);
 });
 
-test('page input preserves row focus and the preferred column without scrolling visible cards', () => {
+test('page input preserves the current column through short rows without scrolling visible cards', () => {
   const s = setup();
   const card = (key, left, top) => ({ ...s.make(key), getBoundingClientRect: () => ({ left, top, width: 100, height: 60 }) });
   const a = card('a', 200, 144), b = card('b', 400, 144), c = card('c', 600, 144);
@@ -408,7 +422,7 @@ test('page input preserves row focus and the preferred column without scrolling 
   s.window.YTGamepad.navigate('down'); assert.equal(s.window.YTGamepad.current, f);
   s.window.YTGamepad.navigate('left'); assert.equal(s.window.YTGamepad.current, e);
   s.window.YTGamepad.navigate('up'); assert.equal(s.window.YTGamepad.current, short);
-  s.window.YTGamepad.navigate('up'); assert.equal(s.window.YTGamepad.current, c);
+  s.window.YTGamepad.navigate('up'); assert.equal(s.window.YTGamepad.current, b);
   s.window.YTGamepad.navigate('down');
   s.window.YTGamepad.navigate('down'); assert.equal(s.window.YTGamepad.current, e);
   s.window.YTGamepad.resetContentFocus();

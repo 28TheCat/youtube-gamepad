@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '../shared/use-i18n';
+const { t } = useI18n();
 import { onMounted, onUnmounted, ref } from 'vue';
 import { useSettingsStore } from '../settings/store';
 import { usePageAppearance } from '../shared/page-appearance';
@@ -7,6 +9,12 @@ usePageAppearance();
 const connection = ref('Checking connection…');
 let stopped = false, refreshing = false;
 let interval: ReturnType<typeof setInterval>;
+async function openGamepadTest() {
+  try {
+    await chrome.tabs.create({ url: chrome.runtime.getURL('src/settings/options.html#gamepadTest') });
+    window.close();
+  } catch { settings.feedback('Could not open gamepad detection. Please try again.'); }
+}
 async function openSettings() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -37,10 +45,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-<header><span class="brand-mark" aria-hidden="true">▶</span><div><h1>YouTube Gamepad</h1><p class="tagline">YouTube from your couch</p></div></header>
-<label class="toggle"><span>Enable gamepad controls</span><input id="enabled" type="checkbox" :checked="settings.values.enabled" :disabled="!settings.ready || settings.saving" @change="settings.save('enabled', $event)"></label>
-<section class="connection-card" aria-labelledby="connectionTitle"><h2 id="connectionTitle">Connection status</h2><p id="connection" role="status">{{ connection }}</p></section>
-<p class="quick-guide" data-ytg-hint="A Confirm · B Back · Start Menu">A Confirm · B Back · Start Menu</p>
-<button id="moreSettings" type="button" @click="openSettings">Open settings on YouTube</button>
-<output id="status" role="status" :hidden="!settings.statusVisible">{{ settings.status }}</output>
+<header><span class="brand-mark" aria-hidden="true">▶</span><div><h1>YouTube Gamepad</h1><p class="tagline">{{ t("YouTube from your couch") }}</p></div></header>
+<label class="toggle"><span>{{ t("Enable gamepad controls") }}</span><input id="enabled" type="checkbox" :checked="settings.values.enabled" :disabled="!settings.ready || settings.saving" @change="settings.save('enabled', $event)"></label>
+<section class="connection-card" aria-labelledby="connectionTitle"><h2 id="connectionTitle">{{ t("Connection status") }}</h2><p id="connection" role="status">{{ t(connection) }}</p></section>
+<button id="openGamepadTest" type="button" @click="openGamepadTest">{{ t('Gamepad detection & calibration') }}</button>
+<p class="quick-guide" :data-ytg-hint="t('A Confirm · B Back · Start Menu')">{{ t("A Confirm · B Back · Start Menu") }}</p>
+<button id="moreSettings" type="button" @click="openSettings">{{ t("Open settings on YouTube") }}</button>
+<output id="status" role="status" :hidden="!settings.statusVisible">{{ t(settings.status) }}</output>
 </template>

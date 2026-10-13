@@ -163,3 +163,23 @@ test('Vue settings preserve independent bindings, external updates and narrow-sc
   assert.equal(await menu.locator('#inline-settings button').count(), 4, 'reopening mounts one category list');
 });
 
+
+
+test('inline right-hand preset updates input and restores custom bindings without overwriting storage', { timeout: 60000 }, async t => {
+  const { page, menu, worker, context } = await setup(t);
+  await menu.locator('[data-setting="controller"]').click();
+  const before = await worker.evaluate(() => chrome.storage.local.get(['bindings', 'bindingLayouts']));
+  await menu.locator('[data-setting="rightHandMode"]').click();
+  await page.waitForFunction(() => document.documentElement.dataset.ytgNavigationStick === 'right');
+  assert.equal(await menu.locator('[data-setting="confirm"]').isDisabled(), true);
+  const pad = await virtualPad(context, page);
+  await pad({ connected: true }); await page.waitForTimeout(80);
+  const first = await focused(page);
+  await pad({ connected: true, ry: 1 }); await page.waitForTimeout(80);
+  await pad({ connected: true }); await page.waitForTimeout(80);
+  assert.notEqual(await focused(page), first, 'right stick moves settings focus');
+  await menu.locator('[data-setting="rightHandMode"]').click();
+  await page.waitForFunction(() => document.documentElement.dataset.ytgNavigationStick === 'left');
+  assert.equal(await menu.locator('[data-setting="confirm"]').isDisabled(), false);
+  assert.deepEqual(await worker.evaluate(() => chrome.storage.local.get(['bindings', 'bindingLayouts'])), before);
+});

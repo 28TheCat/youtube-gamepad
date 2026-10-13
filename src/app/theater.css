@@ -1,4 +1,6 @@
 /* Native page layout, input effects and playback overrides. */
+#ytg-temporary-speed{position:fixed!important;top:64px!important;left:50%!important;transform:translateX(-50%)!important;z-index:2147483647!important;padding:10px 20px!important;border-radius:24px!important;background:var(--ytg-overlay-surface)!important;color:var(--ytg-overlay-text)!important;font:600 18px/1.4 var(--ytg-font-family)!important;pointer-events:none!important}
+#ytg-temporary-speed[hidden]{display:none!important}
 /* Loading occupies its own strip above the player, never covering media. */
 #ytg-watch-loading{position:fixed!important;inset:0 0 auto!important;height:48px!important;box-sizing:border-box!important;z-index:2147483647!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;background:var(--ytg-overlay-surface)!important;color:var(--ytg-overlay-text)!important;font:500 16px/1.4 var(--ytg-font-family)!important;pointer-events:none!important}
 #ytg-watch-loading[hidden]{display:none!important}
@@ -18,12 +20,13 @@ html.ytg-gamepad-input .ytg-selected :is(a#video-title,a#video-title-link,a#thum
 
 
 /* Playback fills the page even when Edge requires a trusted gesture for native fullscreen. */
-html.ytg-playback:not([data-ytg-native]),html.ytg-playback:not([data-ytg-native]) body{overflow:hidden!important}
-html.ytg-playback:not([data-ytg-native]) ytd-masthead,html.ytg-playback:not([data-ytg-native]) #secondary,html.ytg-playback:not([data-ytg-native]) #below,html.ytg-playback:not([data-ytg-native]) ytd-guide-renderer,html.ytg-playback:not([data-ytg-native]) ytd-mini-guide-renderer{display:none!important}
-html.ytg-playback:not([data-ytg-native]) #movie_player{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;z-index:2147483645!important;background:#000!important}
-html.ytg-playback:not([data-ytg-native]) #movie_player .html5-video-container{width:100%!important;height:100%!important}
-html.ytg-playback:not([data-ytg-native]) #movie_player video.html5-main-video{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:contain!important}
-html.ytg-playback:not([data-ytg-native]) #movie_player .ytp-chrome-bottom{width:calc(100% - 48px)!important;left:24px!important}
+/* Keep the gamepad layout through loading and capability recovery. */
+html.ytg-watch-layout,html.ytg-watch-layout body{overflow:hidden!important}
+html.ytg-watch-layout :is(ytd-masthead,#secondary,#below,ytd-guide-renderer,ytd-mini-guide-renderer){display:none!important}
+html.ytg-watch-layout #movie_player{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;z-index:2147483645!important;background:#000!important}
+html.ytg-watch-layout #movie_player .html5-video-container{width:100%!important;height:100%!important}
+html.ytg-watch-layout #movie_player video.html5-main-video{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:contain!important}
+html.ytg-watch-layout #movie_player .ytp-chrome-bottom{width:calc(100% - 48px)!important;left:24px!important}
 /* Keep native controls visible while the gamepad owns their focus. */
 /* Apply the player layout as soon as the watch URL arrives, even while the
    native safety gate keeps custom controls disabled. Reserve the status strip. */
@@ -38,6 +41,8 @@ html.ytg-controls:not([data-ytg-native]) #movie_player .ytp-chrome-controls{opac
 /* The watch surface replaces desktop chrome, while media, captions and ads stay native. */
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-bottom,
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-top{display:none!important}
+/* Recommendations belong to the gamepad surface, including after playback ends. */
+html.ytg-watch-active:not([data-ytg-native]) #movie_player :is(.html5-endscreen,.ytp-endscreen-content,.ytp-autonav-endscreen,.ytp-upnext,.ytp-ce-element){display:none!important}
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-settings-menu{z-index:2147483647!important;bottom:160px!important;right:4vw!important;max-width:90vw;font-size:20px!important}
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-panel-menu{max-height:65vh!important}
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-menuitem{height:56px!important;font-size:20px!important}
@@ -53,7 +58,6 @@ html.ytg-playback.ytg-comments-preload:not([data-ytg-native]) #below,
 html.ytg-comments:not([data-ytg-native]) #below{opacity:0!important;pointer-events:none!important}
 html.ytg-playback.ytg-comments-preload:not([data-ytg-native]):not(.ytg-comments) #below{display:block!important;position:fixed!important;inset:0 0 0 auto!important;width:clamp(320px,36vw,680px)!important;height:100vh!important;overflow:auto!important;z-index:0!important;pointer-events:none!important}
 html.ytg-comments:not([data-ytg-native]) #below{display:block!important;position:fixed!important;inset:0 0 0 auto!important;width:clamp(320px,36vw,680px)!important;height:100vh!important;overflow:auto!important;z-index:0!important}
-html.ytg-comments:not([data-ytg-native]) #movie_player{width:calc(100vw - clamp(320px,36vw,680px))!important;right:auto!important}
 html.ytg-watch-active:not([data-ytg-native]).ytg-controls:not(.ytg-comments) #movie_player .caption-window.ytp-caption-window-bottom{bottom:46vh!important}
 html.ytg-watch-active:not([data-ytg-native]).ytg-recommendations:not(.ytg-comments) #movie_player .caption-window.ytp-caption-window-bottom{bottom:68vh!important}
 

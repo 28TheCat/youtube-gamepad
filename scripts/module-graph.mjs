@@ -3,6 +3,7 @@
 // Site and view instances are connected by coordinator; they do not import each other.
 export const dependencies = {
   'src/shared/actions.ts': [],
+  'src/playback/seek.ts': [],
   'src/input/bindings.ts': ['src/shared/actions.ts'],
   'src/shared/runtime.ts': [],
   'src/diagnostics/diagnostics.ts': ['src/shared/runtime.ts'],
@@ -31,7 +32,7 @@ export const dependencies = {
   'src/ui/watch-surface.ts': ['src/ui/playback-presentation.ts'],
   'src/playback/watch.ts': ['src/shared/runtime.ts', 'src/app/state-machine.ts', 'src/ui/watch-view.ts', 'src/ui/watch-panels.ts', 'src/navigation/focus.ts', 'src/ui/watch-surface.ts'],
   'src/app/browse.ts': ['src/shared/runtime.ts'],
-  'src/sites/youtube.ts': ['src/shared/actions.ts', 'src/shared/runtime.ts', 'src/navigation/focus.ts'],
+  'src/sites/youtube.ts': ['src/shared/actions.ts', 'src/playback/seek.ts', 'src/shared/runtime.ts', 'src/navigation/focus.ts'],
   'src/app/coordinator.ts': ['src/input/bindings.ts', 'src/diagnostics/diagnostics.ts', 'src/shared/runtime.ts', 'src/app/route-controller.ts', 'src/navigation/core.ts', 'src/sites/youtube.ts'],
   'src/app/content.ts': ['src/input/bindings.ts'],
   'src/settings/inline-settings.ts': ['src/input/bindings.ts', 'src/diagnostics/diagnostics-store.ts'],

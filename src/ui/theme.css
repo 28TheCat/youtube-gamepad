@@ -14,10 +14,14 @@
   --ytg-icon-stroke: 2.5;
   --ytg-line-body: 1.5;
   --ytg-line-heading: 1.3;
-  --ytg-focus-color: #f1f1f1;
+  --ytg-focus-color: #1769d2;
+  --ytg-client-background: #f5f6f8;
+  --ytg-client-surface: #fff;
+  --ytg-client-active: #e8eef8;
   --ytg-adjusting-color: #fbbf24;
-  --ytg-focus-width: 3px;
-  --ytg-focus-offset: 3px;
+  /* Make the active gamepad target readable from a couch distance. */
+  --ytg-focus-width: 4px;
+  --ytg-focus-offset: 4px;
   --ytg-focus-duration: 120ms;
   --ytg-focus-easing: cubic-bezier(.26,.86,.44,.985);
   --ytg-motion-press: 140ms;
@@ -25,7 +29,7 @@
   --ytg-motion-easing: cubic-bezier(.2,.8,.2,1);
   --ytg-motion-spring: cubic-bezier(.34,1.3,.64,1);
   --ytg-shadow-control: 0 2px 8px #00000014;
-  --ytg-shadow-focus: 0 6px 20px #00000024;
+  --ytg-shadow-focus: 0 8px 24px #00000038, 0 0 0 2px #ffffff24;
   --ytg-glass-blur: 12px;
   --ytg-pill-radius: 999px;
   --ytg-chip-radius: 8px;
@@ -44,6 +48,7 @@
   --ytg-selected-text: var(--ytg-background);
   --ytg-overlay-backdrop: #0009;
   --ytg-overlay-panel: #181818ed;
+  --ytg-comments-background: #181818;
   --ytg-overlay-surface: #222;
   --ytg-overlay-button: #ffffff20;
   --ytg-overlay-subtle: #ffffff0d;
@@ -82,6 +87,10 @@ html[dark] {
   --ytg-muted: #aaa;
   --ytg-surface: #272727;
   --ytg-border: #454545;
+  --ytg-focus-color: #8ab4f8;
+  --ytg-client-background: #15171c;
+  --ytg-client-surface: #1c1f26;
+  --ytg-client-active: #2a3447;
 }
 html:not([dark]) { color-scheme: light; }
 /* The extension popup has no YouTube document; use its system preference. */
@@ -93,5 +102,9 @@ html:not([dark]) { color-scheme: light; }
     --ytg-muted: #aaa;
     --ytg-surface: #272727;
     --ytg-border: #454545;
+    --ytg-focus-color: #8ab4f8;
+    --ytg-client-background: #15171c;
+    --ytg-client-surface: #1c1f26;
+    --ytg-client-active: #2a3447;
   }
 }

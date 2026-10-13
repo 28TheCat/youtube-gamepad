@@ -1,4 +1,5 @@
 import { legacyModuleSource } from '../scripts/test-source.mjs';
+import { controllerAssets } from '../scripts/controller-assets.mjs';
 import { mainFixture } from './helpers/main-bundle.mjs';
 import { inlineSettingsFixture } from './helpers/inline-bundle.mjs';
 import { test } from 'node:test';
@@ -492,7 +493,7 @@ test('controller hints switch in open search and watch UI without disturbing inp
     assert.equal(result.watchConfirm, confirm); assert.ok(result.watchLabel.includes(confirm + ' to start adjusting'));
     assert.equal(result.title, remove + ' Delete (hold to repeat)'); assert.equal(result.count, 11);
     assert.equal(result.query, 'controller test'); assert.deepEqual(result.cursor, [3, 7]); assert.equal(result.focus, true);
-    const assets = JSON.parse(readFileSync(new URL('assets/controller/kenney.json', root), 'utf8'));
+    const assets = controllerAssets(fileURLToPath(root));
     const original = readFileSync(new URL(assets.profiles[family].A, root)).toString('base64');
     assert.equal(result.icon, `url("data:image/svg+xml;base64,${original}")`);
     assert.equal(result.aria, confirm); assert.equal(result.fontSize, '0px');
@@ -847,7 +848,7 @@ test('native header preserves sidebar and feed geometry across widths and guide 
   assert.equal(await page.evaluate(() => window.YTGamepad.current === document.querySelector('#ytg-browse-grid [data-browse-id="video:a"]')),true,'right returns to the original Vue card');
 });
 
-test('native video rows retain independent focus through short rows and DOM replacement', options, async t => {
+test('native video rows keep the current column through short rows and DOM replacement', options, async t => {
   const page = await setup(t);
   const result = await page.evaluate(() => {
     document.querySelectorAll('ytd-rich-item-renderer').forEach(card => card.remove());
@@ -877,7 +878,7 @@ test('native video rows retain independent focus through short rows and DOM repl
     return { selections, scrollY: window.scrollY };
   });
   assert.deepEqual(result.selections, ['/watch?v=row1col0', '/watch?v=row2col2',
-    '/watch?v=row2col1', '/watch?v=row1col0', '/watch?v=row0col2',
+    '/watch?v=row2col1', '/watch?v=row1col0', '/watch?v=row0col1',
     '/watch?v=row2col1', '/watch?v=row0col0']);
   assert.equal(result.scrollY, 0);
 });

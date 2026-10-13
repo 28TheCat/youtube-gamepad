@@ -37,7 +37,7 @@ export interface NavigationReads {
   styles: WeakMap<HTMLElement, CSSStyleDeclaration>;
   candidates: Map<NavigationRoot, InteractiveElement[]>;
 }
-export interface RowMemory { column: number | null; rows: { keys: Set<string | Element | MeasuredItem>; selected: string | Element | MeasuredItem }[] }
+export interface RowMemory { column: number | null }
 export interface YouTubeVideoDetails { videoId?: string; isLive?: boolean; title?: string; author?: string; shortDescription?: string; channelId?: string; viewCount?: string }
 export interface YouTubePlayer extends HTMLElement {
   showControls?(): void; hideControls?(): void;

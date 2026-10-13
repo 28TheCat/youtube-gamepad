@@ -44,27 +44,21 @@ export let YTGamepadNavigation!: Navigation;
     return row.sort((a, b) => Math.abs(center(a.rect).x - x) - Math.abs(center(b.rect).x - x))[0];
   }
   const orderedRow = (from: MeasuredItem, items: MeasuredItem[]) => rowOf(from, items).sort((a, b) => a.rect.left - b.rect.left);
-  const itemKey = (item: MeasuredItem) => item.key ?? item.el ?? item;
-  // Row memories use video keys, so replacing DOM nodes does not lose selection.
+  // Keep the preferred column across short rows; a row's old selection must
+  // not override the column when navigating vertically.
   function createRowFocus() {
     const sections: Map<string, RowMemory> = new Map();
     function state(section: string) {
-      if (!sections.has(section)) sections.set(section, { column: null, rows: [] });
+      if (!sections.has(section)) sections.set(section, { column: null });
       return sections.get(section)!;
     }
     function remember(item: MeasuredItem, items: MeasuredItem[], keepColumn = false) {
       const row = orderedRow(item, items), s = state(item.section);
       if (!keepColumn || s.column === null) s.column = row.indexOf(item);
-      const keys = new Set(row.map(itemKey));
-      s.rows = s.rows.filter((saved) => !row.some((card) => saved.keys.has(itemKey(card))));
-      s.rows.push({ keys, selected: itemKey(item) });
-      if (s.rows.length > 100) s.rows.shift();
     }
     function target(from: MeasuredItem, next: MeasuredItem, items: MeasuredItem[]) {
       const row = orderedRow(next, items), s = state(from.section);
-      const saved = s.rows.find((entry) => row.some((card) => entry.keys.has(itemKey(card))));
-      return row.find((card) => itemKey(card) === saved?.selected)
-        || row[Math.min(s.column ?? 0, row.length - 1)];
+      return row[Math.min(s.column ?? 0, row.length - 1)];
     }
     return { remember, target, reset() { sections.clear(); } };
   }
@@ -108,7 +102,13 @@ export let YTGamepadNavigation!: Navigation;
     for (const id of exits) {
       const pool = items.filter((item) => item.section === id);
       const target = ranked(from, pool, direction, true)[0] || ranked(from, pool, direction)[0];
+      // An explicit region exit is a logical link, even when its destination
+      // is above/below the source after scrolling or a responsive layout change.
       if (target) return target.item;
+      if (pool.length) return pool.reduce((a, b) => {
+        const origin = center(from.rect), ac = center(a.rect), bc = center(b.rect);
+        return Math.hypot(ac.x - origin.x, ac.y - origin.y) <= Math.hypot(bc.x - origin.x, bc.y - origin.y) ? a : b;
+      });
     }
     return null;
   }

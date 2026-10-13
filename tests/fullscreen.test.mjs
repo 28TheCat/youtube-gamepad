@@ -117,7 +117,7 @@ test('settings entry opens options only for an active top-level YouTube tab', as
 test('new document does not interpret an initial empty gamepad snapshot as disconnect', async () => {
   const sent = [], events = {}; let pads = [], tick;
   const window = { addEventListener(name, fn) { events[name] = fn; }, postMessage() {} };
-  const chrome = { runtime: { onMessage: { addListener() {} }, async sendMessage(message) { sent.push(message); return { ok: true }; } }, storage: { local: { get(defaults, callback) { callback(defaults); } }, onChanged: { addListener(fn) { events.settings = fn; } } } };
+  const chrome = { runtime: { id: 'test', onMessage: { addListener() {} }, async sendMessage(message) { sent.push(message); return { ok: true }; } }, storage: { local: { get(defaults, callback) { callback(defaults); } }, onChanged: { addListener(fn) { events.settings = fn; } } } };
   runInNewContext(moduleSource('src/app/content.ts'), {
     window, chrome, console, location: { origin: 'https://www.youtube.com' }, navigator: { getGamepads: () => pads },
     document: { hidden: false, addEventListener(name, fn) { events[name] = fn; } }, setInterval(fn) { tick = fn; }
@@ -139,7 +139,7 @@ test('synthetic Escape cannot request fullscreen exit or report a false disconne
   const sent = [], events = {}, pad = { connected: true, mapping: 'standard', axes: [.8, 0], buttons: [] };
   let tick, frame;
   const window = { addEventListener(name, fn) { events[name] = fn; }, postMessage() {} };
-  const chrome = { runtime: { onMessage: { addListener() {} }, async sendMessage(message) { sent.push(message); return { ok: true }; } }, storage: { local: { get(defaults, callback) { callback(defaults); } }, onChanged: { addListener() {} } } };
+  const chrome = { runtime: { id: 'test', onMessage: { addListener() {} }, async sendMessage(message) { sent.push(message); return { ok: true }; } }, storage: { local: { get(defaults, callback) { callback(defaults); } }, onChanged: { addListener() {} } } };
   runInNewContext(moduleSource('src/app/content.ts'), {
     window, chrome, console, location: { origin: 'https://www.youtube.com' }, navigator: { getGamepads: () => [pad] },
     document: { hidden: false, hasFocus: () => true, addEventListener() {} }, setInterval(fn) { tick = fn; }, requestAnimationFrame(fn) { frame = fn; }
@@ -181,7 +181,7 @@ function connectionBridge() {
   let tick, result = { ok: true }, pads = [{ connected: true, mapping: 'standard' }];
   const document = { hidden: false, addEventListener(name, fn) { events[name] = fn; } };
   const chrome = {
-    runtime: { onMessage: { addListener() {} }, async sendMessage(message) {
+    runtime: { id: 'test', onMessage: { addListener() {} }, async sendMessage(message) {
       sent.push(message);
       if (result instanceof Error) throw result;
       return result;

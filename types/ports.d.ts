@@ -45,7 +45,7 @@ export type WatchFeatures = Readonly<Partial<Record<'metadata' | 'recommendation
   | 'channel' | 'captions' | 'settings' | 'subscribe' | 'like' | 'dislike' | 'save' | 'nativeLayers', Capability>>>;
 export interface AdaptationSnapshot { readonly status: 'inactive' | 'waiting' | 'ready' | 'fallback'; readonly reason: string; readonly route?: string }
 export interface CoordinatorSnapshot { readonly mode: Mode; readonly enabled: boolean; readonly surfaceReady: boolean; readonly navigating: boolean }
-  export interface Settings { enabled: boolean; theater: boolean; deadzone: number; repeatDelay: number; repeatInterval: number; bindings?: Record<string, number>; bindingLayouts?: Record<string, Record<string, number>> }
+export interface Settings { rightHandMode?: boolean; enabled: boolean; theater: boolean; deadzone: number; repeatDelay: number; repeatInterval: number; bindings?: Record<string, number>; bindingLayouts?: Record<string, Record<string, number>> }
 export type SearchTarget = HTMLInputElement | null;
 export type OperationResult = boolean | void;
 export type RecommendationResult = 'opened' | 'blocked' | 'missing';
@@ -199,9 +199,9 @@ export interface DiagnosticState { route?: string; mode?: Mode; adaptation?: str
 export interface Diagnostics { record(module: string, operation: string, error: unknown, state?: DiagnosticState): void }
 export interface ApplicationMessage { source: string; values?: Settings; entry?: unknown }
 export interface ApplicationChannel { publish(message: ApplicationMessage): void; subscribe(listener: (message: ApplicationMessage) => void): Dispose }
-export interface InputDependencies { localChannel?: ApplicationChannel; runtime: Runtime; controllerStyle: ControllerStyle; isSearchOpen(): boolean }
+export interface InputDependencies { localChannel?: ApplicationChannel; runtime: Runtime; controllerStyle: ControllerStyle; isSearchOpen(): boolean; temporarySpeed?(held: boolean): boolean; canRepeatMedia?(): boolean }
 export interface SiteDependencies { pageAccess?: import("../src/bridge/page-protocol").PageAccess; runtime: Runtime; diagnostics?: Diagnostics; focusManager?: FocusManager }
-export interface InputModule { readonly connected: boolean; readonly mode: 'mouse' | 'gamepad' | 'keyboard'; configure(values: Partial<Settings>): void; destroy(): void }
+export interface InputModule { readonly connected: boolean; readonly mode: 'mouse' | 'gamepad' | 'keyboard'; isHeld?(action: Action): boolean; cancelSeeking?(): void; configure(values: Partial<Settings>): void; destroy(): void }
 export interface MenuModule { readonly opened: boolean; readonly settingsOpened?: boolean; readonly state: MenuSnapshot; connect(port: MenuPort): void; close(): void; openSearch(target?: SearchTarget): void; handle(action: Action): Disposition; destroy(): void }
 export interface WatchModule {
   readonly ownsFocus: boolean;
@@ -209,7 +209,8 @@ export interface WatchModule {
   connect(port: WatchPort): void; sync(mode?: Mode, preferences?: Partial<Settings>): void;
   show(target?: 'controls' | 'recommendations'): void; handle(action: Action): boolean;
   handleInput(action: Action): Disposition; refresh(): void; destroy(): void;
-  mediaFeedback(action: Action): void;
+  mediaFeedback(action: Action, seekDelta?: number): void;
+  seekPreview?(value: import('../src/ui/playback-presentation').SeekPreview | null): void;
 }
 export interface ActionContext { current?: HTMLElement | null; scope: Document | Element }
 export interface NavigationPolicy {
@@ -227,6 +228,7 @@ export interface NavigationPolicy {
   onSettingsClosed(): void; pageBack(): void; readonly navigating: boolean; readonly mode: Mode;
 }
 export interface SitePort extends WatchDataPort, SearchDataPort {
+  temporarySpeed(held: boolean): number | false;
   hasNativeLayer(): boolean; perform(action: Action): OperationResult | Promise<OperationResult>;
   performWatchAction(action: WatchAction): OperationResult | Promise<OperationResult>;
   showNativeControls(): HTMLElement | null; isProgress(el: Element | null): boolean;
@@ -352,7 +354,7 @@ export interface RouteStateModule {
   transition(app: AppSnapshot, event: RouteEvent): { app: AppSnapshot; effects: readonly Effect[]; disposition: Disposition };
 }
 export interface BindingsSchema {
-  defaults: Record<string,number>; keys: Record<number,string>; labels: Record<string,string>; layouts: Record<string,string>;
+  defaults: Record<string,number>; rightHand: Record<string,number>; keys: Record<number,string>; labels: Record<string,string>; layouts: Record<string,string>;
   normalize(raw?: unknown): Record<string,number>;
   normalizeLayouts(raw?: unknown, legacy?: unknown): Record<string,Record<string,number>>;
   contextLabel(action: string, layout: string): string;

@@ -1,6 +1,7 @@
 import { videoGridDefaults, normalizeVideoGrid } from './video-grid';
+import { languageDefault, normalizeLanguage } from './i18n';
 export const settingDefaults = {
-  ...videoGridDefaults, enabled: true, theater: true, autoFullscreen: true,
+  ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, autoFullscreen: true,
   deadzone: 0.35, repeatDelay: 350, repeatInterval: 140
 };
 export type Settings = typeof settingDefaults;
@@ -9,7 +10,8 @@ const ranges = { deadzone: [0.15, 0.75], repeatDelay: [150, 1000], repeatInterva
 
 export function normalizeSettings(raw: Record<string, unknown>): Settings {
   const values = { ...settingDefaults };
-  for (const key of ['enabled', 'theater', 'autoFullscreen'] as const)
+  values.uiLanguage = normalizeLanguage(raw.uiLanguage);
+  for (const key of ['enabled', 'theater', 'autoFullscreen', 'rightHandMode'] as const)
     if (typeof raw[key] === 'boolean') values[key] = raw[key];
   if (typeof raw.autoFullscreen !== 'boolean') values.autoFullscreen = values.theater;
   for (const key of ['deadzone', 'repeatDelay', 'repeatInterval'] as const) {

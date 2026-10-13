@@ -68,8 +68,8 @@ export let YTGamepadStateMachine!: StateMachineModule;
       case 'BASE_INPUT':
         if (!app.enabled || app.navigation || app.returning) { disposition = 'blocked'; break; }
         if (!isWatch(event.route) || app.mode !== 'playback') { disposition = 'pass'; break; }
-        if (event.action === 'left' || event.action === 'right') { effect('showControls', 'controls'); effect('moveFocus', event.action); }
-        else if (event.action === 'confirm') effect('media', 'playPause');
+        if (event.action === 'left' || event.action === 'right') effect('media', event.action === 'left' ? 'seekBack' : 'seekForward');
+        else if (event.action === 'confirm') effect('showControls', 'controls');
         else if (event.action === 'back') effect('pageBack');
         else if (event.action === 'up' || event.action === 'down') effect('showControls', event.action === 'down' ? 'recommendations' : 'controls');
         else disposition = 'pass';
@@ -133,8 +133,7 @@ export let YTGamepadStateMachine!: StateMachineModule;
           if (watch.row === 'progress') disposition = 'blocked';
           else {
             const columns = Math.max(1, event.cardColumns || event.cardCount || 1);
-            const edge = watch.row === 'recommendations' && (action === 'left' ? watch.index % columns === 0 : watch.index % columns === columns - 1);
-            let index = edge ? watch.index : clamp(watch.index + (action === 'left' ? -1 : 1), watch.row === 'recommendations' ? event.cardCount : event.controlCount);
+            let index = clamp(watch.index + (action === 'left' ? -1 : 1), watch.row === 'recommendations' ? event.cardCount : event.controlCount);
             if (watch.row === 'controls' && event.availableControls) {
               index = (action === 'left' ? [...event.availableControls].reverse().find(i => i < watch.index) : event.availableControls.find((i) => i > watch.index)) ?? watch.index;
             }

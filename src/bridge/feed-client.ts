@@ -28,7 +28,8 @@ export function createFeedClient() {
     let result: FeedCategory[] = [];
     const id = dispatch('readBrowseCategories', {}, message => {
       if (message?.ok && Array.isArray(message.value)) result = message.value.slice(0, 100).filter((item: any) =>
-        typeof item.id === 'string' && item.id.length <= 100 && typeof item.label === 'string' && item.label.length <= 80)
+        item && typeof item === 'object' && typeof item.id === 'string' && item.id.length <= 100 &&
+        typeof item.label === 'string' && item.label.length <= 80)
         .map((item: any) => ({ id: item.id, label: item.label, selected: item.selected === true }));
     });
     pending.delete(id);

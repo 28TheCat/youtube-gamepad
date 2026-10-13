@@ -5,10 +5,10 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 const read = file => moduleSource(file);
 
-function bridge() {
+function bridge(overrides = {}) {
   const events = {}, messages = [], writes = [], runtime = [];
   let reads = 0, now = 1000;
-  const stored = { enabled: false, theater: true, deadzone: Infinity, repeatDelay: 1, repeatInterval: '200', secret: 'never publish' };
+  const stored = { enabled: false, theater: true, deadzone: Infinity, repeatDelay: 1, repeatInterval: '200', secret: 'never publish', ...overrides };
   const window = { addEventListener(name, fn) { events[name] = fn; }, postMessage(message, origin) { messages.push({ message, origin }); } };
   const chrome = {
     storage: {
@@ -30,7 +30,10 @@ test('page bridge publishes only allowed settings with validated values', () => 
   const s = bridge();
   assert.deepEqual(JSON.parse(JSON.stringify(s.messages[0])), {
     origin: 'https://www.youtube.com', message: { source: 'yt-gamepad-settings',
-      values: { enabled: false, theater: true, deadzone: .35, repeatDelay: 150, repeatInterval: 140, bindings: { confirm: 0, back: 1, playPause: 2, search: 3, seekBack: 4, seekForward: 5, volumeDown: 6, volumeUp: 7, help: 9, keyboardSymbols: 10, keyboardCandidates: 11 } } }
+      values: { enabled: false, theater: true, rightHandMode: false, deadzone: .35, repeatDelay: 150, repeatInterval: 140,
+        gridLayout: 'adaptive', gridAutoSwitch: true, gridSwitchWidth: 640, gridSingleCover: 40, gridDoubleCover: 50,
+        gridColumns0: 1, gridColumns640: 2, gridColumns768: 3, gridColumns1024: 4, gridColumns1280: 4, gridColumns1536: 5,
+        bindings: { confirm: 0, back: 1, playPause: 2, search: 3, seekBack: 4, seekForward: 5, volumeDown: 6, volumeUp: 7, help: 9, keyboardSymbols: 10, keyboardCandidates: 11 } } }
   });
 });
 
@@ -132,4 +135,10 @@ test('malformed or oversized rankings fall back to defaults without blocking lea
     s.ime.learn({ key: 'ni', text: '你' });
     assert.deepEqual(JSON.parse(s.writes[0].value), { 'ni:你': 1 });
   }
+});
+
+
+test('right-hand preset crosses the settings bridge only as a boolean', () => {
+  assert.equal(bridge({ rightHandMode: true }).messages[0].message.values.rightHandMode, true);
+  assert.equal(bridge({ rightHandMode: 'true' }).messages[0].message.values.rightHandMode, false);
 });
