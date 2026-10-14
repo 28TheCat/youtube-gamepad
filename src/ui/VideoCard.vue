@@ -1,22 +1,12 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { onBeforeUnmount, ref } from 'vue';
+import { useThumbnail } from './use-thumbnail';
 import type { BrowseItem } from '../sites/youtube-browse';
 const props = defineProps<{ item: BrowseItem; selected: boolean; register: (id: string, node: HTMLAnchorElement | null) => void }>();
 const emit = defineEmits<{ select: [id: string]; open: [id: string] }>();
-const source = ref(''), failed = ref(false);
-const loaded = ref(false), cover = ref<HTMLElement>();
+const { source, failed, loaded, imageError } = useThumbnail(() => props.item);
+const cover = ref<HTMLElement>();
 let press: Animation | undefined;
-watch(() => [props.item.id, props.item.thumbnail, props.item.thumbnailFallback], () => {
-  source.value = props.item.thumbnail || props.item.thumbnailFallback || '';
-  failed.value = !source.value;
-  loaded.value = false;
-}, { immediate: true });
-function imageError() {
-  loaded.value = false;
-  const fallback = props.item.thumbnailFallback;
-  if (fallback && source.value !== fallback) source.value = fallback;
-  else failed.value = true;
-}
 function open() {
   press?.cancel();
   if (window.matchMedia('(prefers-reduced-motion: no-preference)').matches) {

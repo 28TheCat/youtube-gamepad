@@ -1,24 +1,5 @@
 {
-  "compilerOptions": {
-    "strict": true,
-    "noEmit": true,
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "allowJs": false,
-    "allowImportingTsExtensions": true,
-    "checkJs": false,
-    "skipLibCheck": true,
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "types": [
-      "chrome",
-      "vite/client"
-    ]
-  },
+  "extends": "./tsconfig.json",
   "include": [
     "src/entries/popup.ts",
     "src/entries/options.ts",

@@ -1,4 +1,4 @@
-import { videoGridDefaults, normalizeVideoGrid, type VideoGridSettings, type VideoGridKey } from '../shared/video-grid';
+import { videoGridDefaults, normalizeVideoGrid, type VideoGridSettings } from '../shared/video-grid';
 import { nextTick, reactive } from 'vue';
 import { YTGamepadBindings as schema } from '../input/bindings.ts';
 import { YTGamepadDiagnosticStore as diagnostics } from '../diagnostics/diagnostics-store.ts';

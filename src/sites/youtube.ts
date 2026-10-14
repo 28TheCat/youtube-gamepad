@@ -1,4 +1,4 @@
-import type { ActionContext, Capability, Dispose, ModuleFactory, NavigationPolicy, RecommendationSnapshot, SearchTarget, SiteDependencies, SitePort, WatchAction, WatchPageSnapshot } from '../../types/ports';
+import type { Capability, Dispose, ModuleFactory, NavigationPolicy, RecommendationSnapshot, SearchTarget, SiteDependencies, SitePort, WatchAction, WatchPageSnapshot } from '../../types/ports';
 
 import type { NavigationConfig, InteractiveElement } from '../../types/core';
 type Mutable<T> = {-readonly [K in keyof T]: T[K]};
@@ -42,6 +42,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
     return 2;
   }
   lifecycle.cleanup(restoreSpeed);
+  if (typeof document !== 'undefined') {
   for (const event of ['yt-navigate-start', 'yt-navigate-finish']) lifecycle.listen(document, event, restoreSpeed);
   for (const event of ['pause', 'ended', 'emptied', 'loadstart']) lifecycle.listen(document, event, e => {
     if (e.target === speedSession?.video) restoreSpeed();
@@ -49,8 +50,9 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
   lifecycle.listen(document, 'ratechange', e => {
     if (e.target === speedSession?.video && speedSession.video.playbackRate !== speedSession.applied) restoreSpeed();
   }, true);
-  for (const event of ['blur', 'pagehide', 'popstate']) lifecycle.listen(window, event, restoreSpeed);
   lifecycle.listen(document, 'visibilitychange', () => { if (document.hidden) restoreSpeed(); });
+  }
+  if (typeof window !== 'undefined') for (const event of ['blur', 'pagehide', 'popstate']) lifecycle.listen(window, event, restoreSpeed);
   const progressSelector = '.ytp-progress-bar';
   // Keep preview handling in the site adapter: never pause the main watch player.
   const cardSelector = 'ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model';

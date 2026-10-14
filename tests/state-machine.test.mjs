@@ -28,6 +28,10 @@ test('recommendation grid moves between rows, clamps a short last row and reques
   assert.equal(store.state.watch.index, 3, 'right stops at the edge of the current row');
   input('down'); assert.equal(store.state.watch.index, 7);
   input('down'); assert.equal(store.state.watch.index, 9, 'short last row selects a surviving card');
+  input('right'); assert.equal(store.state.watch.index, 9, 'right stops at the end of a short last row');
+  input('left'); assert.equal(store.state.watch.index, 8);
+  input('left'); assert.equal(store.state.watch.index, 8, 'left stops at the start of the current row');
+  input('right'); assert.equal(store.state.watch.index, 9);
   assert.equal(effects(input('down')), 'loadRecommendations,focus');
   assert.equal(store.state.watch.index, 9, 'loading cannot move selection past the list');
   input('up'); assert.equal(store.state.watch.index, 5);

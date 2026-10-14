@@ -42,7 +42,7 @@ html.ytg-controls:not([data-ytg-native]) #movie_player .ytp-chrome-controls{opac
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-bottom,
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-top{display:none!important}
 /* Recommendations belong to the gamepad surface, including after playback ends. */
-html.ytg-watch-active:not([data-ytg-native]) #movie_player :is(.html5-endscreen,.ytp-endscreen-content,.ytp-autonav-endscreen,.ytp-upnext,.ytp-ce-element){display:none!important}
+html.ytg-watch-active:not([data-ytg-native]) #movie_player :is(.html5-endscreen,.ytp-endscreen-content,.ytp-autonav-endscreen,.ytp-upnext,.ytp-ce-element,.ytp-fullscreen-grid,.ytp-fullscreen-grid-stills-container,.ytp-modern-videowall-still){display:none!important}
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-settings-menu{z-index:2147483647!important;bottom:160px!important;right:4vw!important;max-width:90vw;font-size:20px!important}
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-panel-menu{max-height:65vh!important}
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-menuitem{height:56px!important;font-size:20px!important}

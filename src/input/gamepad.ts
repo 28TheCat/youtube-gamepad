@@ -9,6 +9,7 @@ export let YTGamepadInput: InputModule | undefined, YTGamepadInputModule!: Modul
   let settings = { ...defaults }, previous = new Set(), heldDirection = '', nextRepeat = 0, index: number|null = null;
   let inputMode: 'gamepad' | 'mouse' | 'keyboard' = 'mouse', mousePosition: { x: number; y: number; }|null = null, mouseTravel = { x: 0, y: 0, time: 0 }, waitForNeutral = false, suspended = false;
   let speedPress: number | null = null;
+  let speedRoute = '';
   const stopSpeed = () => { if (speedPress !== null) temporarySpeed?.(false); speedPress = null; };
   function setMode(value: 'gamepad' | 'mouse' | 'keyboard') {
     if (inputMode === value) return;
@@ -128,7 +129,9 @@ export let YTGamepadInput: InputModule | undefined, YTGamepadInputModule!: Modul
     // R3 is physical, and never overrides a user's ordinary button binding.
     // Only a fresh press can arm it; cancellation cannot restart a held press.
     if (temporarySpeed && layout === 'watch' && !searchOpen && !buttons[11] && pressed.has(11)) {
-      if (!previous.has(11)) speedPress = time;
+      const route = location.pathname + location.search;
+      if (!previous.has(11)) { speedPress = time; speedRoute = route; }
+      if (speedPress !== null && route !== speedRoute) stopSpeed();
       if (speedPress !== null && time - speedPress >= 350) {
         setMode('gamepad');
         if (!temporarySpeed(true)) stopSpeed();

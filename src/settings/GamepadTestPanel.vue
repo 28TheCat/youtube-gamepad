@@ -31,6 +31,8 @@ watch(navigationStick, () => cancelCalibration('Navigation stick changed. Start 
 function selectDevice(event: Event) {
   selected.value = Number((event.target as HTMLSelectElement).value);
   cancelCalibration(); previewing.value = false;
+  const device = pad.value;
+  currentIdentity = device ? `${device.index}:${device.id}:${device.mapping}` : '';
 }
 function preview(event: Event) { draft.value = Number((event.target as HTMLInputElement).value); previewing.value = true; }
 async function apply(value: number) {

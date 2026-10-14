@@ -214,8 +214,9 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     if (!overlay) ring.style.borderColor = adjustingTarget === current ? 'var(--ytg-adjusting-color,#fbbf24)' : '';
     if (!overlay) ring.style.borderRadius = config.getSelectionRadius?.(current) || 'var(--ytg-card-radius, 14px)';
     const r = rect(target);
-    if (overlay) overlay.update({ visible: true, animate, adjusting: adjustingTarget === current, radius: config.getSelectionRadius?.(current) || 'var(--ytg-card-radius, 14px)', left: r.left - 3, top: r.top - 3, width: r.width + 6, height: r.height + 6 });
-    else Object.assign(ring.style, { display: 'block', transform: `translate3d(${r.left - 3}px,${r.top - 3}px,0)`, width: `${r.width + 6}px`, height: `${r.height + 6}px` });
+    const inset = parseFloat(computed(document.documentElement).getPropertyValue?.('--ytg-focus-width')) || 3;
+    if (overlay) overlay.update({ visible: true, animate, adjusting: adjustingTarget === current, radius: config.getSelectionRadius?.(current) || 'var(--ytg-card-radius, 14px)', left: r.left - inset, top: r.top - inset, width: r.width + inset * 2, height: r.height + inset * 2 });
+    else Object.assign(ring.style, { display: 'block', transform: `translate3d(${r.left - inset}px,${r.top - inset}px,0)`, width: `${r.width + inset * 2}px`, height: `${r.height + inset * 2}px` });
   }
   function measure(list: HTMLElement[]) {
     return list.map((el) => {

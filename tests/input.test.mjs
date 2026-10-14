@@ -155,6 +155,17 @@ test('R3 speed respects custom playback bindings and is inactive while browsing'
   assert.deepEqual(calls, []);
 });
 
+test('an R3 hold cannot cross video routes even before the hold threshold', () => {
+  const calls = [], location = { pathname: '/watch', search: '?v=first' };
+  const s = setup(location, held => { calls.push(held); return held; });
+  s.pad.buttons[11].pressed = true; s.tick(0);
+  location.search = '?v=next'; s.tick(200); s.tick(500);
+  assert.deepEqual(calls, [false]);
+  s.pad.buttons[11].pressed = false; s.tick(516);
+  s.pad.buttons[11].pressed = true; s.tick(532); s.tick(882);
+  assert.equal(calls.at(-1), true);
+});
+
 test('labels follow the active standard controller and fall back after disconnect', () => {
   const s = setup(); s.pad.id = 'Xbox Wireless Controller';
   const ps = { ...s.pad, id: 'DualSense Wireless Controller', index: 1, buttons: s.pad.buttons.map(() => ({ pressed: false })) };

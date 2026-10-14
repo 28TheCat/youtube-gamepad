@@ -44,7 +44,7 @@ MAIN 初始化成功发出 `ytg-main-ready`，content 初始化成功通过同�
 
 验证入口：`npm run check`、`npm run build:extension`、`node --test tests/back-search.test.mjs tests/pinyin.test.mjs`，以及真实扩展测试 `node --test tests/search-vue.test.mjs`。后者覆盖 Vue 输入、emoji 删除、键位恢复、拼音确认、逐层返回、重开、原生搜索提交、历史文本转义及窄屏；需浏览器能够正常启动才算完成运行验证。
 
-搜索专项验收（2026-10-08）：`node scripts/check-vue.cjs -p tsconfig.search.json` 通过；真实扩展搜索测试 3/3 通过，补充覆盖 R3 在键盘/候选之间切换、LB/RB 候选分页和使用原始拼音。默认 Chromium 在本机启动报 `spawn UNKNOWN`，实际验收使用 Edge 154 的 CDP 扩展加载：
+搜索专项验收（2026-10-08）：当时的搜索专项类型检查通过；真实扩展搜索测试 3/3 通过，补充覆盖 R3 在键盘/候选之间切换、LB/RB 候选分页和使用原始拼音。搜索与播放的专项类型配置现已移除，两者均由 `tsconfig.menu.json` 覆盖，可运行 `node scripts/check-vue.cjs -p tsconfig.menu.json` 检查。默认 Chromium 在本机启动报 `spawn UNKNOWN`，实际验收使用 Edge 154 的 CDP 扩展加载：
 
 ```powershell
 $env:YTG_BROWSER_EXECUTABLE = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'

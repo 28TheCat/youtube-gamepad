@@ -20,6 +20,78 @@ ${mediaSource}
 document.querySelector('#movie_player').getPlayerResponse=()=>({videoDetails:{videoId:new URL(location.href).searchParams.get('v'),title:'Fixture video',author:'Fixture channel',isLive:false}});
 </script></body></html>`;
 
+test('held media previews and commits on release through real extension input', { timeout: 60000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, language: 'en', rightHandMode: false, repeatDelay: 350, repeatInterval: 140 }));
+  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: fixture,
+    headers: { 'content-security-policy': "require-trusted-types-for 'script'; trusted-types 'none'" } }));
+  const page = await context.newPage(), errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('https://www.youtube.com/watch?v=fixture');
+  const host = page.locator('#ytg-watch'); await host.waitFor({ state: 'attached' });
+  const setPad = await virtualPad(context, page);
+  const cdp = await context.newCDPSession(page), worlds = [];
+  cdp.on('Runtime.executionContextCreated', ({ context: world }) => worlds.push(world));
+  await cdp.send('Runtime.enable');
+  let isolatedId;
+  for (const world of worlds.filter(world => !world.auxData?.isDefault)) {
+    const probe = await cdp.send('Runtime.evaluate', { contextId: world.id, expression: 'typeof chrome !== "undefined" && !!chrome.runtime?.id' });
+    if (!probe.result.value) continue;
+    isolatedId = world.id;
+    const media = mediaSource.replace('duration:{get:()=>120}', 'duration:{get:()=>3600}')
+      .replace('set:value=>video.dataset.position=String(value)', 'set:value=>{video.dataset.position=String(value);video.dataset.seekCount=String(Number(video.dataset.seekCount||0)+1)}');
+    const result = await cdp.send('Runtime.evaluate', { contextId: world.id, expression: `(()=>{${media}})()` });
+    assert.equal(result.exceptionDetails, undefined);
+  }
+  assert.ok(isolatedId);
+  const command = action => cdp.send('Runtime.evaluate', { contextId: isolatedId,
+    expression: `window.dispatchEvent(new CustomEvent('yt-gamepad-action',{detail:{action:'${action}'}}))` });
+  await page.bringToFront(); await setPad({ connected: true });
+  await page.waitForFunction(() => document.documentElement.dataset.ytgMode === 'playback');
+  const neutral = async () => { await setPad({ connected: true }); await page.waitForTimeout(100); };
+  const position = () => page.locator('video').getAttribute('data-position');
+  const count = async () => Number(await page.locator('video').getAttribute('data-seek-count') || 0);
+
+  await setPad({ connected: true, button: 5 });
+  await host.locator('.seek-target').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => Number(/\+(\d+)/.exec(document.querySelector('#ytg-watch').shadowRoot.querySelector('.seek-change')?.textContent || '')?.[1]) >= 70);
+  assert.equal(await position(), '30'); assert.equal(await count(), 0);
+  const preview = await host.locator('.seek-target').textContent();
+  assert.match(preview, /Seek to \d+:\d\d/);
+  await page.screenshot({ path: 'output/playwright/held-seek-preview.png' });
+  await neutral();
+  const afterHold = Number(await position());
+  assert.ok(afterHold >= 100); assert.equal(await count(), 1);
+  assert.equal(await page.locator('video').getAttribute('data-paused'), 'false');
+
+  await setPad({ connected: true, button: 4 });
+  await host.locator('.seek-target').waitFor({ state: 'visible' });
+  assert.match(await host.locator('.seek-change').textContent(), /−10/);
+  await neutral(); assert.equal(Number(await position()), afterHold - 10); assert.equal(await count(), 2);
+
+  await setPad({ connected: true, button: 5 }); await host.locator('.seek-target').waitFor({ state: 'visible' });
+  await command('help'); await page.locator('#yt-gamepad-menu').waitFor({ state: 'visible' });
+  await page.waitForTimeout(500); assert.equal(await count(), 2);
+  await command('back'); await page.locator('#yt-gamepad-menu').waitFor({ state: 'hidden' });
+  await page.waitForTimeout(500); assert.equal(await count(), 2);
+  assert.equal(await host.locator('.seek-target').count(), 0);
+  await neutral(); assert.equal(await count(), 2);
+
+  await page.locator('video').evaluate(video => { video.volume = .5; });
+  await setPad({ connected: true, button: 7 });
+  await page.waitForFunction(() => document.querySelector('video').volume >= .65);
+  await neutral(); const volume = await page.locator('video').evaluate(video => video.volume);
+  await page.waitForTimeout(400); assert.equal(await page.locator('video').evaluate(video => video.volume), volume);
+  await setPad({ connected: true, button: 2 }); await page.waitForTimeout(800);
+  assert.equal(await page.locator('video').getAttribute('data-paused'), 'true'); await neutral();
+
+  await setPad({ connected: true, button: 5 }); await host.locator('.seek-target').waitFor({ state: 'visible' });
+  await setPad({ connected: false }); await page.waitForTimeout(500);
+  assert.equal(await count(), 2); assert.equal(Number(await position()), afterHold - 10);
+  assert.equal(await host.locator('.seek-target').count(), 0);
+  assert.deepEqual(errors, []); await cdp.detach();
+});
+
 test('R3 temporary speed restores the saved rate on release, menu and disconnect', { timeout: 60000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, language: 'en' }));

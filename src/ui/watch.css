@@ -37,7 +37,7 @@
     .feedback-level{display:block;height:100%;background:var(--ytg-overlay-text)}
     .seek-target{white-space:nowrap;font-variant-numeric:tabular-nums}
     .seek-change{font-size:var(--ytg-font-body);font-variant-numeric:tabular-nums}
-    .seek-instruction{font-size:var(--ytg-font-small);color:var(--ytg-muted)}
+    .seek-instruction{font-size:var(--ytg-font-small);color:var(--ytg-overlay-text);opacity:.75}
     @media(prefers-reduced-motion:no-preference){
       .status.media-feedback{opacity:1;transition:opacity 100ms ease,display 100ms allow-discrete}
       .status.media-feedback:empty,.status.media-feedback.feedback-closing{opacity:0}

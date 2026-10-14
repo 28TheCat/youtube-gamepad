@@ -30,7 +30,8 @@ test('gamepad watch layout hides desktop recommendations even during capability 
 });
 test('gamepad playback hides native end recommendations and restores them in native mode', async t => {
   const page = await browserPage(t);
-  const selectors = ['.html5-endscreen', '.ytp-endscreen-content', '.ytp-autonav-endscreen', '.ytp-upnext', '.ytp-ce-element'];
+  const selectors = ['.html5-endscreen', '.ytp-endscreen-content', '.ytp-autonav-endscreen', '.ytp-upnext', '.ytp-ce-element',
+    '.ytp-fullscreen-grid', '.ytp-fullscreen-grid-stills-container', '.ytp-modern-videowall-still'];
   await page.setContent(`<html class="ytg-watch-active"><body><div id="movie_player"><video></video><div class="caption-window">Captions</div>${selectors.map(selector => `<div class="${selector.slice(1)}">Native recommendation</div>`).join('')}</div></body></html>`);
   await page.addStyleTag({ content: readFileSync(new URL('../src/app/theater.css', import.meta.url), 'utf8') });
   for (const selector of selectors) assert.equal(await page.locator(selector).evaluate(node => getComputedStyle(node).display), 'none');

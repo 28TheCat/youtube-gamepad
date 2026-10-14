@@ -1,6 +1,5 @@
 import { readFileSync, lstatSync } from 'node:fs';
 import { resolve, relative, isAbsolute, dirname, posix } from 'node:path';
-import { assertLoadOrder } from './module-graph.mjs';
 import { entries } from './extension-entries.mjs';
 import { controllerAssets as loadControllerAssets } from './controller-assets.mjs';
 export function safePath(root, file) {
@@ -21,9 +20,9 @@ export function releaseFiles(root, { source = false } = {}) {
   const manifest = JSON.parse(readFileSync(resolve(root, 'manifest.json'), 'utf8'));
   if (manifest.manifest_version !== 3) throw new Error('Expected Manifest V3');
   for (const entry of manifest.content_scripts) {
-    if (entry.js.every(file => file in entries)) {
-      if (entry.js.length !== 1) throw new Error('Expected one bundle per content world');
-    } else assertLoadOrder(entry.js);
+    if (entry.js.length !== 1 || !Object.hasOwn(entries, entry.js[0])) {
+      throw new Error('Expected one registered bundle per content world');
+    }
     if (new Set(entry.css || []).size !== (entry.css || []).length) throw new Error('Duplicate manifest stylesheet.');
   }
   const pages = [manifest.action.default_popup, manifest.options_ui?.page].filter(Boolean);

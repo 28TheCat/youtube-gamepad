@@ -38,23 +38,6 @@ export const dependencies = {
   'src/settings/inline-settings.ts': ['src/input/bindings.ts', 'src/diagnostics/diagnostics-store.ts'],
   'src/background/background.ts': ['src/diagnostics/diagnostics-store.ts']
 };
-export function assertLoadOrder(files) {
-  const loaded = new Set();
-  for (const file of files) {
-    if (!(file in dependencies)) throw new Error(`Unregistered module: ${file}`);
-    if (loaded.has(file)) throw new Error(`Duplicate module: ${file}`);
-    for (const dependency of dependencies[file]) {
-      if (!loaded.has(dependency)) throw new Error(`${file} requires ${dependency} before it`);
-    }
-    if (file === 'src/app/coordinator.ts') {
-      for (const module of compositionModules) {
-        if (!loaded.has(module)) throw new Error(`src/app/coordinator.ts requires ${module} before assembly`);
-      }
-    }
-    loaded.add(file);
-  }
-}
-
 // Full extension assembly requires these definitions; small VM policy tests can
 // provide module doubles instead of rendering every feature.
 export const compositionModules = ['src/navigation/focus.ts', 'src/input/controller-style.ts', 'src/input/gamepad.ts',

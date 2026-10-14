@@ -10,10 +10,11 @@ for (const reducedMotion of ['no-preference', 'reduce']) {
     const page = await browserPage(t);
     await page.emulateMedia({ reducedMotion });
     await page.setViewportSize({ width: 1280, height: 900 });
-    let releaseFeed, releaseImages;
+    let releaseFeed, releaseImages, releaseMusic;
     const feedGate = new Promise(resolve => { releaseFeed = resolve; });
     const imageGate = new Promise(resolve => { releaseImages = resolve; });
-    t.after(() => { releaseFeed(); releaseImages(); });
+    const musicGate = new Promise(resolve => { releaseMusic = resolve; });
+    t.after(() => { releaseFeed(); releaseImages(); releaseMusic(); });
     await page.route('https://i.ytimg.com/**', async route => {
       await imageGate;
       await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"><rect width="480" height="270" fill="#315c70"/></svg>' });
@@ -23,6 +24,7 @@ for (const reducedMotion of ['no-preference', 'reduce']) {
       await feedGate;
       const body = route.request().postDataJSON();
       const category = body.browseId || 'more';
+      if (category === 'music') await musicGate;
       return route.fulfill({ json: { contents: [
         ...Array.from({ length: 6 }, (_, i) => ({ videoRenderer: { videoId: `${category}-${i}`, title: { simpleText: `${category} ${i}` } } })),
         { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'more' } } } }
@@ -69,7 +71,11 @@ for (const reducedMotion of ['no-preference', 'reduce']) {
     await grid.locator('[data-browse-id="video:more-0"]').waitFor();
     assert.equal(await page.evaluate(() => window.__motionCalls.filter(id => id === 'ytg-feed-enter').length), calls, 'navigation and appending never replay the feed entrance');
     await page.locator('#ytg-browse-categories button').last().click();
+    await grid.locator('.feed-skeletons').waitFor();
+    await page.locator('.client-brand').evaluate(node => window.YTGamepad.focus(node));
+    releaseMusic();
     await grid.locator('[data-browse-id="video:music-0"]').waitFor();
+    assert.equal(await page.evaluate(() => document.activeElement.classList.contains('client-brand')), true, 'a late category response must not steal focus from the header');
     assert.equal(await page.evaluate(() => window.__motionCalls.filter(id => id === 'ytg-feed-enter').length), reducedMotion === 'reduce' ? 0 : 2);
     const toggle = page.locator('#ytg-sidebar-explore');
     await toggle.click();

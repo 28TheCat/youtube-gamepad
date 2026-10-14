@@ -1,4 +1,4 @@
-import type { Action, ActionContext, AdaptationSnapshot, CoordinatorModule, Direction, Dispose, Disposition, Effect, InteractionEvent, Mode, OperationResult, PlaybackSnapshot, RecommendationResult, SitePort, WatchAction, WatchModule } from '../../types/ports';
+import type { Action, ActionContext, AdaptationSnapshot, CoordinatorModule, Direction, Effect, InteractionEvent, Mode, OperationResult, PlaybackSnapshot, RecommendationResult, SitePort, WatchAction, WatchModule } from '../../types/ports';
 
 import { YTGamepadRuntime } from '../shared/runtime.ts';
 import { YTGamepadFocus } from '../navigation/focus.ts';
@@ -262,7 +262,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   // Every view command shares the same enablement and navigation policy.
   // Views read this state; their render notifications cannot write it back.
   function canRepeatMedia() {
-    return !lifecycle.destroyed && preferences.enabled && location.pathname === '/watch' && surfaceReady() &&
+    return !lifecycle.destroyed && preferences.enabled && location.pathname === '/watch' && surfaceReady() && visibleMode() !== 'browse' &&
       !appState().navigation && !appState().returning && !hasTemporaryLayer() &&
       !document.hidden && (document.hasFocus?.() ?? true);
   }

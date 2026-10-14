@@ -44,7 +44,7 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen }: 
     changed: sync,
     loadingChanged: loading => { host.dataset.feedLoading = String(loading); },
     afterRender: () => nextTick(),
-    canResetFocus: () => !categoryHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring,
+    canResetFocus: () => !sidebarHasFocus() && !categoryHasFocus() && !headerHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring,
     resetFocus: () => core.resetContentFocus()
   });
   function resetFeed() {
@@ -69,7 +69,8 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen }: 
   function stopBatch() { nativePager.stop(); }
   const sidebarHasFocus = () => Boolean(document.activeElement?.closest('#ytg-browse-sidebar') || core.current?.closest('#ytg-browse-sidebar'));
   const categoryHasFocus = () => Boolean(document.activeElement?.closest('#ytg-browse-categories') || core.current?.closest('#ytg-browse-categories'));
-  const ownsFocus = () => !sidebarHasFocus() && !categoryHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring &&
+  const headerHasFocus = () => Boolean(document.activeElement?.closest('#ytg-browse-top') || core.current?.closest('#ytg-browse-top'));
+  const ownsFocus = () => !sidebarHasFocus() && !categoryHasFocus() && !headerHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring &&
     (host.contains(document.activeElement) || focusWanted);
   const more = () => {
     if (feedController.active) { void feedController.changeCategory(store.category, true); return; }

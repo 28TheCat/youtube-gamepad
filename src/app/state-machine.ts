@@ -132,8 +132,12 @@ export let YTGamepadStateMachine!: StateMachineModule;
         } else if (action === 'left' || action === 'right') {
           if (watch.row === 'progress') disposition = 'blocked';
           else {
-            const columns = Math.max(1, event.cardColumns || event.cardCount || 1);
             let index = clamp(watch.index + (action === 'left' ? -1 : 1), watch.row === 'recommendations' ? event.cardCount : event.controlCount);
+            if (watch.row === 'recommendations') {
+              const columns = Math.max(1, event.cardColumns || event.cardCount || 1);
+              const rowStart = Math.floor(watch.index / columns) * columns;
+              index = Math.max(rowStart, Math.min(index, rowStart + columns - 1));
+            }
             if (watch.row === 'controls' && event.availableControls) {
               index = (action === 'left' ? [...event.availableControls].reverse().find(i => i < watch.index) : event.availableControls.find((i) => i > watch.index)) ?? watch.index;
             }

@@ -1,4 +1,4 @@
-import type { Action, Direction, Disposition, FocusRecord, MeasuredItem, NavigationPolicy, NavigationSection, Scope } from './ports';
+import type { Action, Disposition, NavigationPolicy, NavigationSection, Scope } from './ports';
 
 export type InteractiveElement = HTMLElement & { disabled?: boolean };
 export type NavigationRoot = Document | HTMLElement;

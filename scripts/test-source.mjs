@@ -2,7 +2,7 @@ import { watchPanelRendererSource } from '../tests/helpers/watch-panel-renderer.
 import { readFileSync, readdirSync } from 'node:fs';
 import ts from 'typescript-vue';
 import { searchRendererSource } from '../tests/helpers/search-renderer.mjs';
-import { dependencies, compositionModules } from './module-graph.mjs';
+import { dependencies } from './module-graph.mjs';
 // Compatibility belongs only to old VM fixtures. Production uses ESM imports.
 const aliases = new Set();
 const compiled = new Map();
@@ -63,18 +63,6 @@ export function legacyModuleSource(file) {
     source = `(function() {\n${locale}\n${i18n}\n${grid}\n${source}\n})();`;
   }
   return source;
-}
-export function legacyMainSource() {
-  const seen = new Set(), files = [];
-  function visit(file) {
-    if (seen.has(file)) return;
-    seen.add(file);
-    for (const dependency of dependencies[file] || []) visit(dependency);
-    files.push(file);
-  }
-  for (const file of compositionModules) visit(file);
-  visit('src/app/coordinator.ts');
-  return files.map(file => legacyModuleSource(file)).join('\n');
 }
 // Load the same prerequisites as the extension. VM test doubles still supply
 // only the collaborators the original scenario uses.
