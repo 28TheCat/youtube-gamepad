@@ -30,11 +30,17 @@ test('page bridge publishes only allowed settings with validated values', () => 
   const s = bridge();
   assert.deepEqual(JSON.parse(JSON.stringify(s.messages[0])), {
     origin: 'https://www.youtube.com', message: { source: 'yt-gamepad-settings',
-      values: { enabled: false, theater: true, rightHandMode: false, deadzone: .35, repeatDelay: 150, repeatInterval: 140,
+      values: { enabled: false, theater: true, playbackLayout: 'page', rightHandMode: false, deadzone: .35, repeatDelay: 150, repeatInterval: 140,
         gridLayout: 'adaptive', gridAutoSwitch: true, gridSwitchWidth: 640, gridSingleCover: 40, gridDoubleCover: 50,
-        gridColumns0: 1, gridColumns640: 2, gridColumns768: 3, gridColumns1024: 4, gridColumns1280: 4, gridColumns1536: 5,
+        gridColumns0: 1, gridColumns600: 2, gridColumns900: 3, gridColumns1200: 4,
+        shortcutLayouts: { watch: {}, browse: {} },
         bindings: { confirm: 0, back: 1, playPause: 2, search: 3, seekBack: 4, seekForward: 5, volumeDown: 6, volumeUp: 7, help: 9, keyboardSymbols: 10, keyboardCandidates: 11 } } }
   });
+});
+
+test('shortcut bridge drops unknown buttons, unsupported keys and arbitrary layout data', () => {
+  const s = bridge({ shortcutLayouts: { watch: { X: 'm', unknown: 'c', A: 'Delete', B: { key: 'Enter' } }, browse: { Select: ' ' }, secret: 'never publish' } });
+  assert.deepEqual(JSON.parse(JSON.stringify(s.messages[0].message.values.shortcutLayouts)), { watch: { X: 'm' }, browse: { Select: ' ' } });
 });
 
 test('forged page messages cannot persist settings or trigger extension operations', () => {

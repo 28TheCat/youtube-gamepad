@@ -6,14 +6,21 @@ import { runInNewContext } from 'node:vm';
 const source = moduleSource('src/input/gamepad.ts');
 function setup(location = { pathname: '/' }, temporarySpeed, canRepeatMedia) {
   const actions = [], ends = [], connections = [], listeners = {}, documentListeners = {}, classes = new Set(), pad = { index: 0, connected: true, mapping: 'standard', axes: [0, 0], buttons: Array.from({ length: 16 }, () => ({ pressed: false })) };
-  let frame;
-  const window = { dispatchEvent(e) { if (e.type === 'yt-gamepad-button-end') ends.push({ ...e.detail }); else if ('connected' in e.detail) connections.push(e.detail.connected); else if (e.detail.action) actions.push(e.detail.action); }, addEventListener(name, fn) { listeners[name] = fn; } };
+  let frame, currentTime = 0;
+  const keyListeners = [];
+  const window = { dispatchEvent(e) { if (e.type === 'yt-gamepad-button-end') ends.push({ ...e.detail }); else if ('connected' in e.detail) connections.push(e.detail.connected); else if (e.detail.action) actions.push(e.detail.action); }, addEventListener(name, fn) { listeners[name] = fn; if (name === 'keydown') keyListeners.push(fn); } };
   const document = { hidden: false, hasFocus: () => true, documentElement: { dataset: {}, classList: { toggle(name, on) { if (on) classes.add(name); else classes.delete(name); } } }, addEventListener(name, fn) { documentListeners[name] = fn; } };
   const contextNavigator = { getGamepads: () => [pad] };
-  runInNewContext(source, { window, document, location, navigator: contextNavigator, requestAnimationFrame(fn) { frame = fn; }, CustomEvent: class { constructor(name, data) { this.type = name; this.detail = data.detail; } } });
+  runInNewContext(source, { window, document, location, performance: { now: () => currentTime }, navigator: contextNavigator, requestAnimationFrame(fn) { frame = fn; }, CustomEvent: class { constructor(name, data) { this.type = name; this.detail = data.detail; } } });
   if (temporarySpeed || canRepeatMedia) window.YTGamepadInputModule.create({ runtime: window.YTGamepadRuntime, controllerStyle: window.YTGamepadControllerStyle,
     isSearchOpen: () => !!(window.YTGamepadMenu?.opened && window.YTGamepadMenu.state.view === 'search'), temporarySpeed, canRepeatMedia });
-  return { pad, actions, ends, connections, window, document, classes, listeners, documentListeners, setPads(pads) { contextNavigator.getGamepads = () => pads; }, tick(time) { frame(time); } };
+  return { pad, actions, ends, connections, window, document, classes, listeners, documentListeners,
+    key(key, values = {}) {
+      const event = { key, isTrusted: true, defaultPrevented: false, stopped: false,
+        preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() { this.stopped = true; }, ...values };
+      for (const listener of keyListeners) { listener(event); if (event.stopped) break; }
+      return event;
+    }, setPads(pads) { contextNavigator.getGamepads = () => pads; }, tick(time) { currentTime = time; frame(time); } };
 }
 
 test('playback seeking and volume repeat with configured timing and end once on release', () => {
@@ -47,6 +54,36 @@ test('playback hold follows remapping while confirm, back, pause and menu remain
 test('browsing shoulder buttons do not repeat category changes', () => {
   const s = setup(); s.pad.buttons[5].pressed = true; s.tick(0); s.tick(500); s.tick(1000);
   assert.deepEqual(s.actions, ['seekForward']); assert.deepEqual(s.ends, []);
+});
+
+test('Shorts select watch bindings and repeat playback media actions', () => {
+  const s = setup({ pathname: '/shorts/JnICtQ9VHJ8' });
+  s.window.YTGamepadInput.configure({ bindingLayouts: { watch: { seekForward: 8 }, browse: { seekForward: 5 } } });
+  s.tick(0); s.pad.buttons[8].pressed = true; s.tick(10); s.tick(360);
+  assert.deepEqual(s.actions, ['seekForward', 'seekForward']);
+  s.pad.buttons[8].pressed = false; s.tick(400);
+  assert.equal(s.window.YTGamepadInput.isHeld('seekForward'), false);
+});
+
+test('page shortcuts override physical buttons, switch by layout and yield to settings navigation', () => {
+  const route = { pathname: '/watch' }, s = setup(route);
+  let settingsOpen = false;
+  s.document.querySelector = () => ({ hasAttribute: () => settingsOpen });
+  s.window.YTGamepadInput.configure({ shortcutLayouts: { watch: { X: 'm', Select: 'c' }, browse: { X: ' ' } } });
+  s.tick(0);
+  s.pad.buttons[2].pressed = true; s.tick(10);
+  assert.equal(s.actions.at(-1), 'mute');
+  s.pad.buttons[2].pressed = false; s.tick(20);
+  s.pad.buttons[8].pressed = true; s.tick(30);
+  assert.equal(s.actions.at(-1), 'captions');
+  s.pad.buttons[8].pressed = false; s.tick(40);
+  settingsOpen = true;
+  s.pad.buttons[2].pressed = true; s.tick(50);
+  assert.equal(s.actions.at(-1), 'playPause');
+  s.pad.buttons[2].pressed = false; s.tick(60);
+  settingsOpen = false; route.pathname = '/'; s.tick(70);
+  s.pad.buttons[2].pressed = true; s.tick(80);
+  assert.equal(s.actions.at(-1), 'playPause');
 });
 
 test('a new layer cancels a media hold and closing it cannot resume the held button', () => {
@@ -215,14 +252,15 @@ test('only controller activity enters gamepad mode; real mouse motion restores m
   move({ isTrusted: true, clientX: 20, clientY: 30, movementX: 0, movementY: 0 }); assert.equal(active(), true);
   move({ isTrusted: true, clientX: 20, clientY: 30, movementX: 0, movementY: 0 }); assert.equal(active(), true);
   move({ isTrusted: true, clientX: 21, clientY: 30, movementX: 0, movementY: 0 }); assert.equal(active(), true);
-  move({ isTrusted: true, clientX: 28, clientY: 30, movementX: 0, movementY: 0 }); assert.equal(active(), false);
+  move({ isTrusted: true, clientX: 28, clientY: 30, movementX: 0, movementY: 0 }); assert.equal(active(), true);
+  move({ isTrusted: true, clientX: 44, clientY: 30, movementX: 0, movementY: 0 }); assert.equal(active(), false);
   s.tick(400); assert.equal(active(), false); // Held stick cannot steal ownership back.
   s.pad.axes[0] = 0; s.tick(416); s.pad.axes[0] = .8; s.tick(432); assert.equal(active(), true);
-  move({ isTrusted: true, clientX: 36, clientY: 30, movementX: 8, movementY: 0 }); assert.equal(active(), false);
+  move({ isTrusted: true, clientX: 68, clientY: 30, movementX: 24, movementY: 0 }); assert.equal(active(), false);
 });
 
-test('disable, disconnect, blur and hidden page restore the mouse', () => {
-  for (const release of [s => s.window.YTGamepadInput.configure({ enabled: false }), s => { s.pad.connected = false; s.tick(16); }, s => s.listeners.blur(), s => { s.document.hidden = true; s.documentListeners.visibilitychange(); }]) {
+test('disable and disconnect restore the mouse', () => {
+  for (const release of [s => s.window.YTGamepadInput.configure({ enabled: false }), s => { s.pad.connected = false; s.tick(16); }]) {
     const s = setup(); s.pad.buttons[0].pressed = true; s.tick(0);
     assert.equal(s.classes.has('ytg-gamepad-input'), true);
     release(s); assert.equal(s.classes.has('ytg-gamepad-input'), false);
@@ -241,12 +279,68 @@ test('jitter does not accumulate into a switch; click, wheel and keyboard take o
   s.documentListeners.wheel({ isTrusted: true }); assert.equal(s.window.YTGamepadInput.mode, 'mouse');
 });
 
+test('route, focus and visibility interruptions preserve hints but cancel held input until neutral', () => {
+  for (const interrupt of [s => s.listeners.blur(), s => s.listeners.popstate(), s => s.listeners.pagehide(),
+    s => s.documentListeners['yt-navigate-start'](), s => s.documentListeners['yt-navigate-finish'](),
+    s => { s.document.hidden = true; s.documentListeners.visibilitychange(); s.document.hidden = false; }]) {
+    const s = setup(); s.pad.axes[0] = .8; s.tick(0);
+    interrupt(s); s.tick(500);
+    assert.equal(s.window.YTGamepadInput.mode, 'gamepad');
+    assert.equal(s.actions.length, 1);
+    s.pad.axes[0] = 0; s.tick(516); s.pad.axes[0] = .8; s.tick(532);
+    assert.equal(s.actions.length, 2);
+    s.key('Tab'); s.documentListeners.keydown({ isTrusted: true, key: 'Tab' });
+    interrupt(s); assert.equal(s.window.YTGamepadInput.mode, 'keyboard');
+  }
+});
+
+test('matching keyboard echoes do not change controller prompts or duplicate actions; deliberate keyboard input still works', () => {
+  const s = setup(); s.pad.buttons[0].pressed = true; s.tick(0);
+  const echo = s.key('Enter');
+  assert.equal(echo.defaultPrevented, true);
+  assert.equal(s.window.YTGamepadInput.mode, 'gamepad');
+  assert.deepEqual(s.actions, ['confirm']);
+  assert.equal(s.window.YTGamepadInput.recentSources.at(-1).source, 'keyboard-echo');
+  assert.equal(s.window.YTGamepadInput.recentSources.at(-1).decision, 'ignored');
+  s.tick(201); s.key('Enter');
+  assert.equal(s.window.YTGamepadInput.mode, 'keyboard');
+  assert.deepEqual(s.actions, ['confirm', 'confirm']);
+});
+
+test('search typing and editable fields immediately own keyboard input despite recent controller actions', () => {
+  const s = setup(); s.pad.buttons[0].pressed = true; s.tick(0);
+  const enter = s.key('Enter', { target: { closest: () => ({}) } });
+  s.documentListeners.keydown(enter);
+  assert.equal(enter.defaultPrevented, false);
+  assert.equal(s.window.YTGamepadInput.mode, 'keyboard');
+  s.pad.buttons[0].pressed = false; s.tick(16); s.pad.buttons[0].pressed = true; s.tick(32);
+  s.window.YTGamepadMenu = { opened: true, state: { view: 'search' } };
+  const typed = s.key('K'); s.documentListeners.keydown(typed);
+  assert.equal(typed.defaultPrevented, false);
+  assert.equal(s.window.YTGamepadInput.mode, 'keyboard');
+  assert.equal(JSON.stringify(s.window.YTGamepadInput.recentSources).includes('"K"'), false, 'source traces contain no typed text');
+});
+
+test('small mouse movements cannot chain across gesture windows and explicit mouse actions always take over', () => {
+  const s = setup(); s.pad.buttons[0].pressed = true; s.tick(0);
+  const move = (x, timeStamp) => s.documentListeners.mousemove({ isTrusted: true, movementX: x, movementY: 0, clientX: 0, clientY: 0, timeStamp });
+  for (let i = 0; i < 20; i++) move(2, 300 * i);
+  assert.equal(s.window.YTGamepadInput.mode, 'gamepad');
+  move(22, 5710);
+  assert.equal(s.window.YTGamepadInput.mode, 'mouse');
+  assert.equal(s.window.YTGamepadInput.recentSources.at(-1).source, 'mouse-move');
+  for (let i = 0; i < 40; i++) s.documentListeners.wheel({ isTrusted: true });
+  assert.equal(s.window.YTGamepadInput.recentSources.length, 32);
+  const snapshot = s.window.YTGamepadInput.recentSources; snapshot[0].source = 'changed';
+  assert.notEqual(s.window.YTGamepadInput.recentSources[0].source, 'changed');
+});
+
 test('analog hysteresis filters threshold chatter and navigation resets require a neutral controller', () => {
   const s = setup(); s.pad.axes[0] = .36; s.tick(0);
   s.pad.axes[0] = .34; s.tick(20); s.pad.axes[0] = .36; s.tick(40);
   assert.deepEqual(s.actions, ['right']);
   s.documentListeners['yt-navigate-start'](); s.tick(500);
-  assert.equal(s.window.YTGamepadInput.mode, 'mouse'); assert.equal(s.actions.length, 1);
+  assert.equal(s.window.YTGamepadInput.mode, 'gamepad'); assert.equal(s.actions.length, 1);
   s.pad.axes[0] = .1; s.tick(516); s.pad.axes[0] = .36; s.tick(532);
   assert.equal(s.window.YTGamepadInput.mode, 'gamepad'); assert.equal(s.actions.length, 2);
 });
@@ -265,13 +359,25 @@ test('search shortcuts and held deletion are scoped to the search keyboard', () 
   s.pad.buttons[10].pressed = true; s.tick(0);
   s.pad.buttons[10].pressed = false; s.pad.buttons[11].pressed = true; s.tick(16);
   s.pad.buttons[11].pressed = false; s.pad.buttons[2].pressed = true; s.tick(32);
-  s.tick(200); s.tick(382); s.tick(522);
+  s.tick(180); s.tick(182); s.tick(262);
   assert.deepEqual(s.actions, ['keyboardSymbols', 'keyboardCandidates', 'playPause', 'playPause', 'playPause']);
   s.window.YTGamepadMenu.opened = false; s.tick(700);
   assert.equal(s.actions.length, 5);
   s.pad.buttons[2].pressed = false; s.tick(716);
   s.pad.buttons[10].pressed = true; s.pad.buttons[11].pressed = true; s.tick(732);
   assert.equal(s.actions.length, 5);
+});
+
+test('Shorts queue navigation keeps a held direction across in-place route events', () => {
+  const s = setup({ pathname: '/watch' });
+  s.tick(0); s.pad.buttons[13].pressed = true; s.tick(10);
+  s.document.documentElement.dataset.ytgShortsSwitching = '';
+  s.documentListeners['yt-navigate-start'](); s.tick(160);
+  s.documentListeners['yt-navigate-finish'](); s.tick(240);
+  assert.deepEqual(s.actions, ['down', 'down', 'down']);
+  delete s.document.documentElement.dataset.ytgShortsSwitching;
+  s.documentListeners['yt-navigate-start'](); s.tick(400);
+  assert.equal(s.actions.length, 3, 'ordinary navigation still requires neutral');
 });
 
 test('custom bindings replace defaults and mapped search deletion repeats', () => {
@@ -341,4 +447,50 @@ test('default mode ignores right stick activity and right-hand preset tolerates 
   const s = setup(); s.pad.axes = [0, 0, .9, 0]; s.tick(0); assert.deepEqual(s.actions, []);
   s.window.YTGamepadInput.configure({ rightHandMode: true }); s.pad.axes = [0, 0]; s.tick(16);
   s.pad.buttons[13].pressed = true; s.tick(32); assert.deepEqual(s.actions, ['down']);
+});
+
+test('keyboard uses shared actions without a controller and never double fires repeated confirmation', () => {
+  const s = setup(); s.setPads([]); s.tick(0);
+  for (const key of ['ArrowRight', 'Enter', ' ', '/', 'F1', 'PageDown', 'Escape']) {
+    assert.equal(s.key(key).defaultPrevented, true);
+  }
+  assert.deepEqual(s.actions, ['right', 'confirm', 'playPause', 'search', 'help', 'seekForward', 'back']);
+  assert.equal(s.window.YTGamepadInput.mode, 'keyboard');
+  s.key('Enter', { repeat: true }); s.key('ArrowRight', { repeat: true });
+  assert.deepEqual(s.actions.slice(7), ['right']);
+});
+
+test('physical typing, IME, modified shortcuts and native widgets retain their keys', () => {
+  const s = setup();
+  for (const values of [{ isComposing: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true },
+    { isTrusted: false }, { target: { isContentEditable: true } },
+    { composedPath: () => [{ closest: () => ({}) }], target: { id: 'shadow-host' } }]) {
+    assert.equal(s.key('ArrowLeft', values).defaultPrevented, false);
+  }
+  s.window.YTGamepadMenu = { opened: true, state: { view: 'search' } };
+  assert.equal(s.key(' ').defaultPrevented, false);
+  assert.equal(s.key('/').defaultPrevented, false);
+  s.window.YTGamepadInput.configure({ enabled: false });
+  assert.equal(s.key('Enter').defaultPrevented, false);
+  assert.equal(s.key('Escape').defaultPrevented, false);
+  assert.deepEqual(s.actions, []);
+});
+
+test('disconnect cancels controller holds but immediately permits keyboard takeover', () => {
+  const s = setup({ pathname: '/watch' });
+  s.pad.buttons[5].pressed = true; s.tick(0);
+  s.setPads([]); s.tick(16);
+  s.key('ArrowDown');
+  assert.deepEqual(s.ends, [{ action: 'seekForward', cancelled: true }]);
+  assert.deepEqual(s.actions, ['seekForward', 'down']);
+});
+
+test('right click returns only within a custom surface', () => {
+  const s = setup();
+  const event = id => ({ isTrusted: true, composedPath: () => [{ id }],
+    preventDefault() {}, stopImmediatePropagation() {} });
+  s.documentListeners.contextmenu(event('movie_player'));
+  assert.deepEqual(s.actions, []);
+  s.documentListeners.contextmenu(event('ytg-browse-root'));
+  assert.deepEqual(s.actions, ['back']);
 });

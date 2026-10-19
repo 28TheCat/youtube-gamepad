@@ -1,6 +1,7 @@
 import type { Action, FocusTarget, InteractionEvent, Mode, PlaybackSnapshot, RecommendationSnapshot, Scope, SharedDependencies, WatchPanels, WatchPanelsPort, WatchPageSnapshot, WatchPort, WatchSnapshot, WatchView, WatchViewDependencies } from '../../types/ports';
 import type { PlaybackFeedback } from './playback-presentation';
-import { recommendationFocusId } from './playback-presentation';
+import { recommendationFocusIds, sameRecommendations } from './playback-presentation';
+import { ui } from './ui-api';
 
 export interface WatchTarget {
   id: string;
@@ -38,20 +39,30 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
   const { host, root, surface, progress, controls, dialog, sheet, close, status, presentation } = view;
   let destroyed = false, descriptionText = '', feedbackAction = '', canSeek = false;
   let recommendations: readonly RecommendationSnapshot[] = [];
+  let recommendationTargetsCache: readonly WatchTarget[] = [];
   const panels = dependencies.createPanels({ ...view, watchState: callbacks.state,
     send: callbacks.send, focus: callbacks.focus, focusManager, controllerStyle,
     get controller() { return callbacks.controller(); }, get descriptionText() { return descriptionText; }
   });
+  const releasePanels = (['description', 'comments', 'playlists'] as const).map(id => ui.registerPanel(id, {
+    isOpen: () => !destroyed && callbacks.state().panel === id,
+    open: () => {
+      if (destroyed || host.hidden || callbacks.controller().navigating || ui.state.openPanels.some(panel =>
+        panel === 'account' || panel === 'search' || panel === 'settings')) return false;
+      panels.open(id);
+    }, close: panels.close
+  }));
+  const unregisterPanels = () => releasePanels.forEach(release => release());
+  lifecycle.cleanup(unregisterPanels);
   lifecycle.cleanup(controllerStyle.register(root));
   const cards = () => presentation.cards();
   const available = (node: HTMLElement) => !node.hidden && !(node as HTMLButtonElement).disabled && node.getAttribute('aria-disabled') !== 'true';
   const controlTargets = () => controls.map((node, index) => ({ id: node.dataset.action || '',
     region: 'controls', itemKey: node.dataset.action || String(index), index, available: available(node) }));
-  const panelNodes = () => callbacks.state().panel === 'comments' ? [close, ...panels.buttons] : [close];
+  const panelNodes = () => callbacks.state().panel && callbacks.state().panel !== 'description' ? [close, ...panels.buttons] : [close];
   const panelTargets = () => panelNodes().map((node, index) => ({ id: node.dataset.focusId || 'panel:close',
     region: 'panel', itemKey: node.dataset.focusId || String(index), index, available: available(node) }));
-  const recommendationTargets = () => recommendations.map((item, index) => ({ id: recommendationFocusId(recommendations, index),
-    region: 'recommendations', itemKey: item.key, index, available: true }));
+  const recommendationTargets = () => recommendationTargetsCache;
   function snapshot(): WatchSurfaceSnapshot {
     return { canSeek, controls: controlTargets(), recommendations: recommendationTargets(), panel: panelTargets() };
   }
@@ -80,7 +91,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     event.stopPropagation();
     const action = ({ ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Escape: 'back' } as Record<string, Action>)[event.key];
     if (action) { event.preventDefault(); callbacks.input(action); }
-    if (event.key === 'Tab') { event.preventDefault(); callbacks.input(callbacks.state().panel === 'comments' ? (event.shiftKey ? 'up' : 'down') : (event.shiftKey ? 'left' : 'right')); }
+    if (event.key === 'Tab') { event.preventDefault(); callbacks.input(callbacks.state().panel && callbacks.state().panel !== 'description' ? (event.shiftKey ? 'up' : 'down') : (event.shiftKey ? 'left' : 'right')); }
   });
   for (const type of ['keydown', 'keyup'] as const) lifecycle.listen(window, type, event => {
     if (host.hidden || !callbacks.controller()?.state.enabled || !event.composedPath?.().includes(host) || ![' ', 'Spacebar', 'Enter'].includes(event.key)) return;
@@ -93,14 +104,22 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     sync(active: boolean, mode: Mode) {
       if (destroyed) return;
       document.documentElement.classList.toggle('ytg-watch-active', active);
-      host.hidden = !active || mode !== 'controls'; presentation.visible(!host.hidden);
+      host.hidden = !active;
+      host.dataset.passive = String(mode !== 'controls'); presentation.visible(!host.hidden);
       if (host.hidden) { document.documentElement.classList.remove('ytg-recommendations'); panels.hide(); }
       if (!active) document.documentElement.classList.remove('ytg-settings-open');
     },
     playback(value: PlaybackSnapshot) { if (!destroyed) { canSeek = !!value.video?.timeline.canSeek; presentation.playback(value); view.updateHint(callbacks.state().row, callbacks.state().adjusting, canSeek); } },
     page(value: WatchPageSnapshot, features: import('../../types/ports').WatchFeatures) {
       if (destroyed) return;
-      descriptionText = value.description; recommendations = value.recommendations; presentation.page(value, features);
+      descriptionText = value.description;
+      if (!sameRecommendations(recommendations, value.recommendations)) {
+        recommendations = value.recommendations;
+        const ids = recommendationFocusIds(recommendations);
+        recommendationTargetsCache = recommendations.map((item, index) => ({ id: ids[index],
+          region: 'recommendations', itemKey: item.key, index, available: true }));
+      }
+      presentation.page(value, features);
     },
     focus(target: WatchTarget | undefined, adjusting: boolean, mode: Mode) {
       if (destroyed) return;
@@ -121,7 +140,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       if (!node || !available(node)) return;
       if (state.panel) node.classList.add('selected');
       node.focus({ preventScroll: true });
-      if (target.region === 'recommendations' || state.panel === 'comments') node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      if (target.region === 'recommendations' || (state.panel && state.panel !== 'description')) node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
     },
     items(region: string): FocusTarget[] {
       const data = region === 'recommendations' ? recommendationTargets() : region === 'progress' ? [{ id: 'progress', region, itemKey: 'progress', index: 0, available: canSeek }] : region === 'panel' ? panelTargets() : controlTargets();
@@ -132,10 +151,6 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       return { ...this.items(region).find(item => item.index === index), region, index, scope: callbacks.state().panel ? dialog : undefined };
     },
     press(id: string) { const node = controls.find(node => node.dataset.action === id); if (node) animate(node, [{ scale: '.95', offset: 0 }], 100, 'ytg-press'); },
-    recommendationPage(start: number, previous: number, animateChange: boolean) {
-      presentation.recommendationPage(start);
-      if (animateChange && start !== previous) animate(view.recommendations, [{ opacity: 0, translate: start > previous ? '16px 0' : '-16px 0' }, { opacity: 1, translate: '0 0' }], 160);
-    },
     feedback(value: PlaybackFeedback | null, action = '') {
       if (destroyed) return;
       const repeated = feedbackAction === action; feedbackAction = action;
@@ -148,7 +163,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       }
     },
     closeFeedback() { if (window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) { status.classList.add('feedback-closing'); return true; } return false; },
-    panel: { open: panels.open, close: panels.close, refresh: panels.refresh, load: panels.load,
+    panel: { open: (id: 'description' | 'comments' | 'playlists') => { ui.openPanel(id); }, close: panels.close, refresh: panels.refresh, load: panels.load,
       activate(index: number) { panelNodes()[index]?.click(); },
       scroll(delta: number) { sheet.scrollBy({ top: delta, behavior: 'instant' }); },
       scrollDelta(index: number, action: Action) {
@@ -158,10 +173,11 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
         return (action === 'down' && delta > 1 || action === 'up' && delta < -1) ? Math.max(-180, Math.min(180, delta)) : 0;
       }
     },
-    reset() { panels.hide(); canSeek = false; recommendations = []; presentation.reset(); },
+    reset() { panels.hide(); canSeek = false; recommendations = []; recommendationTargetsCache = []; presentation.reset(); },
     destroy() {
       if (destroyed) return; destroyed = true;
-      panels.destroy(); presentation.destroy(); host.hidden = true; host.remove(); root.replaceChildren(); recommendations = [];
+      unregisterPanels();
+      panels.destroy(); presentation.destroy(); host.hidden = true; host.remove(); root.replaceChildren(); recommendations = []; recommendationTargetsCache = [];
       document.documentElement.classList.remove('ytg-watch-active', 'ytg-recommendations', 'ytg-comments', 'ytg-settings-open');
     }
   };

@@ -22,7 +22,7 @@
 
 ## MAIN 与隔离脚本
 
-生产 MAIN 入口处理播放器内部元数据、原生控件、分类数据请求和 history 通知。分类适配只允许从页面目录解析出的 browse/search endpoint；调用方只能提供分类 ID 或 MAIN 生成的分页句柄，不能指定 URL、认证头或任意请求体。会话 context 与认证留在 MAIN，不向隔离界面传递。跨 world 协议只允许固定页面操作，JSON 字符串有长度限制并校验字段；响应和 history 通知仍不可信，不得授权扩展权限操作。设置、诊断与菜单服务使用 ISOLATED 模块内通道，生产入口不监听页面 postMessage 的这些请求。兼容消息路径仅供未注入内部通道的历史测试端口使用。
+生产 MAIN 入口处理 API 视频元数据、账号操作、原生控件、分类数据请求和 history 通知。视频账号操作仅接受点赞、点踩、订阅及 MAIN 保存的播放列表句柄；目标视频、频道和播放列表 endpoint 由当前路由及 API 响应确定。账号写入不自动重试，会话凭据和播放列表私有参数不跨 world 返回。分类适配只允许从页面目录解析出的 browse/search endpoint；调用方只能提供分类 ID 或 MAIN 生成的分页句柄，不能指定 URL、认证头或任意请求体。会话 context 与认证留在 MAIN，不向隔离界面传递。跨 world 协议只允许固定页面操作，JSON 字符串有长度限制并校验字段；响应和 history 通知仍不可信，不得授权扩展权限操作。设置、诊断与菜单服务使用 ISOLATED 模块内通道，生产入口不监听页面 postMessage 的这些请求。兼容消息路径仅供未注入内部通道的历史测试端口使用。
 
 `manifest.json` 的 MAIN 脚本与页面共享 JavaScript 环境；`content.js` 使用隔离环境并持有扩展 API。`window.postMessage` 的同窗口、同源检查只能过滤其他窗口或来源，`source` 字段只是协议标签。页面可以监听和伪造它们；随机标识也不能使共享 MAIN 环境成为可信发送方。
 

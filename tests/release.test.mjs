@@ -25,17 +25,17 @@ function fixture(t) {
   for (const file of ['bundles/main.js', 'bundles/content.js', 'bundles/background.js', 'bundles/popup.js', 'src/popup/popup.css', 'src/app/browse.css',
     'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt', 'licenses/kenney-input-prompts-LICENSE.txt']) write(file);
   const controllerAssets = JSON.parse(readFileSync(new URL('../assets/controller/kenney.json', import.meta.url), 'utf8'));
+  write('licenses/mingcute-LICENSE.txt', readFileSync(new URL('../licenses/mingcute-LICENSE.txt', import.meta.url)));
   write('licenses/vue-LICENSE.txt', readFileSync(new URL('../licenses/vue-LICENSE.txt', import.meta.url)));
   write('licenses/pinia-LICENSE.txt', readFileSync(new URL('../licenses/pinia-LICENSE.txt', import.meta.url)));
-  write('assets/controller/kenney.json', JSON.stringify(controllerAssets));
-  const controllerFont = JSON.parse(readFileSync(new URL('../assets/controller/controller-font/prompts.json', import.meta.url), 'utf8'));
-  for (const file of ['assets/controller/controller-font/prompts.json', 'assets/controller/controller-font/upstream-revision.txt',
-    'assets/controller/controller-font/keymap_keyboard.ttf', 'assets/controller/controller-font/FREEWARE.txt',
-    'licenses/controller-font-FREEWARE.txt', ...Object.keys(controllerFont.files)]) {
-    write(file, readFileSync(new URL('../' + file, import.meta.url)));
+  for (const name of ['youtubei', 'fflate', 'meriyah', 'protobuf', 'protobuf-BSD']) {
+    write(`licenses/${name}-LICENSE.txt`, readFileSync(new URL(`../licenses/${name}-LICENSE.txt`, import.meta.url)));
   }
+  write('assets/controller/kenney.json', JSON.stringify(controllerAssets));
   for (const file of Object.keys(controllerAssets.files)) write(file, readFileSync(new URL('../' + file, import.meta.url)));
   write('assets/controller/layout.svg', readFileSync(new URL('../assets/controller/layout.svg', import.meta.url)));
+  write('assets/controller/template.json', readFileSync(new URL('../assets/controller/template.json', import.meta.url)));
+  write('licenses/nicefrog-gamepad-LICENSE.txt', readFileSync(new URL('../licenses/nicefrog-gamepad-LICENSE.txt', import.meta.url)));
   const { files } = releaseFiles(root);
   const inventory = Object.fromEntries(files.map(file => [file, createHash('sha256').update(readFileSync(resolve(root, file))).digest('hex')]));
   writeFileSync(root + '.inventory.json', JSON.stringify({ version: manifest.version, files: inventory }));

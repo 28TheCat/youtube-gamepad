@@ -1,9 +1,9 @@
-import type { SearchPort, SearchTarget, PinyinCandidate, KeyboardKey, Action, Disposition } from '../../types/ports.js';
+import type { SearchInstance, SearchPort, SearchTarget, PinyinCandidate, KeyboardKey, Action, Disposition } from '../../types/ports.js';
 import { createSearchText } from './search-text';
 import type { MountSearch, SearchRenderer, SearchView } from './search-view';
 
 /** Search policy and state; the injected renderer owns all markup. */
-export function createSearchModel(port: SearchPort, mount: MountSearch) {
+export function createSearchModel(port: SearchPort, mount: MountSearch): SearchInstance {
   const { root, menuState, send, buttons, focus, feedback } = port;
   const { controllerStyle, pinyin, keyboard } = port;
   const text = createSearchText();
@@ -13,7 +13,6 @@ export function createSearchModel(port: SearchPort, mount: MountSearch) {
   let searchTarget: SearchTarget = null, recent: string[] = [];
   let candidates: readonly PinyinCandidate[] = [];
   // Page storage is untrusted and readable by YouTube scripts; it is not an
-
   // extension-private database. Bound persisted input before using it in UI.
   const maxQueryLength = 256;
   const sanitizeRecent = (value: unknown): string[] => Array.isArray(value)
@@ -26,7 +25,7 @@ export function createSearchModel(port: SearchPort, mount: MountSearch) {
   function snapshot(): SearchView {
     const state = menuState();
     const start = state.candidatePage * 5;
-    return { query: text.state.query, nativeSearch: !!searchTarget, composing: state.composing,
+    return { query: text.state.query, composing: state.composing,
       chinese: state.language === 'zh-CN', choosingLanguage: state.choosingLanguage,
       rows: state.choosingLanguage ? [[{ label: 'English', action: 'ENGLISH' }, { label: 'Chinese (Pinyin)', action: 'CHINESE' }, { label: 'Physical keyboard', action: 'PHYSICAL_INPUT' }]] : keyboard.rows(state.frame, state.uppercase),
       recent: [...recent], candidates: candidates.slice(start, start + 5),
@@ -110,30 +109,29 @@ export function createSearchModel(port: SearchPort, mount: MountSearch) {
         input.setSelectionRange(0, input.value.length); rememberCursor(); edit(''); break;
       }
       case 'SEARCH': submit(); break;
-      case 'SHIFT': send({ type: 'MENU_SHIFT' }); renderKeys(); focus(); break;
+      case 'SHIFT': send({ type: 'MENU_SHIFT' }); updateView(); focus(); break;
       case 'NUMBER_LAYOUT': case 'LETTER_LAYOUT': {
         const active = buttons()[port.selected];
         const row = Number(active?.dataset.row || 0), column = Number(active?.dataset.column || 0);
-        send({ type: 'MENU_FRAME', value: key.action }); renderKeys();
+        send({ type: 'MENU_FRAME', value: key.action }); updateView();
         port.selected = buttons().findIndex(button => Number(button.dataset.row) === row && Number(button.dataset.column) === column);
         focus(); break;
       }
       case 'SWITCH_LANGUAGE':
         if (menuState().composing) { feedback('Select a candidate, or press B to cancel pinyin'); focusCandidate(); break; }
-        send({ type: 'MENU_LANGUAGE', value: true }); renderKeys(); port.selected = buttons().findIndex(button => button.dataset.action === 'ENGLISH'); focus(); break;
+        send({ type: 'MENU_LANGUAGE', value: true }); updateView(); port.selected = buttons().findIndex(button => button.dataset.action === 'ENGLISH'); focus(); break;
       case 'ENGLISH': case 'CHINESE':
         if (menuState().composing) { feedback('Select a candidate, or press B to cancel pinyin'); break; }
-        setLanguage(key.action === 'CHINESE' ? 'zh-CN' : 'en'); send({ type: 'MENU_LANGUAGE', value: false }); send({ type: 'MENU_FRAME', value: 'LETTER_LAYOUT' }); renderKeys(); refreshCandidates(); focusFirstKey(); break;
-      case 'PHYSICAL_INPUT': setLanguage('en'); send({ type: 'MENU_LANGUAGE', value: false }); renderKeys(); refreshCandidates(); inputElement()?.focus(); feedback('Type with your keyboard. Press Enter to search, or B to go back.'); break;
+        setLanguage(key.action === 'CHINESE' ? 'zh-CN' : 'en'); send({ type: 'MENU_LANGUAGE', value: false }); send({ type: 'MENU_FRAME', value: 'LETTER_LAYOUT' }); updateView(); refreshCandidates(); focusFirstKey(); break;
+      case 'PHYSICAL_INPUT': setLanguage('en'); send({ type: 'MENU_LANGUAGE', value: false }); updateView(); refreshCandidates(); inputElement()?.focus(); feedback('Type with your keyboard. Press Enter to search, or B to go back.'); break;
     }
   }
-  function renderKeys() { updateView(); }
   function submit() {
     if (menuState().composing) { feedback('Select a candidate before searching'); focusCandidate(); return; }
     const query = text.state.query.trim();
     if (!query) { feedback('Enter a search query'); return; }
     const submitted = port.controller.submitSearch(searchTarget, query, () => {
-      // Commit history only when the adapter has a usable native search target.
+      // Commit history when the adapter accepts a validated search destination.
       recent = sanitizeRecent([query, ...recent.filter(item => item !== query)]);
       try { localStorage.setItem('ytg-recent-searches', JSON.stringify(recent)); } catch (_) {}
       port.close();
@@ -189,15 +187,10 @@ export function createSearchModel(port: SearchPort, mount: MountSearch) {
     if (menuState().composing && e.key === ' ') { e.preventDefault(); space(); return true; }
     return false;
   }
-  return { render, navigate, keydown, renderKeys, refreshCandidates, focusFirstKey,
-    focusCandidate, keyboardAction, space, backspace, pageCandidates, toggleCandidates, moveCursor, submit,
+  return { render, navigate, keydown, renderKeys: updateView, refreshCandidates, focusFirstKey,
+    keyboardAction, space, backspace, pageCandidates, toggleCandidates, moveCursor, submit,
     setTarget(value: SearchTarget) { searchTarget = value; }, get target() { return searchTarget; },
     initializeQuery() { text.setQuery(port.controller.readSearch(searchTarget)); paintQuery(); },
-    insertText: typeText, deleteBackward: backspace, selectCandidate: commitCandidate,
-    back() { port.controller.dispatchAction('back'); },
-    get state() { return { ...text.state, selection: [...text.state.selection], composition: menuState().composing,
-      keyboardPage: menuState().frame === 'NUMBER_LAYOUT' ? 'symbols' : 'letters',
-      candidates: [...candidates], activeKeyId: (root.activeElement as HTMLElement | null)?.dataset.focusId ?? null }; },
     unmount,
     destroy() { unmount(); searchTarget = null; candidates = []; text.setQuery(''); }
 

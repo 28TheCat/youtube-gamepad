@@ -1,8 +1,4 @@
 import { onMounted, onUnmounted } from 'vue';
-import '../input/bindings.ts';
-import './runtime.ts';
-import '../ui/styles.ts';
-import '../input/controller-style.ts';
 import { YTGamepadControllerStyle } from '../input/controller-style.ts';
 
 // Preserve the shared controller artwork and YouTube theme with a bounded lifecycle.
@@ -57,6 +53,6 @@ export function usePageAppearance() {
   onUnmounted(() => {
     stopped = true; clearInterval(interval); sheet?.remove(); unregister?.();
     system.removeEventListener('change', systemChanged);
-    chrome.storage.onChanged.removeListener(changed);
+    chrome.storage?.onChanged?.removeListener?.(changed);
   });
 }

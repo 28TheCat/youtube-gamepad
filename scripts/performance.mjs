@@ -7,7 +7,12 @@ import { pathToFileURL } from 'node:url';
 
 export function coreFixture(size = 1000) {
   const counts = { rects: 0, styles: 0, queries: 0, frames: 0 };
-  const events = {}, frames = [], observers = [];
+  const events = {}, listeners = new Map(), frames = [], observers = [];
+  const listen = (name, fn) => {
+    events[name] = fn;
+    if (!listeners.has(name)) listeners.set(name, []);
+    listeners.get(name).push(fn);
+  };
   const node = (index = -1) => ({
     isConnected: true, style: {}, dataset: {}, attributes: {}, classList: { add() {}, remove() {}, contains() { return false; } },
     append() {}, replaceChildren(...children) { this.children = children; }, attachShadow() { return node(); }, contains(el) { return el === this; },
@@ -22,10 +27,10 @@ export function coreFixture(size = 1000) {
   });
   const nodes = Array.from({ length: size }, (_, i) => node(i));
   const document = { body: node(), documentElement: node(), createElement: () => node(),
-    addEventListener(name, fn) { events[name] = fn; }, contains: () => true,
+    addEventListener: listen, contains: () => true,
     querySelectorAll(selector) { counts.queries++; return selector === '[role="dialog"]' ? [] : nodes; }
   };
-  const window = { addEventListener(name, fn) { events[name] = fn; }, scrollTo() {} };
+  const window = { addEventListener: listen, scrollTo() {} };
   const context = { window, document, location: { pathname: '/', search: '' }, innerWidth: 1200, innerHeight: 800,
     scrollX: 0, scrollY: 0, getComputedStyle() { counts.styles++; return { display: 'block', visibility: 'visible', opacity: '1' }; },
     requestAnimationFrame(fn) { frames.push(fn); return frames.length; },
@@ -44,6 +49,7 @@ export function coreFixture(size = 1000) {
   const reset = () => { for (const key of Object.keys(counts)) counts[key] = 0; };
   const flush = () => { while (frames.length) { counts.frames++; frames.shift()(); } };
   return { window, context, document, nodes, counts, reset, flush, events,
+    dispatch(name, event = { type: name }) { for (const fn of listeners.get(name) || []) fn(event); },
     playbackFrame() { playing = true; observers[0]([{ type: 'attributes', attributeName: 'style', target: player }]); flush(); },
     mutate(records) { observers[0](records); }, setPlaying(value) { playing = value; }
   };

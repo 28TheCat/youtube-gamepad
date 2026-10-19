@@ -1,0 +1,206 @@
+import { createWatchDataService, type WatchDataService } from './youtube-watch-data';
+import { Innertube, Session, Parser, YTNodes } from 'youtubei.js/web';
+import type { YouTubeVideoDetails } from '../../types/core';
+import { parseWatchLink, parseShortLink } from '../shared/watch-link';
+import { createYouTubeHeaders, requestYouTube } from './youtube-request';
+import { PAGE_WATCH_INFO } from '../bridge/page-protocol';
+
+export interface SavedPlaylist { key: string; title: string; selected: boolean }
+export interface WatchInfoSnapshot {
+  route: string; details?: YouTubeVideoDetails; avatar: string;
+  subscribed: boolean; liked: boolean; disliked: boolean;
+  canLike: boolean; canSubscribe: boolean; canSave: boolean;
+  loading: boolean; failed: boolean; working: boolean;
+}
+type Node = Record<string, any>;
+const empty = (route: string): WatchInfoSnapshot => ({ route, avatar: '', subscribed: false, liked: false,
+  disliked: false, canLike: false, canSubscribe: false, canSave: false, loading: false, failed: false, working: false });
+Parser.setParserErrorHandler(() => {});
+
+// Current video/channel and playlist endpoints are service-owned. The bridge
+// accepts fixed actions and opaque playlist keys, never arbitrary API payloads.
+export function createWatchInfoService(sharedData?: WatchDataService) {
+  const dataService = sharedData || createWatchDataService();
+  let state = empty(''), destroyed = false, api: Innertube | undefined;
+  let pending: Promise<void> | undefined, retryAt = 0, controller = new AbortController();
+  let channelId = '';
+  let nextResponse: Node | undefined;
+  const playlists = new Map<string, { value: SavedPlaylist; node: InstanceType<typeof YTNodes.PlaylistAddToOption> }>();
+  const route = () => location.pathname + location.search;
+  const notify = () => { if (!destroyed) document.dispatchEvent(new Event(PAGE_WATCH_INFO)); };
+  function syncRoute() {
+    dataService.routeChanged();
+    if (state.route === route()) return;
+    controller.abort(); controller = new AbortController(); pending = undefined; api = undefined;
+    retryAt = 0; channelId = ''; nextResponse = undefined; playlists.clear(); state = empty(route());
+  }
+  function client() {
+    if (api) return api;
+    const config = (key: string) => (window as any).ytcfg?.get?.(key);
+    const context = config('INNERTUBE_CONTEXT');
+    if (!context?.client) throw Error('YouTube context unavailable');
+    const captured = state, signal = controller.signal;
+    const session = new Session(structuredClone({ ...context, user: context.user || {} }), '', 'v1', 0,
+      undefined, undefined, undefined, async () => { throw Error('Unexpected watch parser request'); });
+    session.logged_in = config('LOGGED_IN') === true || /(?:^|;\s*)(?:SAPISID|__Secure-3PAPISID)=/.test(document.cookie);
+    session.actions.execute = (async (endpoint: string, args: Node = {}) => {
+      const path = endpoint.replace(/^\//, '');
+      const readOnly = ['player', 'next', 'playlist/get_add_to_playlist'].includes(path);
+      if (!readOnly && !['like/like', 'like/dislike', 'like/removelike', 'subscription/subscribe',
+        'subscription/unsubscribe', 'browse/edit_playlist'].includes(path)) throw Error('Unexpected watch API endpoint');
+      if (destroyed || captured !== state || signal.aborted || captured.route !== route()) throw Error('Watch request cancelled');
+      const headers = await createYouTubeHeaders(context);
+      const body: Node = {};
+      for (const key of ['videoId', 'videoIds', 'target', 'channelIds', 'playlistId', 'params', 'actions'])
+        if (args[key] !== undefined) body[key] = args[key];
+      if (path.startsWith('like/') && typeof body.target === 'string') body.target = { videoId: body.target };
+      const init = { method: 'POST', credentials: 'same-origin' as const, headers,
+        body: JSON.stringify({ context, ...body }), signal };
+      let raw: Node;
+      if (readOnly) raw = await (path === 'next' ? dataService.read(init) : requestYouTube(path, init));
+      else {
+        // Mutations are never automatically retried: a lost response may have
+        // followed a successful write on YouTube.
+        const timeout = new AbortController();
+        const cancel = () => timeout.abort();
+        signal.addEventListener('abort', cancel, { once: true });
+        const timer = setTimeout(cancel, 20000);
+        try {
+          const response = await fetch(`/youtubei/v1/${path}`, { ...init, signal: timeout.signal });
+          if (!response.ok) throw Error('Watch action failed');
+          raw = await response.json();
+          if (!raw || raw.error || raw.success === false) throw Error('Watch action failed');
+        } finally { clearTimeout(timer); signal.removeEventListener('abort', cancel); }
+      }
+      if (destroyed || captured !== state || signal.aborted || captured.route !== route()) throw Error('Watch request cancelled');
+      if (path === 'next') nextResponse = raw;
+      return args.parse ? Parser.parseResponse(raw) : { success: true, status_code: 200, data: raw };
+    }) as typeof session.actions.execute;
+    return api = new Innertube(session);
+  }
+  function load(): Promise<void> {
+    syncRoute();
+    const target = parseWatchLink(state.route) || parseShortLink(state.route);
+    if (destroyed || !target || state.details || Date.now() < retryAt) return Promise.resolve();
+    if (pending) return pending;
+    const captured = state;
+    captured.loading = true;
+    pending = (async () => {
+      try {
+        const info = await client().getInfo(target.videoId);
+        if (captured !== state || destroyed) return;
+        const basic = info.basic_info;
+        if (basic.id !== target.videoId) throw Error('Mismatched video details');
+        channelId = basic.channel_id || '';
+        captured.details = { videoId: basic.id, title: basic.title, author: basic.author,
+          channelId, shortDescription: basic.short_description, viewCount: String(basic.view_count ?? ''), isLive: basic.is_live };
+        const secondary = info.secondary_info;
+        const subscribe = secondary?.subscribe_button;
+        const subscriptionEntity = nextResponse?.frameworkUpdates?.entityBatchUpdate?.mutations?.find((entry: Node) =>
+          entry.payload?.subscriptionStateEntity?.channelId === channelId &&
+          typeof entry.payload.subscriptionStateEntity.subscribed === 'boolean')?.payload.subscriptionStateEntity;
+        const subscribed = subscribe?.is(YTNodes.SubscribeButton) ? subscribe.subscribed : subscriptionEntity?.subscribed;
+        captured.subscribed = subscribed === true;
+        captured.canSubscribe = !!channelId && typeof subscribed === 'boolean' && client().session.logged_in;
+        let liked = basic.is_liked, disliked = basic.is_disliked;
+        // 18.1.0 Menu omits the legacy segmented button from its allowed types.
+        // Parse that known API node directly when VideoInfo has no rating state.
+        if (liked === undefined || disliked === undefined) {
+          let budget = 12000;
+          const visit = (value: any, depth = 0) => {
+            if (!value || typeof value !== 'object' || depth > 25 || --budget < 0) return;
+            if (value.segmentedLikeDislikeButtonRenderer) {
+              const buttons = Parser.parseItem({ segmentedLikeDislikeButtonRenderer: value.segmentedLikeDislikeButtonRenderer }, YTNodes.SegmentedLikeDislikeButton);
+              if (buttons?.like_button?.is(YTNodes.ToggleButton)) liked = buttons.like_button.is_toggled;
+              if (buttons?.dislike_button?.is(YTNodes.ToggleButton)) disliked = buttons.dislike_button.is_toggled;
+              return;
+            }
+            for (const child of Object.values(value)) visit(child, depth + 1);
+          };
+          visit(nextResponse);
+        }
+        captured.liked = liked === true; captured.disliked = disliked === true;
+        captured.canLike = basic.allow_ratings !== false && typeof liked === 'boolean' &&
+          typeof disliked === 'boolean' && client().session.logged_in;
+        captured.canSave = client().session.logged_in;
+        const avatar = secondary?.owner?.author.thumbnails?.[0]?.url;
+        try { if (avatar && new URL(avatar).protocol === 'https:') captured.avatar = avatar; } catch { /* No avatar. */ }
+        captured.failed = false;
+      } catch {
+        if (captured === state) { captured.failed = true; retryAt = Date.now() + 5000; }
+      } finally {
+        if (captured === state) { captured.loading = false; pending = undefined; notify(); }
+      }
+    })();
+    return pending;
+  }
+  async function exclusive<T>(run: () => Promise<T>, fallback: T): Promise<T> {
+    syncRoute();
+    const expected = state;
+    await load();
+    if (destroyed || expected !== state || expected.route !== route() || !state.details || state.working || !client().session.logged_in) return fallback;
+    const captured = state;
+    captured.working = true; notify();
+    try { return await run(); }
+    catch { return fallback; }
+    finally { if (captured === state) { captured.working = false; notify(); } }
+  }
+  async function act(action: 'like' | 'dislike' | 'subscribe') {
+    return exclusive(async () => {
+      const current = state, id = state.details!.videoId!;
+      const interaction = client().interact;
+      if (action === 'subscribe') {
+        if (!state.canSubscribe) return false;
+        await (state.subscribed ? interaction.unsubscribe(channelId) : interaction.subscribe(channelId));
+        current.subscribed = !current.subscribed;
+      } else {
+        if (!state.canLike) return false;
+        const removing = action === 'like' ? state.liked : state.disliked;
+        if (removing) await interaction.removeRating(id);
+        else if (action === 'like') await interaction.like(id);
+        else await interaction.dislike(id);
+        current.liked = !removing && action === 'like'; current.disliked = !removing && action === 'dislike';
+      }
+      return true;
+    }, false);
+  }
+  async function listPlaylists() {
+    return exclusive(async () => {
+      const response = await client().actions.execute('/playlist/get_add_to_playlist', { videoIds: [state.details!.videoId] });
+      const raw = response.data;
+      const options: InstanceType<typeof YTNodes.PlaylistAddToOption>[] = [];
+      let budget = 20000;
+      function visit(value: any, depth = 0) {
+        if (!value || typeof value !== 'object' || depth > 25 || --budget < 0) return;
+        if (value.playlistAddToOptionRenderer) {
+          try { options.push(new YTNodes.PlaylistAddToOption(value.playlistAddToOptionRenderer)); } catch { /* Skip malformed options. */ }
+          return;
+        }
+        for (const child of Object.values(value)) visit(child, depth + 1);
+      }
+      visit(raw); playlists.clear();
+      for (const [index, node] of options.slice(0, 100).entries()) {
+        if (!node.playlist_id || !node.title.toString()) continue;
+        const key = String(index);
+        playlists.set(key, { node, value: { key, title: node.title.toString().slice(0, 200), selected: node.contains_selected_videos === 'ALL' } });
+      }
+      return [...playlists.values()].map(item => ({ ...item.value }));
+    }, undefined as SavedPlaylist[] | undefined);
+  }
+  async function togglePlaylist(key: string) {
+    return exclusive(async () => {
+      const option = playlists.get(key);
+      if (!option) return false;
+      const endpoint = option.value.selected ? option.node.remove_from_playlist_service_endpoint : option.node.add_to_playlist_service_endpoint;
+      const command = endpoint.command;
+      const path = command?.is(YTNodes.PlaylistEditEndpoint) ? command.getApiPath() : endpoint.metadata.api_url?.replace(/^\//, '');
+      if (path !== 'browse/edit_playlist') return false;
+      await endpoint.call(client().actions);
+      option.value.selected = !option.value.selected;
+      return true;
+    }, false);
+  }
+  return { read() { syncRoute(); void load(); return { ...state }; }, act, listPlaylists, togglePlaylist,
+    routeChanged: syncRoute,
+    destroy() { destroyed = true; controller.abort(); playlists.clear(); api = undefined; if (!sharedData) dataService.destroy(); } };
+}

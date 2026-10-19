@@ -35,5 +35,5 @@ export function syncLanguage(): () => void {
   chrome.storage.onChanged.addListener(changed);
   const version = revision;
   void chrome.storage.local.get('uiLanguage').then(saved => { if (version === revision) apply(saved.uiLanguage); }).catch(() => { if (version === revision) apply(languageDefault); });
-  return () => { disposed = true; chrome.storage.onChanged.removeListener(changed); };
+  return () => { disposed = true; chrome.storage?.onChanged?.removeListener?.(changed); };
 }

@@ -7,7 +7,7 @@ import type { ControllerStyle } from '../../types/ports';
 import type { PlaybackModel, PlaybackViewState } from './playback-model';
 import { formatPlaybackTime } from '../ui/playback-presentation';
 const props = defineProps<{ model: PlaybackModel; state: PlaybackViewState; selected: boolean; adjusting: boolean; controllerStyle: ControllerStyle }>();
-const state = computed(() => props.state);
+const state = computed(() => props.model.state.value);
 const elapsed = computed(() => state.value.isLive ? (state.value.atLiveEdge ? t('Live') : t('Behind live by {time}', { time: formatPlaybackTime(state.value.end - state.value.currentTime) })) : formatPlaybackTime(state.value.currentTime));
 const duration = computed(() => state.value.isLive ? (state.value.canSeek ? t('Live · Replay window: {time}', { time: formatPlaybackTime(state.value.end - state.value.start) }) : t('Live · Seeking unavailable')) : formatPlaybackTime(state.value.duration));
 const percent = computed(() => state.value.canSeek ? Math.min(100, Math.max(0, (state.value.currentTime - state.value.start) / (state.value.end - state.value.start) * 100)) : 0);
@@ -29,7 +29,7 @@ function finish(event: PointerEvent) {
 }
 function cancel() { if (pointer !== null) { pointer = null; props.model.cancelPreview(); } }
 watch(() => props.selected, value => { if (!value) cancel(); });
-watch(() => props.state.controlsVisible, value => { if (!value) cancel(); });
+watch(() => state.value.controlsVisible, value => { if (!value) cancel(); });
 onBeforeUnmount(cancel);
 const vProgressLabel: Directive<HTMLElement, boolean> = {
   mounted(node, binding) { label(node, binding.value); },

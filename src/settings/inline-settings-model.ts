@@ -1,6 +1,9 @@
 import { videoGridDefaults, normalizeVideoGrid, type VideoGridSettings } from '../shared/video-grid';
 import { nextTick, reactive } from 'vue';
 import { YTGamepadBindings as schema } from '../input/bindings.ts';
+import { YTGamepadActions } from '../shared/actions';
+import { positionsOnPad } from './bindings';
+import { ui } from '../ui/ui-api';
 import { YTGamepadDiagnosticStore as diagnostics } from '../diagnostics/diagnostics-store.ts';
 import { t, applyLanguage, languageDefault, normalizeLanguage, type UILanguage } from '../shared/i18n';
 
@@ -8,6 +11,7 @@ type Layout = 'watch' | 'browse';
 type Category = '' | 'general' | 'display' | 'controller' | 'help';
 type Bindings = Record<string, number>;
 interface Settings extends VideoGridSettings {
+  playbackLayout: 'normal' | 'wide' | 'page';
   uiLanguage: UILanguage;
   enabled: boolean;
   rightHandMode: boolean;
@@ -18,6 +22,7 @@ interface Settings extends VideoGridSettings {
   repeatInterval: number;
   bindings: Bindings;
   bindingLayouts: Record<Layout, Bindings>;
+  shortcutLayouts: Record<string, Record<string, string>>;
 }
 export const categories = {
   general: 'General', display: 'Display & layout',
@@ -28,19 +33,16 @@ export const physicalNames: Record<string, string> = {
   LB: 'LB / L1', RB: 'RB / R1', LT: 'LT / L2', RT: 'RT / R2',
   Select: 'View / Share / −', Start: 'Menu / Options / +', L3: 'Left stick press', R3: 'Right stick press'
 };
-export const positions: Record<string, [number, number]> = {
-  A: [74.5, 46.75], B: [81, 37], X: [68, 37], Y: [74.5, 27.25],
-  LB: [24, 16], RB: [76, 16], LT: [16, 7], RT: [84, 7],
-  Select: [43.2, 36.5], Start: [56.8, 36.5], L3: [26.3, 36.5], R3: [63, 57.5]
-};
+export const positions = positionsOnPad;
 export const adjustments = [
   { key: 'deadzone', label: 'Stick deadzone', min: .15, max: .75, step: .05, suffix: '' },
   { key: 'repeatDelay', label: 'Initial repeat delay', min: 150, max: 1000, step: 10, suffix: ' ms' },
   { key: 'repeatInterval', label: 'Repeat interval', min: 80, max: 500, step: 10, suffix: ' ms' }
 ] as const;
 const defaults = {
+  playbackLayout: 'page' as const,
   ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, autoFullscreen: null, deadzone: .35,
-  repeatDelay: 350, repeatInterval: 140, bindings: {}, bindingLayouts: null
+  repeatDelay: 150, repeatInterval: 80, bindings: {}, bindingLayouts: null, shortcutLayouts: null
 };
 
 export function createInlineSettingsModel(root: ShadowRoot, container: HTMLElement) {
@@ -48,6 +50,8 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     values: null as Settings | null,
     category: '' as Category,
     bindingAction: '',
+    bindingKey: '',
+    shortcutError: '',
     layout: (location.pathname === '/watch' ? 'watch' : 'browse') as Layout,
     saving: false,
     family: document.documentElement.dataset.ytgController || 'generic',
@@ -67,7 +71,8 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     const revision = ++focusRevision;
     await nextTick();
     if (disposed || revision !== focusRevision || !container.isConnected) return;
-    const controls = Array.from(container.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+    const controls = Array.from(container.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button:not(:disabled),input:not(:disabled)'))
+      .filter(control => !control.getClientRects || control.getClientRects().length > 0);
     const target = (id === undefined ? controls.find(button => button.closest?.('.settings-content')) : controls.find(button => button.dataset.setting === id)) || controls[0];
     target?.focus({ preventScroll: true });
     target?.scrollIntoView({ block: 'nearest' });
@@ -77,23 +82,26 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
       ...defaults, ...normalizeVideoGrid(stored),
       uiLanguage: normalizeLanguage(stored.uiLanguage),
       bindings: schema.normalize(stored.bindings),
-      bindingLayouts: schema.normalizeLayouts(stored.bindingLayouts, stored.bindings)
+      bindingLayouts: schema.normalizeLayouts(stored.bindingLayouts, stored.bindings),
+      shortcutLayouts: schema.normalizeShortcuts(stored.shortcutLayouts)
     };
     for (const key of ['enabled', 'theater', 'rightHandMode'] as const) {
       values[key] = typeof stored[key] === 'boolean' ? stored[key] : defaults[key];
     }
     values.autoFullscreen = typeof stored.autoFullscreen === 'boolean' ? stored.autoFullscreen : values.theater;
+    values.playbackLayout = stored.playbackLayout === 'normal' || stored.playbackLayout === 'wide' ? stored.playbackLayout : 'page';
     for (const { key, min, max } of adjustments) {
       const value = stored[key];
       values[key] = typeof value === 'number' && Number.isFinite(value)
         ? Math.min(max, Math.max(min, value)) : defaults[key];
     }
     state.values = values;
-    if (values.rightHandMode) state.bindingAction = '';
+    if (values.rightHandMode) { state.bindingAction = ''; state.bindingKey = ''; }
   }
   const currentBindings = () => state.values!.rightHandMode ? schema.rightHand : state.values!.bindingLayouts[state.layout];
   const bindingUpdate = (next: Bindings) => {
-    const bindingLayouts = { ...state.values!.bindingLayouts, [state.layout]: next };
+    const bindingLayouts = Object.fromEntries(Object.entries(state.values!.bindingLayouts).map(([layout, values]) => [layout, { ...values }])) as Record<Layout, Bindings>;
+    bindingLayouts[state.layout] = next;
     return { bindingLayouts, bindings: bindingLayouts.watch };
   };
   async function save(next: Partial<Settings>, id: string, text = 'Settings saved.') {
@@ -101,7 +109,9 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     const revision = focusRevision, hadFocus = ownsFocus();
     state.saving = true;
     try {
-      await chrome.storage.local.set(next);
+      if (next.playbackLayout && Object.keys(next).length === 1 && ui.state.layout !== undefined) {
+        if (!await ui.setLayout(next.playbackLayout)) throw Error('Could not save layout');
+      } else await chrome.storage.local.set(next);
       if (disposed) return;
       apply({ ...state.values, ...next });
       if (next.uiLanguage) applyLanguage(state.values!.uiLanguage);
@@ -116,6 +126,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     if (state.saving) return;
     state.category = category;
     state.bindingAction = '';
+    state.bindingKey = '';
     void focus(category === 'controller' ? `layout-${state.layout}` : undefined);
   }
   function selectLayout(layout: Layout) {
@@ -126,10 +137,19 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     if (state.saving || state.values?.rightHandMode) return;
     state.bindingAction = action; void focus(String(currentBindings()[action]));
   }
+  function selectButton(key: string) {
+    if (state.saving || state.values?.rightHandMode || !Object.values(schema.keys).includes(key)) return;
+    state.bindingAction = '';
+    state.bindingKey = key;
+    state.shortcutError = '';
+    const action = Object.keys(currentBindings()).find(action => schema.keys[currentBindings()[action]] === key);
+    void focus(`assign-${action || actions[0]}`);
+  }
   function back() {
     if (state.saving) return;
-    const previous = state.bindingAction || state.category;
-    if (state.bindingAction) state.bindingAction = '';
+    const previous = state.bindingKey ? `pad-${state.bindingKey}` : state.bindingAction || state.category;
+    if (state.bindingKey) state.bindingKey = '';
+    else if (state.bindingAction) state.bindingAction = '';
     else state.category = '';
     void focus(previous);
   }
@@ -138,11 +158,18 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
   }
   function bind(index: number) {
     if (!state.values || state.values.rightHandMode || !state.bindingAction) return;
-    const next = { ...currentBindings() }, previous = next[state.bindingAction];
-    const conflict = Object.keys(next).find(action => action !== state.bindingAction && next[action] === index);
+    assign(state.bindingAction, index, String(index));
+  }
+  function assign(action: string, index: number, id: string) {
+    if (!state.values || state.values.rightHandMode || !Object.hasOwn(schema.labels, action) || !Object.hasOwn(schema.keys, index)) return;
+    const next = { ...currentBindings() }, previous = next[action];
+    const conflict = Object.keys(next).find(other => other !== action && next[other] === index);
     if (conflict) next[conflict] = previous;
-    next[state.bindingAction] = index;
-    void save(bindingUpdate(next), String(index), conflict
+    next[action] = index;
+    const shortcutLayouts = schema.normalizeShortcuts(state.values.shortcutLayouts);
+    delete shortcutLayouts[state.layout][schema.keys[index]];
+    delete shortcutLayouts[state.layout][schema.keys[previous]];
+    void save({ ...bindingUpdate(next), shortcutLayouts }, id, conflict
       ? t('Saved. Swapped buttons with “{label}”.', { label: t(schema.labels[conflict]) }) : 'Button bindings saved.');
   }
   function adjust(item: typeof adjustments[number], delta: number, label: string) {
@@ -202,20 +229,49 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     if (disposed) return;
     disposed = true; ++focusRevision;
     observer.disconnect();
-    try { chrome.storage.onChanged.removeListener(changed); }
+    try { chrome.storage?.onChanged?.removeListener?.(changed); }
     catch (error) {
       if (!/extension context invalidated/i.test(String((error as Error)?.message || error))) throw error;
     }
   }
   const layouts = [{ id: 'watch', label: schema.layouts.watch }, { id: 'browse', label: schema.layouts.browse }] as const;
   const actions = Object.keys(schema.labels);
-  return { state, schema, layouts, actions, start, dispose, open, selectLayout, selectAction, back, toggle, bind, adjust,
+  function recordShortcut(event: KeyboardEvent) {
+    event.preventDefault(); event.stopPropagation();
+    if (!state.values || !state.bindingKey || state.saving || event.repeat || event.isComposing) return;
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    if (event.ctrlKey || event.altKey || event.metaKey || !Object.hasOwn(schema.keyboardActions, key)) {
+      state.shortcutError = 'Use a supported page shortcut without Ctrl, Alt or Win.'; return;
+    }
+    state.shortcutError = '';
+    const shortcutLayouts = schema.normalizeShortcuts(state.values.shortcutLayouts);
+    shortcutLayouts[state.layout][state.bindingKey] = key;
+    void save({ shortcutLayouts }, 'shortcut-recorder', 'Button bindings saved.');
+  }
+  const shortcutFor = (key: string) => state.values?.rightHandMode ? '' : state.values?.shortcutLayouts[state.layout]?.[key] || '';
+  const summaryFor = (key: string) => {
+    const shortcut = shortcutFor(key);
+    if (shortcut) return `${schema.shortcutLabel(shortcut)} · ${t(YTGamepadActions.get(schema.keyboardActions[shortcut])!.label)}`;
+    const action = Object.keys(currentBindings()).find(action => schema.keys[currentBindings()[action]] === key);
+    return action ? schema.contextLabel(action, state.layout) : 'Unassigned';
+  };
+  return { state, schema, layouts, actions, start, dispose, open, selectLayout, selectAction, selectButton, back, toggle, bind, adjust,
+    recordShortcut, shortcutFor, summaryFor,
+    assignAction: (action: string) => {
+      if (!state.bindingKey) return;
+      const index = Object.keys(schema.keys).find(index => schema.keys[Number(index)] === state.bindingKey);
+      if (index !== undefined) assign(action, Number(index), `assign-${action}`);
+    },
+    setPlaybackLayout: (layout: Settings['playbackLayout']) => save({ playbackLayout: layout }, `playback-${layout}`),
     setLanguage: (language: UILanguage) => save({ uiLanguage: normalizeLanguage(language) }, `language-${language}`),
     clearDiagnostics, exportDiagnostics,
     saveGrid: (next: Partial<VideoGridSettings>, id: string) => save(next, id),
     resetGrid: () => save(Object.fromEntries(Object.entries(videoGridDefaults).filter(([key]) => key.startsWith("gridColumns"))), "resetVideoGrid"),
-    reset: () => save(bindingUpdate({ ...schema.defaults }), 'resetBindings'),
-    keyFor: (action: string) => schema.keys[currentBindings()[action]],
-    actionFor: (key: string) => Object.keys(currentBindings()).find(action => schema.keys[currentBindings()[action]] === key)
+    reset: () => {
+      const shortcutLayouts = schema.normalizeShortcuts(state.values?.shortcutLayouts);
+      shortcutLayouts[state.layout] = {};
+      return save({ ...bindingUpdate({ ...schema.defaults }), shortcutLayouts }, 'resetBindings');
+    },
+    keyFor: (action: string) => schema.keys[currentBindings()[action]]
   };
 }

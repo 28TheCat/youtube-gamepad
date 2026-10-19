@@ -18,5 +18,5 @@ export function createSearchText() {
     }
     state.selection = [position, position];
   }
-  return { state, setQuery, insertText, deleteBackward: () => insertText('', true), moveCursor };
+  return { state, setQuery, insertText, moveCursor };
 }

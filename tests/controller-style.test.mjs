@@ -87,16 +87,14 @@ test('button artwork is original third-party SVG data with preserved source and 
     assert.equal(createHash('sha256').update(bytes).digest('hex'), active.files[path].sha256);
     assert.ok(generated.includes(bytes.toString('base64')), path);
   }
-  const controllerFont = JSON.parse(readFileSync(new URL('../assets/controller/controller-font/prompts.json', import.meta.url), 'utf8'));
-  for (const [path, record] of Object.entries(controllerFont.files)) {
-    assert.equal(createHash('sha256').update(readFileSync(new URL('../' + path, import.meta.url))).digest('hex'), record.sha256);
-  }
-  assert.equal(active.profiles.xbox.A, 'assets/controller/controller-font/xbox-a.svg');
-  assert.equal(active.profiles.playstation.A, 'assets/controller/controller-font/playstation-a.svg');
+  assert.equal(active.profiles.xbox.A, assets.profiles.xbox.A);
+  assert.equal(active.profiles.playstation.A, assets.profiles.playstation.A);
   assert.equal(active.profiles.generic.A, active.profiles.xbox.A);
   assert.equal(active.profiles.switch.A, assets.profiles.switch.A);
-  assert.equal(controllerFont.files[active.profiles.playstation.A].codepoint, 'U+E0A0');
-  assert.match(readFileSync(new URL('../licenses/controller-font-FREEWARE.txt', import.meta.url), 'utf8'), /Dean Tersigni/);
+  const template = JSON.parse(readFileSync(new URL('../assets/controller/template.json', import.meta.url), 'utf8'));
+  assert.equal(template.author, 'nicefrog');
+  assert.equal(template.license, 'CC0-1.0');
+  assert.equal(createHash('sha256').update(readFileSync(new URL('../assets/controller/layout.svg', import.meta.url))).digest('hex'), template.files['assets/controller/layout.svg'].sha256);
 });
 
 test('remapped prompts update text, physical artwork keys and controller labels', () => {
@@ -122,4 +120,17 @@ test('right-hand navigation hints update visible text and accessible labels', ()
   document.documentElement.dataset.ytgNavigationStick = 'left';
   style.hint(hint, 'D-pad / left stick: Select · A: Open');
   assert.match(hint.textContent, /left stick/);
+});
+
+test('keyboard prompts follow actions even when gamepad buttons are remapped', () => {
+  const { document, style } = setup();
+  style.configureBindings({ confirm: 1, back: 0 });
+  document.documentElement.dataset.ytgInputMode = 'keyboard';
+  assert.equal(style.format('A confirm · B back · X pause · Y search · Start menu'), 'Enter confirm · Esc back · Space pause · / search · F1 menu');
+  const badge = style.badge(node(), 'A');
+  assert.equal(badge.textContent, 'Enter');
+  assert.equal(badge.getAttribute('data-ytg-icon'), 'false');
+  document.documentElement.dataset.ytgInputMode = 'gamepad';
+  style.use({ id: 'DualSense' });
+  assert.equal(style.format('A confirm'), '○ confirm');
 });

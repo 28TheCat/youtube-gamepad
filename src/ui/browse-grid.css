@@ -1,75 +1,102 @@
 /* Client shell: one header, one navigation rail and one scrollable feed. */
-#ytg-browse-grid{--ytg-sidebar-width:232px;--ytg-client-header:80px;position:fixed;left:var(--ytg-sidebar-width);right:0;bottom:0;top:var(--ytg-browse-top,144px);z-index:2100;background:var(--ytg-client-background);color:var(--ytg-text);font:var(--ytg-font-body)/var(--ytg-line-body) var(--ytg-font-family)}
+.explore-page-heading{display:flex;align-items:center;gap:24px;padding:24px 0 32px;margin-bottom:24px;border-bottom:1px solid var(--ytg-border);scroll-snap-align:start;scroll-snap-stop:always}
+.explore-page-heading .explore-page-symbol{display:grid;place-items:center;flex:none;width:72px;height:72px;border-radius:var(--ytg-card-radius);background:var(--ytg-client-active);color:var(--ytg-text)}
+.explore-page-symbol svg{width:32px;height:32px}
+.explore-page-heading h1{margin:4px 0 8px;font-size:clamp(26px,3vw,40px);line-height:1.2;color:var(--ytg-text)}
+.explore-page-heading p{margin:0;color:var(--ytg-muted);font-size:var(--ytg-font-body);line-height:1.6}
+@media(max-width:600px){.explore-page-heading{gap:16px;padding:16px 0 24px}.explore-page-heading .explore-page-symbol{width:48px;height:48px}}
+#ytg-browse-grid{--ytg-sidebar-width:80px;--ytg-sidebar-expanded-width:232px;--ytg-client-header:56px;position:fixed;right:0;bottom:0;z-index:2100;background:var(--ytg-client-background);color:var(--ytg-text);font:var(--ytg-font-body)/var(--ytg-line-body) var(--ytg-font-family)}
 #ytg-browse-grid[hidden]{display:none!important}
-html.ytg-custom-browse ytd-masthead{visibility:hidden!important;pointer-events:none!important}
-html.ytg-custom-browse :is(ytd-guide-renderer,ytd-mini-guide-renderer,tp-yt-app-drawer#guide){display:none!important}
-/* Keep source cards measurable for data collection and continuation loading. */
-html.ytg-custom-browse ytd-page-manager :is(ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model){visibility:hidden!important;pointer-events:none!important}
-html.ytg-api-categories :is(ytd-feed-filter-chip-bar-renderer,#chips-wrapper,yt-chip-cloud-chip-renderer){visibility:hidden!important;pointer-events:none!important}
-#ytg-browse-top{position:fixed;inset:0 0 auto;height:var(--ytg-client-header);display:flex;align-items:center;gap:32px;padding:0 32px;box-sizing:border-box;background:var(--ytg-client-surface);border-bottom:1px solid var(--ytg-border);z-index:2101}
+/* Native roots are hidden by the manifest's browse.css; retain their source DOM. */
+#ytg-browse-top{position:fixed;inset:0 0 auto;height:var(--ytg-client-header);display:flex;align-items:center;padding:0 32px;box-sizing:border-box;background:var(--ytg-client-surface);border-bottom:1px solid var(--ytg-border);z-index:2101}
 #ytg-browse-top .client-brand{display:flex;align-items:center;gap:12px;flex:none;min-height:48px;padding:8px 4px;background:transparent;border:0;color:var(--ytg-text);font:700 23px/1.1 var(--ytg-font-family);cursor:pointer;border-radius:var(--ytg-button-radius)}
-.client-brand svg{width:36px;height:28px;flex:none;fill:var(--ytg-brand-color)}
+.client-brand svg{flex:none;fill:var(--ytg-brand-color)}
 .client-brand svg path{fill:#fff}
 .client-brand span{display:flex;align-items:baseline;gap:8px;letter-spacing:-.5px}
-.client-brand small{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:var(--ytg-muted);font-weight:600}
-#ytg-client-search{flex:1;max-width:720px;margin:auto;min-width:0}
-#ytg-browse-top{padding-right:96px}
+.client-brand small{text-transform:uppercase;color:var(--ytg-muted)}
+#ytg-client-search{flex:1;margin:auto;min-width:0}
 #ytg-browse-top .client-account{display:grid;place-items:center;flex:none;width:48px;height:48px;padding:12px;background:var(--ytg-surface);border:0;border-radius:var(--ytg-pill-radius);color:var(--ytg-text);cursor:pointer}
-.client-account svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8}
+.client-account svg{width:24px;height:24px;fill:none;stroke:none}
+.client-account img{display:block;width:100%;height:100%;object-fit:cover;border-radius:50%}
+#ytg-browse-top .client-account.has-avatar{padding:0;overflow:hidden}
 #ytg-client-search:empty{display:none}
-#ytg-browse-top button:is(:focus-visible,.ytg-selected){outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset)}
+#ytg-browse-top button:focus-visible,html:not([data-ytg-input-mode=mouse]) #ytg-browse-top button.ytg-selected{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:calc(0px - var(--ytg-focus-width))}
 #ytg-browse-grid #ytg-search-host{max-width:none}
 #ytg-browse-grid .ytg-search-form{height:48px}
-#ytg-browse-grid .ytg-search-field{background:var(--ytg-client-background);border-radius:var(--ytg-button-radius) 0 0 var(--ytg-button-radius);box-shadow:none}
+#ytg-browse-grid .ytg-search-field{background:var(--ytg-client-background);border-radius:var(--ytg-pill-radius) 0 0 var(--ytg-pill-radius);box-shadow:none}
 #ytg-browse-grid .ytg-search-field:focus-within{border-color:var(--ytg-focus-color);box-shadow:inset 1px 0 var(--ytg-focus-color)}
-#ytg-browse-grid .ytg-search-leading{display:block;color:var(--ytg-muted)}
-#ytg-browse-grid .ytg-search-field input{font-size:var(--ytg-font-action)}
-#ytg-browse-grid .ytg-search-submit{border-radius:0 var(--ytg-button-radius) var(--ytg-button-radius) 0}
+#ytg-browse-grid .ytg-search-leading{display:block;visibility:visible;color:var(--ytg-muted)}
+#ytg-browse-grid .ytg-search-submit{border-radius:0 var(--ytg-pill-radius) var(--ytg-pill-radius) 0}
 #ytg-browse-grid .ytg-search-voice{width:48px;height:48px}
-#ytg-browse-sidebar{position:fixed;left:0;top:var(--ytg-client-header);bottom:0;width:var(--ytg-sidebar-width);box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain;padding:24px 16px;background:var(--ytg-client-surface);border-right:1px solid var(--ytg-border);scroll-padding:24px}
-#ytg-browse-sidebar :is(a,button){display:flex;flex-direction:row;align-items:center;gap:14px;width:100%;box-sizing:border-box;min-height:52px;margin:6px 0;padding:12px 16px;border:0;border-radius:var(--ytg-button-radius);background:transparent;color:inherit;font:600 var(--ytg-font-body)/1.5 var(--ytg-font-family);text-align:left;cursor:pointer;outline-offset:0;text-decoration:none}
-#ytg-browse-sidebar span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#ytg-browse-sidebar svg{width:24px;height:24px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-#ytg-browse-sidebar section{margin-top:24px;padding-top:16px;border-top:1px solid var(--ytg-border)}
+#ytg-browse-sidebar{position:fixed;left:0;top:var(--ytg-client-header);bottom:0;width:var(--ytg-sidebar-drawer-width,var(--ytg-sidebar-width));z-index:2102;box-sizing:border-box;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding:24px 12px;background:var(--ytg-client-surface);border-right:1px solid var(--ytg-border)}
+#ytg-browse-sidebar :is(a,button){display:flex;flex-direction:row;align-items:center;justify-content:var(--ytg-sidebar-justify,center);gap:var(--ytg-sidebar-gap,0px);box-sizing:border-box;padding:var(--ytg-sidebar-entry-padding,12px);background:transparent;color:inherit;font:600 var(--ytg-font-body)/1.5 var(--ytg-font-family);text-align:left;cursor:pointer;outline-offset:0;text-decoration:none}
+#ytg-browse-sidebar span{display:var(--ytg-sidebar-label-display,none);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ytg-browse-sidebar svg{display:block;width:24px;height:24px;flex:none;overflow:visible;fill:none;stroke:none}
+#ytg-browse-sidebar section{border-top:1px solid var(--ytg-border)}
 #ytg-browse-sidebar :is(a,button):hover{background:var(--ytg-surface)}
-#ytg-browse-sidebar [aria-current=page]{background:var(--ytg-client-active);color:var(--ytg-focus-color);font-weight:700}
-#ytg-browse-sidebar :is(a,button):focus-visible,html.ytg-gamepad-input #ytg-browse-sidebar .ytg-selected{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);background:var(--ytg-client-active);box-shadow:none}
-#ytg-browse-sidebar .sidebar-chevron{width:16px;height:16px;margin-left:auto;transition:transform .15s}
+#ytg-browse-sidebar :is(a,button)[aria-current=page]{background:var(--ytg-selected-background);color:var(--ytg-selected-text);font-weight:700}
+/* Draw the whole ring inside the target so folding/scroll containers cannot cut its sides. */
+#ytg-browse-sidebar :is(a,button):focus-visible,html.ytg-gamepad-input #ytg-browse-sidebar .ytg-selected{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:calc(0px - var(--ytg-focus-width));box-shadow:none}
+#ytg-browse-sidebar .sidebar-chevron{display:var(--ytg-sidebar-label-display,none);width:16px;height:16px;margin-left:auto;transition:transform .15s}
 #ytg-browse-sidebar .sidebar-chevron.expanded{transform:rotate(90deg)}
-#ytg-browse-categories{position:absolute;bottom:100%;left:0;right:0;height:64px;display:flex;align-items:center;gap:12px;overflow-x:auto;scroll-padding:32px;background:var(--ytg-client-background);padding:8px 32px;box-sizing:border-box;scrollbar-width:none}
+#ytg-browse-categories{position:absolute;bottom:100%;left:0;right:0;display:flex;align-items:center;gap:12px;overflow-x:auto;background:var(--ytg-client-background);padding:8px 32px;box-sizing:border-box;scrollbar-width:none}
 #ytg-browse-categories::-webkit-scrollbar{display:none}
 #ytg-browse-categories [data-ytg-category]{display:block;flex:none;order:var(--ytg-category-order,0)}
 #ytg-browse-categories [data-ytg-category-hidden]{display:none!important}
-#ytg-browse-grid #ytg-browse-categories button{display:flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:40px;margin:0;padding:0 20px;border:1px solid transparent;border-radius:var(--ytg-button-radius);background:var(--ytg-client-surface);color:var(--ytg-muted);font:600 var(--ytg-font-body)/1.4 var(--ytg-font-family);white-space:nowrap;cursor:pointer}
+#ytg-browse-grid #ytg-browse-categories button{display:flex;align-items:center;justify-content:center;box-sizing:border-box;margin:0;font:600 var(--ytg-font-body)/1.4 var(--ytg-font-family);white-space:nowrap;cursor:pointer}
 #ytg-browse-grid #ytg-browse-categories button:hover{color:var(--ytg-text);background:var(--ytg-surface)}
-#ytg-browse-grid #ytg-browse-categories button[aria-pressed=true]{background:var(--ytg-text);color:var(--ytg-background)}
-#ytg-browse-categories [data-ytg-category].ytg-selected:is(:focus,:focus-visible){outline:none;box-shadow:none}
-#ytg-browse-categories .ytg-selected button,#ytg-browse-categories button:focus-visible{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset)}
-#ytg-browse-grid [data-ytg-browse-grid]{height:100%;overflow:auto;overscroll-behavior:contain;box-sizing:border-box;padding:16px 32px 40px;scroll-padding:24px}
-#ytg-browse-grid .cards{display:grid;gap:32px 24px}
-#ytg-browse-grid a[data-browse-id]{display:flex;flex-direction:column;min-width:0;padding:0;color:inherit;text-decoration:none;border-radius:var(--ytg-card-radius);outline-offset:var(--ytg-focus-offset)}
+/* Only the active filter is highlighted; navigation focus adds no second marker. */
+#ytg-browse-categories [data-ytg-category].ytg-selected:is(:focus,:focus-visible),
+#ytg-browse-categories button:is(:focus,:focus-visible),#ytg-browse-categories .ytg-selected button{outline:none;box-shadow:none}
+/* Pointer takeover keeps the navigation target, but hides its focus ring. */
+html[data-ytg-input-mode=mouse] #ytg-browse-top button:focus{outline:none}
+#ytg-browse-grid [data-ytg-browse-grid]{height:100%;overflow:auto;overscroll-behavior:contain;box-sizing:border-box;scroll-padding:24px;scroll-snap-type:y mandatory}
+#ytg-browse-grid .cards{--ytg-row-gap:32px;display:grid;gap:var(--ytg-row-gap) 24px}
+#ytg-browse-grid a[data-browse-id]{display:flex;flex-direction:column;min-width:0;padding:0;color:inherit;text-decoration:none;border-radius:var(--ytg-card-radius);outline-offset:var(--ytg-focus-offset);scroll-snap-align:start;scroll-snap-stop:always}
 #ytg-browse-grid .card-cover{width:100%;aspect-ratio:16/9;flex:none;overflow:hidden;border-radius:var(--ytg-card-radius);background:var(--ytg-surface)}
-#ytg-browse-grid img,#ytg-browse-grid .thumbnail-placeholder{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--ytg-card-radius);background:var(--ytg-surface)}
+#ytg-browse-grid .card-cover img,#ytg-browse-grid .thumbnail-placeholder{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--ytg-card-radius);background:var(--ytg-surface)}
 #ytg-browse-grid img[data-loaded=false]{opacity:0}
 #ytg-browse-grid .thumbnail-placeholder{background:linear-gradient(135deg,var(--ytg-surface),var(--ytg-client-active))}
-#ytg-browse-grid .card-copy{display:flex;flex-direction:column;min-width:0;padding:0 4px}
-#ytg-browse-grid strong{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;font-size:var(--ytg-font-action);font-weight:var(--ytg-weight-body);line-height:1.4;min-height:2.8em;max-height:2.8em;margin-top:14px;overflow-wrap:anywhere}
-#ytg-browse-grid .channel{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--ytg-font-small);line-height:1.5;min-height:1.5em;color:var(--ytg-muted);margin-top:6px}
+#ytg-browse-grid .card-copy{display:flex;flex-direction:column;min-width:0}
+#ytg-browse-grid strong{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+#ytg-browse-grid .channel{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:1.5em;color:var(--ytg-muted)}
 #ytg-browse-grid a[data-browse-id]:focus-visible{outline:none}
 html:not(.ytg-gamepad-input) #ytg-browse-grid a[data-browse-id]:focus-visible .card-cover{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset)}
-html.ytg-gamepad-input #ytg-browse-grid a[data-browse-id].ytg-selected .card-cover{box-shadow:var(--ytg-shadow-focus)}
-html.ytg-gamepad-input #ytg-browse-grid a[data-browse-id].ytg-selected strong{color:var(--ytg-focus-color)}
+/* Keep the selected thumbnail frame independent of the browser's focus-visible
+   heuristic, which changes when keyboard and controller input alternate. */
+html:not([data-ytg-input-mode=mouse]) #ytg-browse-grid a[data-browse-id].ytg-selected .card-cover{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset);box-shadow:var(--ytg-shadow-focus)}
+html:not([data-ytg-input-mode=mouse]) #ytg-browse-grid a[data-browse-id].ytg-selected strong{color:var(--ytg-text)}
 #ytg-browse-grid [data-ytg-browse-grid] button{font:600 var(--ytg-font-body)/1.5 var(--ytg-font-family);background:var(--ytg-client-surface);color:var(--ytg-text);border:1px solid var(--ytg-border);margin:24px 0;padding:12px 24px;border-radius:var(--ytg-button-radius);cursor:pointer}
 #ytg-browse-grid [data-ytg-browse-grid] button:focus-visible{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset)}
 #ytg-browse-grid .cards[data-horizontal=true] a{flex-direction:row;align-items:flex-start;gap:20px}
 #ytg-browse-grid .cards[data-horizontal=true] .card-cover{width:0;min-width:0;flex:var(--ytg-cover-flex,40) 1 0}
 #ytg-browse-grid .cards[data-horizontal=true] .card-copy{flex:var(--ytg-info-flex,60) 1 0}
 #ytg-browse-grid .cards[data-horizontal=true] strong{margin-top:0}
-@media(max-width:1000px){#ytg-browse-grid{--ytg-sidebar-width:196px}#ytg-browse-top{gap:24px;padding-inline:24px}.client-brand small{display:none}#ytg-browse-grid .cards{gap:28px 20px}#ytg-browse-grid [data-ytg-browse-grid]{padding-inline:24px}#ytg-browse-categories{padding-inline:24px}}
-@media(max-width:700px){#ytg-browse-grid{--ytg-sidebar-width:80px}#ytg-browse-sidebar{padding:16px 12px}#ytg-browse-sidebar :is(a,button){justify-content:center;padding:12px;gap:0}#ytg-browse-sidebar span,#ytg-browse-sidebar .sidebar-chevron{display:none}#ytg-browse-sidebar section{margin-top:16px;padding-top:12px}#ytg-browse-top{padding-inline:16px;gap:16px}.client-brand span{display:none}#ytg-browse-grid [data-ytg-browse-grid]{padding:12px 16px 32px}#ytg-browse-categories{padding-inline:16px;gap:10px}#ytg-browse-grid #ytg-browse-categories button{padding-inline:16px}#ytg-browse-grid strong{font-size:var(--ytg-font-body)}#ytg-browse-grid .cards{gap:24px 16px}}
+@media(max-width:1000px){#ytg-browse-grid{--ytg-sidebar-expanded-width:196px}#ytg-browse-top{gap:24px;padding-inline:24px}.client-brand small{display:none}#ytg-browse-grid .cards{--ytg-row-gap:28px;gap:var(--ytg-row-gap) 20px}#ytg-browse-grid [data-ytg-browse-grid]{padding-inline:24px}#ytg-browse-categories{padding-inline:24px}}
+@media(max-width:700px){#ytg-browse-grid{--ytg-sidebar-width:80px}#ytg-browse-sidebar{padding:16px 12px}#ytg-browse-sidebar section{margin-top:16px;padding-top:12px}#ytg-browse-top{padding-inline:16px;gap:16px}.client-brand span{display:none}#ytg-browse-grid [data-ytg-browse-grid]{padding:12px 16px 32px}#ytg-browse-categories{padding-inline:16px;gap:10px}#ytg-browse-grid #ytg-browse-categories button{padding-inline:16px}#ytg-browse-grid strong{font-size:var(--ytg-font-body)}#ytg-browse-grid .cards{--ytg-row-gap:24px;gap:var(--ytg-row-gap) 16px}}
 @media(prefers-reduced-motion:no-preference){#ytg-browse-grid .card-cover{transition:box-shadow var(--ytg-focus-duration) var(--ytg-focus-easing)}#ytg-browse-sidebar :is(a,button),#ytg-browse-categories button{transition:background var(--ytg-focus-duration) ease,color var(--ytg-focus-duration) ease}}
 @media(prefers-reduced-motion:reduce){#ytg-browse-sidebar .sidebar-chevron{transition:none}}
-#ytg-browse-top{padding-right:88px}
+
+/* Shared browse controls and card text. */
+
+#ytg-browse-top .client-account,#ytg-browse-grid #ytg-browse-categories button,#ytg-browse-grid [data-ytg-browse-grid] button{border-radius:var(--ytg-pill-radius)}
+#ytg-browse-sidebar :is(a,button):focus-visible,html.ytg-gamepad-input #ytg-browse-sidebar .ytg-selected,#ytg-browse-grid #ytg-browse-categories button:focus-visible,html.ytg-gamepad-input #ytg-browse-categories .ytg-selected button{background:var(--ytg-selected-background);color:var(--ytg-selected-text);box-shadow:var(--ytg-shadow-focus)}
+#ytg-browse-grid .card-copy{padding:0}
+#ytg-browse-grid strong{color:var(--ytg-text)}
+#ytg-browse-grid a[data-browse-id]:focus-visible strong{color:var(--ytg-text)}
+@media(hover:hover){
+  #ytg-browse-top .client-account:hover,#ytg-browse-grid #ytg-browse-categories button:hover,#ytg-browse-grid [data-ytg-browse-grid] button:hover{background:var(--ytg-selected-background);color:var(--ytg-selected-text);box-shadow:var(--ytg-shadow-focus)}
+  #ytg-browse-grid a[data-browse-id]:hover strong{color:var(--ytg-text)}
+}
+
+/* Dark surfaces share one hierarchy; the focus outline remains the strongest cue. */
+html[dark] #ytg-browse-grid{scrollbar-color:var(--ytg-border) transparent;color-scheme:dark}
+html[dark] #ytg-browse-top,html[dark] #ytg-browse-sidebar{border-color:color-mix(in srgb,var(--ytg-border) 60%,transparent)}
+html[dark] #ytg-browse-grid #ytg-browse-categories button[aria-pressed=true],html[dark] #ytg-browse-sidebar :is(a,button):focus-visible,html[dark].ytg-gamepad-input #ytg-browse-sidebar .ytg-selected,html[dark] #ytg-browse-grid #ytg-browse-categories button:focus-visible,html[dark].ytg-gamepad-input #ytg-browse-categories .ytg-selected button{background:var(--ytg-selected-background);color:var(--ytg-selected-text)}
+html[dark] #ytg-browse-grid .card-cover{box-shadow:inset 0 0 0 1px #ffffff0a}
+@media(hover:hover){
+  html[dark] #ytg-browse-top .client-account:hover,html[dark] #ytg-browse-grid #ytg-browse-categories button:hover,html[dark] #ytg-browse-grid [data-ytg-browse-grid] button:hover{background:var(--ytg-current-background);color:var(--ytg-text)}
+}
 
 /* Animate pixels inside a stable cover so focus measurements never change. */
 #ytg-browse-sidebar .sidebar-group{display:grid;grid-template-rows:1fr;opacity:1;visibility:visible}
@@ -90,3 +117,87 @@ html.ytg-gamepad-input #ytg-browse-grid a[data-browse-id].ytg-selected strong{co
 }
 @keyframes ytg-feed-pulse{50%{opacity:.55}}
 @media(max-width:700px){#ytg-browse-top{gap:8px}#ytg-browse-grid .ytg-search-leading{display:none}#ytg-browse-top .client-account{width:40px;height:40px;padding:8px}}
+
+/* Reserve the expanded rail's space for both the feed and category bar. */
+#ytg-browse-grid{left:var(--ytg-sidebar-drawer-width,var(--ytg-sidebar-width))}
+html:not([data-ytg-input-mode=mouse]) #ytg-browse-grid:has(#ytg-browse-sidebar:focus-within),
+html[data-ytg-input-mode=mouse] #ytg-browse-grid:has(#ytg-browse-sidebar:hover){
+  --ytg-sidebar-drawer-width:var(--ytg-sidebar-expanded-width);
+  --ytg-sidebar-label-display:block;
+  --ytg-sidebar-justify:flex-start;
+  --ytg-sidebar-gap:14px;
+  --ytg-sidebar-entry-padding:12px 16px;
+}
+@media(prefers-reduced-motion:no-preference){
+  #ytg-browse-grid{transition:left 180ms var(--ytg-motion-easing)}
+  #ytg-browse-sidebar{transition:width 180ms var(--ytg-motion-easing)}
+}
+
+/* Match YouTube's browse surfaces while retaining controller focus outlines. */
+#ytg-browse-grid{
+  --ytg-client-categories:56px;
+  --ytg-font-family:Roboto,Arial,sans-serif;
+  --ytg-font-body:14px;--ytg-font-action:16px;--ytg-weight-body:500;
+  --ytg-client-background:#fff;--ytg-client-surface:#fff;--ytg-client-active:#f2f2f2;
+  --ytg-background:#fff;--ytg-text:#0f0f0f;--ytg-muted:#606060;
+  --ytg-surface:#f2f2f2;--ytg-border:#ddd;
+  --ytg-current-background:#e5e5e5;--ytg-current-text:#0f0f0f;
+  --ytg-selected-background:#0f0f0f;--ytg-selected-text:#fff;
+  --ytg-button-radius:8px;--ytg-card-radius:12px;
+  --ytg-shadow-control:none;--ytg-shadow-focus:none;
+  top:var(--ytg-browse-top,112px);
+}
+html[dark] #ytg-browse-grid{
+  --ytg-client-background:#0f0f0f;--ytg-client-surface:#0f0f0f;--ytg-client-active:#272727;
+  --ytg-background:#0f0f0f;--ytg-text:#f1f1f1;--ytg-muted:#aaa;
+  --ytg-surface:#272727;--ytg-border:#3f3f3f;
+  --ytg-current-background:#3f3f3f;--ytg-current-text:#f1f1f1;
+  --ytg-selected-background:#f1f1f1;--ytg-selected-text:#0f0f0f;
+  --ytg-shadow-control:none;--ytg-shadow-focus:none;
+}
+#ytg-browse-top,#ytg-browse-sidebar{background:var(--ytg-client-surface);backdrop-filter:none;border:0}
+#ytg-browse-top{gap:24px;padding-inline:24px}
+#ytg-browse-top .client-brand{font-size:20px;letter-spacing:-1px}
+.client-brand svg{width:30px;height:22px}
+.client-brand small{font-size:10px;letter-spacing:.4px;font-weight:400}
+#ytg-client-search{max-width:640px}
+#ytg-browse-grid .ytg-search-field input{font-size:16px}
+#ytg-browse-grid .ytg-search-submit{width:64px}
+#ytg-browse-grid .ytg-search-entry{min-height:40px;border-radius:20px;font-size:16px;font-weight:400}
+#ytg-browse-sidebar{padding-top:16px;scroll-padding:16px}
+#ytg-browse-sidebar :is(a,button){width:calc(100% - 8px);min-height:48px;margin:6px 4px;padding-block:12px;padding-inline:var(--ytg-sidebar-compact-padding,8px);border:0;border-radius:10px;font-weight:400}
+html:not([data-ytg-input-mode=mouse]) #ytg-browse-grid:has(#ytg-browse-sidebar:focus-within),html[data-ytg-input-mode=mouse] #ytg-browse-grid:has(#ytg-browse-sidebar:hover){--ytg-sidebar-compact-padding:12px}
+#ytg-browse-sidebar [aria-current=page]{color:var(--ytg-text);font-weight:500}
+#ytg-browse-sidebar section{margin-top:20px;padding-top:16px}
+#ytg-browse-sidebar :is(a,button):focus-visible,html.ytg-gamepad-input #ytg-browse-sidebar .ytg-selected{background:var(--ytg-client-active);color:var(--ytg-text)}
+#ytg-browse-categories{height:var(--ytg-client-categories);padding-inline:24px;scroll-padding:24px}
+#ytg-browse-grid #ytg-browse-categories button{min-height:32px;padding:0 12px;border:0;border-radius:8px;background:var(--ytg-surface);color:var(--ytg-text);font-size:14px;font-weight:500;box-shadow:none;backdrop-filter:none}
+#ytg-browse-grid #ytg-browse-categories button[aria-pressed=true]{background:var(--ytg-text);color:var(--ytg-background)}
+#ytg-browse-grid [data-ytg-browse-grid]{padding:16px 24px 40px}
+#ytg-browse-grid .cards,#ytg-browse-grid .feed-skeletons{gap:40px 16px}
+#ytg-browse-grid strong{font-size:16px;font-weight:500;line-height:1.375;min-height:2.75em;max-height:2.75em;margin-top:12px}
+#ytg-browse-grid .channel{font-size:14px;line-height:20px;margin-top:4px}
+#ytg-browse-top .client-account,#ytg-browse-grid [data-ytg-browse-grid] button{background:var(--ytg-surface);border:0;box-shadow:none;backdrop-filter:none}
+@media(hover:hover){
+  #ytg-browse-top .client-account:hover,#ytg-browse-grid #ytg-browse-categories button:hover,#ytg-browse-grid [data-ytg-browse-grid] button:hover{background:var(--ytg-current-background);color:var(--ytg-text);box-shadow:none}
+  #ytg-browse-grid #ytg-browse-categories button[aria-pressed=true]:hover{background:var(--ytg-text);color:var(--ytg-background)}
+  html[data-ytg-input-mode=mouse] #ytg-browse-grid a[data-browse-id]:hover{background:var(--ytg-surface);box-shadow:0 0 0 8px var(--ytg-surface)}
+  html[data-ytg-input-mode=mouse] #ytg-browse-grid a[data-browse-id]:hover img{scale:1}
+}
+@media(hover:hover) and (prefers-reduced-motion:no-preference){
+  #ytg-browse-grid a[data-browse-id]{transition:background-color 120ms ease,box-shadow 120ms ease}
+}
+@media(max-width:700px){
+  #ytg-browse-top{gap:8px;padding-inline:16px}
+  #ytg-browse-grid [data-ytg-browse-grid]{padding:12px 16px 32px}
+  #ytg-browse-categories{padding-inline:16px}
+}
+
+/* The shared banner stays mounted while the feed switches to native YouTube. */
+:host([data-header-only]){height:56px;background:transparent;pointer-events:none}
+:host([data-header-only]) #ytg-browse-grid{left:0;top:0;bottom:auto;height:56px;background:transparent;pointer-events:none}
+:host([data-header-only]) #ytg-browse-top{pointer-events:auto}
+#ytg-browse-top .ytg-search-form{height:40px}
+#ytg-browse-top :is(.client-account,.ytg-search-voice){width:40px;height:40px;padding:8px}
+#ytg-browse-top .ytg-mode-switch{min-height:40px}
+:host([data-header-only]) :is(#ytg-browse-sidebar,#ytg-browse-categories,[data-ytg-browse-grid]){display:none!important}

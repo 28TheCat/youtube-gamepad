@@ -1,22 +1,33 @@
-import { createApp, nextTick, reactive } from 'vue';
+import { createApp, nextTick, reactive, watch } from 'vue';
+import { ui } from './ui-api';
 import type { Pinia } from 'pinia';
 import type { BrowseDependencies } from '../../types/ports';
-import { createYouTubeBrowseAdapter } from '../sites/youtube-browse';
+import type { BrowseSnapshot } from '../shared/browse-data';
 import { useBrowseStore } from '../app/browse-store';
 import BrowsePage from './BrowsePage.vue';
 import { createBrowseFeedController } from '../app/browse-feed-controller';
 import { readBrowseReturn, saveBrowseReturn } from '../app/browse-history';
-import { createNativeBrowsePager } from '../app/browse-native-pager';
 import css from './browse-grid.css?inline';
 import { createFeedClient } from '../bridge/feed-client';
 import { mountSearchBar } from '../search/mount-search-bar';
+import { browseHostId, pageActiveElement } from '../shared/page-dom';
+import themeCss from './theme.css?inline';
+import { mountBrowseMode } from './browse-mode';
+import { shortsQueueKey, shortsPlayerHref } from '../shared/shorts-route';
+import { isInnerTubeBrowseRoute } from '../shared/explore-pages';
+import modeCss from './browse-mode.css?inline';
+import accountCss from './account-page.css?inline';
+import playlistCss from './playlist-card.css?inline';
+import shortsCss from './shorts-card.css?inline';
+import { YTGamepadControllerStyle } from '../input/controller-style';
 
 import { videoGridDefaults, normalizeVideoGrid } from '../shared/video-grid';
 import type { ApplicationChannel } from '../../types/ports';
 
-export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen }: BrowseDependencies, channel?: ApplicationChannel) {
+export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, prepareVideo }: BrowseDependencies, channel?: ApplicationChannel) {
   const lifecycle = runtime.scope('browse-surface');
-  lifecycle.cleanup(mountSearchBar({ runtime, core }));
+  const browseMode = mountBrowseMode(runtime, core);
+  lifecycle.cleanup(browseMode.destroy);
   const gridSettings = reactive({ ...videoGridDefaults });
   function receive(data: import("../../types/ports").ApplicationMessage) {
     if (data?.source === 'yt-gamepad-settings' && data.values && typeof data.values === 'object')
@@ -24,90 +35,163 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen }: 
   }
   if (channel) lifecycle.cleanup(channel.subscribe(receive));
   else lifecycle.listen(window, 'message', e => { if (e.source === window && e.origin === location.origin) receive(e.data); });
-  const adapter = createYouTubeBrowseAdapter();
+  const independentFeed = () => isInnerTubeBrowseRoute(location.pathname + location.search);
   const store = useBrowseStore(pinia);
   const feed = createFeedClient();
   lifecycle.cleanup(feed.destroy);
   let returnView: ReturnType<typeof readBrowseReturn>;
-  let historyReturn = readBrowseReturn(history, location.pathname + location.search);
+  const returnViews = new Map<string, NonNullable<typeof returnView>>();
   const feedController = createBrowseFeedController({
     store, feed,
+    unavailable: () => browseMode.unavailable(),
     getRoute: () => location.pathname + location.search,
-    isVisible: () => !lifecycle.destroyed && !host.hidden,
+    isVisible: () => !lifecycle.destroyed && document.documentElement.classList.contains('ytg-browse'),
     isRestoring: () => core.restoring,
     restoreState: () => {
-      returnView = historyReturn;
-      historyReturn = undefined;
+      const route = location.pathname + location.search;
+      returnView = readBrowseReturn(history, route) || returnViews.get(route);
       return returnView;
     },
-    stopBatch,
-    changed: sync,
+    changed: publishFeed,
     loadingChanged: loading => { host.dataset.feedLoading = String(loading); },
     afterRender: () => nextTick(),
     canResetFocus: () => !sidebarHasFocus() && !categoryHasFocus() && !headerHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring,
     resetFocus: () => core.resetContentFocus()
   });
-  function resetFeed() {
-    feedController.reset();
-    if (document.documentElement.classList.contains('ytg-api-categories'))
+  function resetFeed(preserveView = false) {
+    feedController.reset(preserveView);
+    if (!preserveView && document.documentElement.classList.contains('ytg-api-categories'))
       document.documentElement.classList.remove('ytg-api-categories');
   }
   const host = document.createElement('div');
   host.id = 'ytg-browse-grid'; host.hidden = true;
-  const style = document.createElement('style'); style.textContent = css;
+  const shell = document.createElement('div');
+  shell.id = browseHostId; shell.hidden = true;
+  const shadow = shell.attachShadow({ mode: 'open' });
+  const style = document.createElement('style');
+  // Page-level mode/theme selectors must cross the boundary explicitly.
+  const insideShadow = (text: string) => text.replaceAll(':root', ':host').replace(/html((?:\.[\w-]+|\[[^\]]+\]|:not\([^)]*\))*)/g, ':host-context(html$1)');
+  style.textContent = `:host{all:initial;display:block;position:fixed;inset:0;width:100%;height:100dvh;min-width:0;z-index:2100;background:var(--ytg-client-background);font:var(--ytg-font-body)/var(--ytg-line-body) var(--ytg-font-family);color:var(--ytg-text)}:host([hidden]){display:none!important}*,*::before,*::after{box-sizing:border-box}button,input{font:inherit} ${insideShadow(themeCss)} ${insideShadow(css)} ${modeCss}`;
   const mount = document.createElement('div'); mount.style.height = '100%';
-  host.append(style, mount); document.documentElement.append(host);
-  let timer: number | undefined, pendingRoute = false, focusWanted = false;
-  let lastSignature = '', revision = 0;
-  const nativePager = createNativeBrowsePager({
-    read: adapter.read, loadMore: adapter.loadMore,
-    canLoad: () => !host.hidden && !pendingRoute && !lifecycle.destroyed,
-    now: Date.now,
-    timeout: (callback, delay) => lifecycle.timeout(callback, delay),
-    clearTimeout: id => lifecycle.clearTimeout(id)
-  });
-  function stopBatch() { nativePager.stop(); }
-  const sidebarHasFocus = () => Boolean(document.activeElement?.closest('#ytg-browse-sidebar') || core.current?.closest('#ytg-browse-sidebar'));
-  const categoryHasFocus = () => Boolean(document.activeElement?.closest('#ytg-browse-categories') || core.current?.closest('#ytg-browse-categories'));
-  const headerHasFocus = () => Boolean(document.activeElement?.closest('#ytg-browse-top') || core.current?.closest('#ytg-browse-top'));
+  style.textContent += accountCss + insideShadow(playlistCss) + insideShadow(shortsCss);
+  if (YTGamepadControllerStyle) {
+    style.textContent += YTGamepadControllerStyle.css;
+    lifecycle.cleanup(YTGamepadControllerStyle.register(shadow));
+  }
+  host.append(mount); shadow.append(style, host); document.documentElement.append(shell);
+  let retryTimer: number | undefined, pendingRoute = false, focusWanted = false;
+  let browseVisible = false, headerVisible = false, layoutPending = false;
+  let revision = 0;
+  let emptySnapshot: BrowseSnapshot = { route: '', items: [], canLoadMore: false };
+  let lastSnapshot: BrowseSnapshot | undefined;
+  const sidebarHasFocus = () => Boolean(pageActiveElement()?.closest('#ytg-browse-sidebar') || core.current?.closest('#ytg-browse-sidebar'));
+  const categoryHasFocus = () => Boolean(pageActiveElement()?.closest('#ytg-browse-categories') || core.current?.closest('#ytg-browse-categories'));
+  const headerHasFocus = () => Boolean(pageActiveElement()?.closest('#ytg-browse-top') || core.current?.closest('#ytg-browse-top'));
   const ownsFocus = () => !sidebarHasFocus() && !categoryHasFocus() && !headerHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring &&
-    (host.contains(document.activeElement) || focusWanted);
+    (host.contains(pageActiveElement()) || focusWanted);
   const more = () => {
     if (feedController.active) { void feedController.changeCategory(store.category, true); return; }
-    nativePager.more(store.snapshot);
   };
-  const app = createApp(BrowsePage, { gridSettings, ownsFocus, more, refreshNavigation: () => core.refresh(), changeCategory: (id: string) => { void feedController.changeCategory(id); }, open: (id: string) => {
-    if (!isMenuOpen() && !core.hasTemporaryLayer) {
+  const openSettings = () => {
+    if (ui.openPanel('settings')) return;
+    if (channel) channel.publish({ source: 'yt-gamepad-show-settings' });
+    else window.postMessage({ source: 'yt-gamepad-show-settings' }, location.origin);
+  };
+  for (const [id, selector] of [['search', '#ytg-client-search input'], ['content', '[data-browse-id]'],
+    ['categories', '#ytg-browse-categories [data-ytg-category]'], ['sidebar', '#ytg-browse-sidebar a']] as const) {
+    lifecycle.cleanup(ui.registerFocus(id, () => {
+      if (lifecycle.destroyed || pendingRoute || isMenuOpen() || core.hasTemporaryLayer || ui.state.openPanels.length) return false;
+      const target = host.querySelector<HTMLElement>(selector);
+      if (!target || !target.isConnected || !target.getClientRects().length) return false;
+      core.refresh(); core.focus(target); return pageActiveElement() === target;
+    }));
+  }
+  const app = createApp(BrowsePage, { browseMode, gridSettings, ownsFocus, more, openSettings, focusAccount: (node: HTMLElement) => core.focus(node), refreshNavigation: () => core.refresh(), changeCategory: (id: string) => { if (!pendingRoute) void feedController.changeCategory(id); }, open: (id: string) => {
+    if (!pendingRoute && !isMenuOpen() && !core.hasTemporaryLayer) {
       if (feedController.active) {
         const item = store.snapshot.items.find(item => item.id === id);
         if (item) {
+          if (item.id.startsWith('short:')) {
+            try {
+              sessionStorage.setItem(shortsQueueKey, JSON.stringify({
+                ids: store.snapshot.items.filter(card => card.id.startsWith('short:')).slice(0, 200).map(card => card.id.slice(6)),
+                returnTo: location.pathname + location.search
+              }));
+            } catch { /* Playback remains available without a saved queue. */ }
+          }
           store.select(id);
           const saved = feedController.captureReturnState(host.querySelector('[data-ytg-browse-grid]')?.scrollTop || 0);
-          if (saved) saveBrowseReturn(history, saved);
-          location.assign(item.href);
+          if (saved) { returnViews.set(saved.snapshot.route, saved); saveBrowseReturn(history, saved); }
+          // Shorts keep YouTube's native player and do not enter the watch takeover.
+          if (!item.id.startsWith('short:') && prepareVideo && !prepareVideo(item.href)) return;
+          if (!feed.openVideo(item.href)) location.assign(item.id.startsWith('short:') ? shortsPlayerHref(item.id.slice(6)) : item.href);
         }
-      } else adapter.open(id);
+      }
     }
   } });
   app.use(pinia); app.mount(mount);
+  lifecycle.cleanup(mountSearchBar({ runtime, core }, shadow));
+  // Observers outside a shadow root cannot see its mutations.
+  document.dispatchEvent(new Event('ytg-browse-mounted'));
   const headerSelector = '#ytg-browse-top';
   const measuredHeaders = new Set<HTMLElement>();
-  const headerResize = new ResizeObserver(() => schedule());
+  let awaitingRoute = '', awaitingSince = 0;
+  const headerResize = new ResizeObserver(scheduleLayout);
   lifecycle.cleanup(() => { headerResize.disconnect(); measuredHeaders.clear(); });
-  function sync() {
+  // Page classes only control visibility. Selection/theme class changes must
+  // not initialize the feed, measure its header or restore focus.
+  function syncVisibility() {
     if (lifecycle.destroyed) return;
     const enabled = document.documentElement.classList.contains('ytg-browse');
-    const started = enabled && host.hidden;
+    const root = document.documentElement;
+    const headerEnabled = root.classList.contains('ytg-theater') && !root.hasAttribute('data-ytg-native') &&
+      root.getAttribute('data-ytg-browse-mode') !== 'loading' &&
+      !root.classList.contains('ytg-watch-layout') && !root.classList.contains('ytg-player-pending') &&
+      !document.fullscreenElement && !location.pathname.startsWith('/shorts/');
+    const started = enabled && !browseVisible;
+    if (enabled === browseVisible && headerEnabled === headerVisible) return;
+    const stopped = !enabled && browseVisible;
+    browseVisible = enabled; headerVisible = headerEnabled;
     // Hide immediately at takeover, before any data or Vue nextTick readiness.
-    host.hidden = !enabled;
+    host.hidden = !headerEnabled;
+    shell.hidden = !headerEnabled;
+    shell.toggleAttribute('data-header-only', !enabled);
+    if (root.classList.contains('ytg-browse-header') !== headerEnabled)
+      root.classList.toggle('ytg-browse-header', headerEnabled);
     if (document.documentElement.classList.contains('ytg-custom-browse') !== enabled)
       document.documentElement.classList.toggle('ytg-custom-browse', enabled);
-    if (!enabled) { stopBatch(); resetFeed(); pendingRoute = false; focusWanted = false; return; }
-    if (!pendingRoute && feedController.initialize() && !document.documentElement.classList.contains('ytg-api-categories'))
-      document.documentElement.classList.add('ytg-api-categories');
-    let top = 80, mastheadBottom = 80;
-    host.dataset.feedLoading = String(store.loading);
-    const headers = new Set(document.querySelectorAll<HTMLElement>(headerSelector));
+    if (!enabled) {
+      awaitingRoute = ''; lifecycle.clearTimeout(retryTimer); retryTimer = undefined;
+      if (stopped) { ++revision; resetFeed(); }
+      pendingRoute = false; focusWanted = false; return;
+    }
+    // Keep the mounted list and category bar until the destination is known.
+    // Clearing them on navigate-start produces an empty frame on every click.
+    if (pendingRoute) return;
+    if (started) { initializeFeed(); publishFeed(true); }
+    scheduleLayout();
+  }
+  // Only route/visibility changes and a bounded late-session retry initialize
+  // data. A feed response publishes its snapshot without re-entering here.
+  function initializeFeed() {
+    if (lifecycle.destroyed || !browseVisible || pendingRoute) return;
+    lifecycle.clearTimeout(retryTimer); retryTimer = undefined;
+    if (feedController.initialize()) {
+      awaitingRoute = '';
+      if (!document.documentElement.classList.contains('ytg-api-categories')) document.documentElement.classList.add('ytg-api-categories');
+    } else if (independentFeed()) {
+      const route = location.pathname + location.search;
+      if (awaitingRoute !== route) { awaitingRoute = route; awaitingSince = Date.now(); }
+      if (Date.now() - awaitingSince >= 8000) { browseMode.unavailable(); return; }
+      // ytcfg can appear without a DOM mutation or a YouTube page event.
+      // Retry only while the visible API feed has not been initialized.
+      retryTimer = lifecycle.timeout(() => { retryTimer = undefined; initializeFeed(); publishFeed(); }, 100);
+    }
+  }
+  function measureLayout() {
+    if (lifecycle.destroyed || !browseVisible || !headerVisible || pendingRoute) return;
+    let top = 56, mastheadBottom = 56;
+    const headers = new Set(shadow.querySelectorAll<HTMLElement>(headerSelector));
     for (const bar of measuredHeaders) if (!headers.has(bar)) { headerResize.unobserve(bar); measuredHeaders.delete(bar); }
     for (const bar of headers) {
       if (!measuredHeaders.has(bar)) { measuredHeaders.add(bar); headerResize.observe(bar); }
@@ -120,70 +204,91 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen }: 
       }
     }
     // API categories sit above the grid even before the native chip bar mounts.
-    if (store.categories.length) top = Math.max(top, mastheadBottom + 64);
-    host.style.setProperty('--ytg-browse-top', `${top}px`);
-    const next = pendingRoute ? { route: location.pathname + location.search, items: [], canLoadMore: false } :
-      feedController.active && feedController.snapshot ? feedController.snapshot : adapter.read();
-    const signature = JSON.stringify(next);
-    if (signature === lastSignature && !started) return;
-    lastSignature = signature;
-    focusWanted = !sidebarHasFocus() && (host.contains(document.activeElement) || host.contains(core.current) ||
+    const categoryHeight = parseFloat(getComputedStyle(host).getPropertyValue('--ytg-client-categories')) || 56;
+    if (store.categories.length) top = Math.max(top, mastheadBottom + categoryHeight);
+    const value = `${top}px`;
+    if (host.style.getPropertyValue('--ytg-browse-top') !== value) host.style.setProperty('--ytg-browse-top', value);
+  }
+  function scheduleLayout() {
+    if (lifecycle.destroyed || !browseVisible || !headerVisible || layoutPending) return;
+    layoutPending = true;
+    lifecycle.frame(() => { layoutPending = false; measureLayout(); });
+  }
+  // List updates own rendering/navigation. Resize and page-class notifications
+  // never enter this path, so they cannot refocus the selected video.
+  function publishFeed(started = false) {
+    if (lifecycle.destroyed || !browseVisible || pendingRoute) return;
+    const route = location.pathname + location.search;
+    if (emptySnapshot.route !== route) emptySnapshot = { route, items: [], canLoadMore: false };
+    const next = feedController.snapshot || emptySnapshot;
+    if (next === lastSnapshot && !started) return;
+    lastSnapshot = next;
+    focusWanted = !sidebarHasFocus() && (host.contains(pageActiveElement()) || host.contains(core.current) ||
       (started && document.documentElement.classList.contains('ytg-gamepad-input') && !isMenuOpen()));
-    const firstItems = !store.snapshot.items.length && !!next.items.length;
     store.apply(next);
-    // Fill the initial browse view with up to three native continuation pages.
-    if (!feedController.active && (started || firstItems) && next.items.length > 0 && next.items.length < 60 && next.canLoadMore) more();
     const currentRevision = ++revision;
-    void nextTick().then(() => {
-      if (lifecycle.destroyed || host.hidden || currentRevision !== revision) return;
-      core.refresh();
-      if (returnView) {
-        const saved = returnView; returnView = undefined;
-        if (!sidebarHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring) {
-          const node = Array.from(host.querySelectorAll<HTMLAnchorElement>('[data-browse-id]'))
-            .find(item => item.dataset.browseId === saved.activeItemId);
-          if (node) core.focus(node);
-        }
-        const grid = host.querySelector('[data-ytg-browse-grid]');
-        if (grid) grid.scrollTop = saved.scrollTop;
-        focusWanted = false;
-        return;
+    void nextTick().then(() => restorePresentation(currentRevision));
+  }
+  async function restorePresentation(currentRevision: number) {
+    if (lifecycle.destroyed || !document.documentElement.classList.contains('ytg-browse') || currentRevision !== revision) return;
+    core.refresh();
+    if (returnView) {
+      const saved = returnView; returnView = undefined;
+      const grid = host.querySelector('[data-ytg-browse-grid]');
+      if (grid) {
+        const detail = { scrollTop: saved.scrollTop, ready: undefined as Promise<void> | undefined };
+        grid.dispatchEvent(new CustomEvent('ytg-browse-restore', { detail }));
+        if (detail.ready) await detail.ready; else grid.scrollTop = saved.scrollTop;
       }
-      if (ownsFocus()) {
+      if (lifecycle.destroyed || currentRevision !== revision) return;
+      if (!sidebarHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring) {
         const node = Array.from(host.querySelectorAll<HTMLAnchorElement>('[data-browse-id]'))
-          .find(item => item.dataset.browseId === store.activeItemId);
+          .find(item => item.dataset.browseId === saved.activeItemId);
         if (node) core.focus(node);
       }
       focusWanted = false;
-    });
-  }
-  function schedule() { lifecycle.clearTimeout(timer); timer = lifecycle.timeout(sync, 100); }
-  const source = lifecycle.observer(records => {
-    // Mode changes hide/reveal native cards in the observer turn, without debounce.
-    if (records.some(record => record.target === document.documentElement && record.type === 'attributes')) {
-      sync(); return;
+      return;
     }
-    if (records.some(record => !host.contains(record.target) &&
-      (record.target === document.documentElement || (record.target as Element).closest?.('ytd-page-manager,ytd-masthead,#masthead-container')))) schedule();
+    if (ownsFocus()) {
+      const node = Array.from(host.querySelectorAll<HTMLAnchorElement>('[data-browse-id]'))
+        .find(item => item.dataset.browseId === store.activeItemId);
+      if (node) core.focus(node);
+    }
+    focusWanted = false;
+  }
+  // Category presence changes the grid inset; card selection and pagination
+  // do not. Observe Vue state directly rather than rediscovering it from DOM.
+  lifecycle.cleanup(watch(() => store.categories.length > 0, scheduleLayout, { flush: 'post' }));
+  lifecycle.cleanup(watch(gridSettings, scheduleLayout, { deep: true, flush: 'post' }));
+  const source = lifecycle.observer(() => syncVisibility());
+  source.observe(document.documentElement,
+    { attributes: true, attributeFilter: ['class', 'data-ytg-native', 'data-ytg-browse-mode'] });
+  lifecycle.listen(document, 'yt-navigate-start', () => {
+    const saved = feedController.captureReturnState(host.querySelector('[data-ytg-browse-grid]')?.scrollTop || 0);
+    if (saved) {
+      returnViews.set(saved.snapshot.route, saved);
+      if (returnViews.size > 30) returnViews.delete(returnViews.keys().next().value!);
+    }
+    ++revision; pendingRoute = true;
+    lifecycle.clearTimeout(retryTimer); retryTimer = undefined;
+    resetFeed(true); syncVisibility();
   });
-  source.observe(document.documentElement, { childList: true, subtree: true, characterData: true,
-    attributes: true, attributeFilter: ['class', 'hidden', 'href', 'src', 'srcset', 'data-src', 'data-thumb', 'aria-hidden', 'data-ytg-native'] });
-  lifecycle.listen(document, 'yt-navigate-start', () => { stopBatch(); resetFeed(); pendingRoute = true; lastSignature = ''; sync(); });
-  lifecycle.listen(document, 'yt-navigate-finish', () => { pendingRoute = false; sync(); });
-  const restoreAfterInterruptedNavigation = () => { pendingRoute = false; sync(); };
-  lifecycle.listen(document, 'yt-navigate-cancel', restoreAfterInterruptedNavigation);
-  lifecycle.listen(document, 'yt-navigate-error', restoreAfterInterruptedNavigation);
-  lifecycle.listen(document, 'yt-page-data-updated', schedule);
-  lifecycle.listen(window, 'resize', schedule);
-  lifecycle.listen(document, 'fullscreenchange', schedule);
-  if (window.visualViewport) lifecycle.listen(window.visualViewport, 'resize', schedule);
-  lifecycle.listen(window, 'popstate', schedule);
+  const finishNavigation = () => {
+    if (pendingRoute || (feedController.snapshot && feedController.snapshot.route !== location.pathname + location.search)) resetFeed();
+    pendingRoute = false; syncVisibility(); initializeFeed(); publishFeed(); scheduleLayout();
+  };
+  lifecycle.listen(document, 'yt-navigate-finish', finishNavigation);
+  lifecycle.listen(document, 'yt-navigate-cancel', finishNavigation);
+  lifecycle.listen(document, 'yt-navigate-error', finishNavigation);
+  lifecycle.listen(window, 'resize', scheduleLayout);
+  lifecycle.listen(document, 'fullscreenchange', syncVisibility);
+  if (window.visualViewport) lifecycle.listen(window.visualViewport, 'resize', scheduleLayout);
+  lifecycle.listen(window, 'popstate', finishNavigation);
   lifecycle.cleanup(() => {
-    stopBatch();
     resetFeed();
     feedController.destroy();
-    app.unmount(); host.remove(); document.documentElement.classList.remove('ytg-custom-browse');
+    app.unmount(); shell.remove(); document.documentElement.classList.remove('ytg-custom-browse', 'ytg-browse-header');
   });
-  sync();
+  syncVisibility();
   return lifecycle.destroy;
 }

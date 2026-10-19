@@ -1,10 +1,11 @@
 import { videoGridDefaults, normalizeVideoGrid } from '../shared/video-grid';
+import { ui } from '../ui/ui-api';
 import type { Dispose, Settings } from '../../types/ports';
 import type { DisposerHost } from '../../types/core';
 import { YTGamepadBindings } from '../input/bindings.ts';
 import { YTGamepadInlineSettings } from '../settings/inline-settings.ts';
 import { applyLanguage, languageDefault } from '../shared/i18n';
-export function startContent(localChannel?: import("../../types/ports").ApplicationChannel, onInvalidated?: Dispose) {
+export function startContent(localChannel?: import("../../types/ports").ApplicationChannel, onInvalidated?: Dispose, onSettingsApplied?: Dispose) {
   const publish = (message: import("../../types/ports").ApplicationMessage) => {
     if (localChannel) localChannel.publish(message);
     else window.postMessage(message, location.origin);
@@ -61,7 +62,7 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
   function contextAvailable() {
     if (lifecycle.destroyed) return false;
     try {
-      if (chrome.runtime.id) return true;
+      if (chrome.runtime?.id && chrome.storage?.local) return true;
       failedExtensionCall(new Error('Extension context invalidated.'));
     } catch (error) { failedExtensionCall(error); }
     return false;
@@ -75,7 +76,9 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
       catch (other) { return Promise.reject(other); }
     }
   }
-  const defaults = { ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, deadzone: 0.35, repeatDelay: 350, repeatInterval: 140, bindings: {}, bindingLayouts: null };
+  const defaults = { playbackLayout: 'page' as const, ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, deadzone: 0.35, repeatDelay: 150, repeatInterval: 80, bindings: {}, bindingLayouts: null, shortcutLayouts: {} };
+  let appliedSettings: Settings | undefined;
+  let themeRevision = 0;
   // Production settings stay inside the isolated module graph.
   const send = (raw: Record<string,unknown>) => {
     if (lifecycle.destroyed) return;
@@ -86,15 +89,27 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
     for (const [key, min, max] of [['deadzone', .15, .75], ['repeatDelay', 150, 1000], ['repeatInterval', 80, 500]] as const) {
       if (typeof raw?.[key] === 'number' && Number.isFinite(raw[key])) values[key] = Math.min(max, Math.max(min, raw[key]));
     }
+    values.playbackLayout = raw?.playbackLayout === 'normal' || raw?.playbackLayout === 'wide' ? raw.playbackLayout : 'page';
     values.bindings = YTGamepadBindings.normalize(raw?.bindings);
     if (raw?.bindingLayouts) values.bindingLayouts = YTGamepadBindings.normalizeLayouts(raw.bindingLayouts, raw.bindings);
+    values.shortcutLayouts = YTGamepadBindings.normalizeShortcuts(raw?.shortcutLayouts);
+    appliedSettings = values;
     publish({ source: 'yt-gamepad-settings', values: { ...values, ...normalizeVideoGrid(raw) } });
+    onSettingsApplied?.();
   };
   let lastConnection: boolean;
   let seenConnection = false;
   let needsConnectionRetry = false;
   let connectionPending = false;
   let connectionRefresh = false;
+  function warnFullscreenFailure(error: unknown) {
+    if (lifecycle.destroyed) return;
+    const message = String((error as { message?: string })?.message || error);
+    // A lost reply is not an acknowledgement. Connection polling will retry;
+    // Escape still falls back to navigation when its reply is unavailable.
+    if (/^(?:A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received\.?|The message port closed before a response was received\.?|Could not establish connection\. Receiving end does not exist\.?)$/i.test(message)) return;
+    console.warn('YouTube Gamepad fullscreen:', message);
+  }
   const reportConnection = (force = false) => {
     if (!contextAvailable()) return;
     if (document.hidden) return;
@@ -110,7 +125,7 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
       if (lifecycle.destroyed) return;
       if (result?.ok === true && !result.retry) { lastConnection = connected; needsConnectionRetry = false; }
       else if (result?.ok === false) console.warn('YouTube Gamepad fullscreen:', result.error);
-    }).catch(error => console.warn('YouTube Gamepad fullscreen:', error.message)).finally(() => {
+    }).catch(warnFullscreenFailure).finally(() => {
       connectionPending = false;
       if (connectionRefresh && !lifecycle.destroyed) {
         connectionRefresh = false;
@@ -134,37 +149,68 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
     };
     extensionCall(() => chrome.runtime.sendMessage({ type: 'ytg-exit-fullscreen' })).then(result => {
       if (!result?.exited) back();
-    }).catch(error => { console.warn('YouTube Gamepad fullscreen:', error.message); back(); });
+    }).catch(error => { warnFullscreenFailure(error); back(); });
   });
   const readSettings = () => extensionCall(() => chrome.storage.local.get(defaults, send))
     .catch(error => console.warn('YouTube Gamepad settings:', error.message));
+  lifecycle.cleanup(ui.registerLayout({
+    read: () => appliedSettings?.playbackLayout || 'page',
+    async write(playbackLayout) {
+      if (!contextAvailable()) return false;
+      await extensionCall(() => chrome.storage.local.set({ playbackLayout }));
+      if (!contextAvailable()) return false;
+      const raw = await extensionCall(() => chrome.storage.local.get(defaults));
+      if (raw) send(raw);
+      return !lifecycle.destroyed && appliedSettings?.playbackLayout === playbackLayout;
+    }
+  }));
   void readSettings();
   if (lifecycle.destroyed) return lifecycle.destroy;
   // Only a bounded appearance value is persisted; page messages cannot write it.
   if (document.documentElement?.hasAttribute && chrome.runtime.onMessage?.addListener) {
     const readTheme = () => document.documentElement.hasAttribute('dark') ? 'dark' : 'light';
-    let rememberedTheme: string|undefined;
+    lifecycle.cleanup(ui.registerTheme({ read: readTheme, async write(uiTheme) {
+      if (!contextAvailable()) return false;
+      ++themeRevision;
+      await extensionCall(() => chrome.storage.local.set({ uiTheme }));
+      if (!contextAvailable()) return false;
+      document.documentElement.toggleAttribute('dark', uiTheme === 'dark');
+      return true;
+    } }));
+    let rememberedTheme: string|undefined, themeReady = false;
     const rememberTheme = () => {
-      if (document.hidden || lifecycle.destroyed) return;
+      if (document.hidden || lifecycle.destroyed || !themeReady) return;
       const theme = readTheme();
       if (theme === rememberedTheme) return;
       rememberedTheme = theme;
       extensionCall(() => chrome.storage.local.set({ uiTheme: theme })).catch(() => { rememberedTheme = undefined; });
     };
     const themeRequest = (message: { type: string; }, sender: chrome.runtime.MessageSender, respond: (arg0: { theme: string; }) => void) => {
-      if (message?.type !== 'ytg-read-theme' || lifecycle.destroyed || (sender.id && sender.id !== chrome.runtime.id)) return;
+      if (!contextAvailable() || message?.type !== 'ytg-read-theme' || !sender?.id || sender.id !== chrome.runtime?.id) return;
       respond({ theme: readTheme() });
     };
     chrome.runtime.onMessage.addListener(themeRequest);
-    lifecycle.cleanup(() => chrome.runtime.onMessage.removeListener?.(themeRequest));
+    lifecycle.cleanup(() => chrome.runtime?.onMessage?.removeListener?.(themeRequest));
     lifecycle.observer(rememberTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['dark'] });
     lifecycle.listen(document, 'visibilitychange', rememberTheme);
-    rememberTheme();
+    const revision = themeRevision;
+    void extensionCall(() => chrome.storage.local.get({ uiTheme: undefined }, saved => {
+      if (lifecycle.destroyed) return;
+      themeReady = true;
+      if (revision !== themeRevision) return;
+      if (saved.uiTheme === 'dark' || saved.uiTheme === 'light')
+        document.documentElement.toggleAttribute('dark', saved.uiTheme === 'dark');
+      rememberTheme();
+    })).catch(() => { themeReady = true; rememberTheme(); });
   }
   if (lifecycle.destroyed) return lifecycle.destroy;
   const onStorageChanged = (changes: Record<string,chrome.storage.StorageChange>, area: string) => {
     if (lifecycle.destroyed) return;
     if (area === 'local') {
+      if (changes.uiTheme && (changes.uiTheme.newValue === 'dark' || changes.uiTheme.newValue === 'light')) {
+        ++themeRevision;
+        document.documentElement.toggleAttribute('dark', changes.uiTheme.newValue === 'dark');
+      }
       if (changes.uiLanguage) applyLanguage(changes.uiLanguage.newValue);
       // UI language does not change input policy. Avoid reapplying disabled
       // controls, which would otherwise close an open search during translation.
@@ -174,7 +220,7 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
     }
   };
   chrome.storage.onChanged.addListener(onStorageChanged);
-  lifecycle.cleanup(() => chrome.storage.onChanged.removeListener?.(onStorageChanged));
+  lifecycle.cleanup(() => chrome.storage?.onChanged?.removeListener?.(onStorageChanged));
   let lastReady = -Infinity;
   let lastSettingsOpen = -Infinity;
   let disposeSettings: (() => void)|undefined;
@@ -182,17 +228,18 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
   lifecycle.cleanup(() => disposeSettings?.());
   let diagnosticWindow = 0, diagnosticCount = 0;
   const onExtensionMessage = (message: { type: string; }, sender: chrome.runtime.MessageSender, reply: (arg0: { ok?: boolean; controllerId?: string; connected?: boolean; }) => void) => {
-    if (sender.id === chrome.runtime.id && message?.type === 'ytg-open-inline-settings') {
+    if (!contextAvailable() || !sender?.id || sender.id !== chrome.runtime?.id) return;
+    if (message?.type === 'ytg-open-inline-settings') {
       publish({ source: 'yt-gamepad-show-settings' });
       reply({ ok: true }); return;
     }
-    if (sender.id !== chrome.runtime.id || message?.type !== 'ytg-connection-status') return;
+    if (message?.type !== 'ytg-connection-status') return;
     const pads = Array.from(navigator.getGamepads?.() || []).filter(p => p?.connected && p.mapping === 'standard').filter((p): p is Gamepad => p !== null);
     const pad = pads.find(p => p.buttons?.some(button => button.pressed) || p.axes?.some(axis => Math.abs(axis) > .35)) || pads[0];
     reply({ connected: Boolean(pad), ...(typeof pad?.id === 'string' ? { controllerId: pad.id.slice(0, 256) } : {}) });
   };
   chrome.runtime.onMessage.addListener(onExtensionMessage);
-  lifecycle.cleanup(() => chrome.runtime.onMessage.removeListener?.(onExtensionMessage));
+  lifecycle.cleanup(() => chrome.runtime?.onMessage?.removeListener?.(onExtensionMessage));
   const receive = (e: MessageEvent) => {
     // source/origin filter other windows, not hostile same-page scripts. The
     // Only bounded resends and opening the fixed settings page are accepted.

@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "pinia": "^4.0.3",
-    "vue": "^3.5.43"
+    "vue": "^3.5.43",
+    "youtubei.js": "18.1.0"
   }
 }

@@ -65,6 +65,19 @@ async function setup({ failLoad = false, invalidatedAt = '' } = {}) {
   };
 }
 
+test('inline playback layout saves, follows external changes and preserves values on write failure', async () => {
+  const s = await setup();
+  assert.equal(s.model.state.values.playbackLayout, 'page');
+  await s.model.setPlaybackLayout('wide');
+  assert.equal(s.saved.playbackLayout, 'wide');
+  s.change({ playbackLayout: 'normal' });
+  assert.equal(s.model.state.values.playbackLayout, 'normal');
+  s.failWrites();
+  await s.model.setPlaybackLayout('page');
+  assert.equal(s.model.state.values.playbackLayout, 'normal');
+  s.model.dispose();
+});
+
 test('failed inline saves leave values intact, announce failure and retain the active action', async () => {
   const s = await setup();
   s.model.open('display'); await flush();
@@ -98,9 +111,44 @@ test('external settings normalize bounded values without stealing focus from the
   s.change({ deadzone: 10, repeatDelay: 1, repeatInterval: NaN }); await flush();
   assert.equal(s.model.state.values.deadzone, .75);
   assert.equal(s.model.state.values.repeatDelay, 150);
-  assert.equal(s.model.state.values.repeatInterval, 140);
+  assert.equal(s.model.state.values.repeatInterval, 80);
   assert.equal(s.focused, 'general');
   assert.equal(s.writes.length, 0);
+  s.model.dispose();
+});
+
+test('button-first assignment swaps occupied actions, preserves the other layout and returns to the pad', async () => {
+  const s = await setup();
+  s.model.open('controller');
+  s.model.selectButton('A');
+  assert.equal(s.model.state.bindingKey, 'A');
+  s.model.assignAction('playPause'); await flush();
+  assert.equal(s.saved.bindingLayouts.browse.playPause, 0);
+  assert.equal(s.saved.bindingLayouts.browse.confirm, 2);
+  assert.equal(s.saved.bindingLayouts.watch.playPause, 2);
+  assert.equal(s.saved.bindings.playPause, 2);
+  s.model.back(); await flush();
+  assert.equal(s.model.state.bindingKey, '');
+  assert.equal(s.model.state.category, 'controller');
+  s.model.selectButton('Select');
+  s.model.assignAction('search'); await flush();
+  assert.equal(s.saved.bindingLayouts.browse.search, 8, 'unused buttons can receive actions');
+  s.model.dispose();
+});
+
+test('recorded shortcuts are scoped by layout, reject unsupported keys and clear on action assignment', async () => {
+  const s = await setup();
+  s.model.selectButton('X');
+  const key = (key, ctrlKey = false) => s.model.recordShortcut({ key, ctrlKey, preventDefault() {}, stopPropagation() {} });
+  key('m'); await flush();
+  assert.equal(s.saved.shortcutLayouts.browse.X, 'm');
+  assert.equal(Object.keys(s.saved.shortcutLayouts.watch).length, 0);
+  assert.match(s.model.summaryFor('X'), /^m · Mute/);
+  key('r', true); await flush();
+  assert.equal(s.saved.shortcutLayouts.browse.X, 'm');
+  assert.match(s.model.state.shortcutError, /supported/);
+  s.model.assignAction('playPause'); await flush();
+  assert.equal(s.saved.shortcutLayouts.browse.X, undefined);
   s.model.dispose();
 });
 

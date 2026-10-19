@@ -2,7 +2,6 @@ import type { ControllerStyle, KeyboardKey, PinyinCandidate } from '../../types/
 
 export interface SearchView {
   query: string;
-  nativeSearch: boolean;
   composing: string;
   chinese: boolean;
   choosingLanguage: boolean;

@@ -4,18 +4,15 @@ export type GridLayoutMode = "adaptive" | "oneColumn" | "twoColumns";
 export const videoGridDefaults = {
   gridLayout: "adaptive" as GridLayoutMode, gridAutoSwitch: true, gridSwitchWidth: 640,
   gridSingleCover: 40, gridDoubleCover: 50,
-  gridColumns0: 1, gridColumns640: 2, gridColumns768: 3,
-  gridColumns1024: 4, gridColumns1280: 4, gridColumns1536: 5
+  gridColumns0: 1, gridColumns600: 2, gridColumns900: 3, gridColumns1200: 4
 };
 export type VideoGridSettings = typeof videoGridDefaults;
 export type VideoGridKey = keyof VideoGridSettings;
 export const gridBreakpoints = [
-  { key: 'gridColumns0', width: 0, label: '< 640px' },
-  { key: 'gridColumns640', width: 640, label: '≥ 640px' },
-  { key: 'gridColumns768', width: 768, label: '≥ 768px' },
-  { key: 'gridColumns1024', width: 1024, label: '≥ 1024px' },
-  { key: 'gridColumns1280', width: 1280, label: '≥ 1280px' },
-  { key: 'gridColumns1536', width: 1536, label: '≥ 1536px' }
+  { key: 'gridColumns0', width: 0, label: '< 600px' },
+  { key: 'gridColumns600', width: 600, label: '600–899px' },
+  { key: 'gridColumns900', width: 900, label: '900–1199px' },
+  { key: 'gridColumns1200', width: 1200, label: '≥ 1200px' }
 ] as const;
 export function normalizeVideoGrid(raw: Record<string, unknown>): VideoGridSettings {
   const values = { ...videoGridDefaults };

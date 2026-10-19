@@ -106,10 +106,10 @@ export let YTGamepadStateMachine!: StateMachineModule;
           if (action === 'back') { watch = { ...watch, panel: '' }; effect('closePanel'); }
           else if (action === 'confirm') effect('panelClick');
           else if (action === 'up' || action === 'down') {
-            if (watch.panel !== 'comments' || event.scrollDelta) effect('panelScroll', event.scrollDelta || (action === 'up' ? -180 : 180));
+            if (watch.panel === 'description' || event.scrollDelta) effect('panelScroll', event.scrollDelta || (action === 'up' ? -180 : 180));
             else {
               watch = { ...watch, panelIndex: Math.max(0, Math.min(event.commentCount, watch.panelIndex + (action === 'up' ? -1 : 1))) };
-              if (!event.commentCount && action === 'down') effect('loadComments'); effect('focus');
+              if (!event.commentCount && action === 'down' && watch.panel === 'comments') effect('loadComments'); effect('focus');
             }
           } else disposition = 'blocked';
           break;

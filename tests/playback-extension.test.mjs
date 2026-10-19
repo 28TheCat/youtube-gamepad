@@ -17,13 +17,75 @@ const fixture = `<!doctype html><html><body><ytd-watch-flexy>
 <ytd-watch-next-secondary-results-renderer>${Array.from({length:6}, (_, i) => `<ytd-compact-video-renderer><a id="thumbnail" href="/watch?v=r${i}">Recommendation ${i}</a><span id="video-title">Recommendation ${i}</span></ytd-compact-video-renderer>`).join('')}</ytd-watch-next-secondary-results-renderer>
 </ytd-watch-flexy><script>
 ${mediaSource}
+window.ytcfg={get:key=>key==='INNERTUBE_CONTEXT'?{client:{clientVersion:'test'}}:undefined};
 document.querySelector('#movie_player').getPlayerResponse=()=>({videoDetails:{videoId:new URL(location.href).searchParams.get('v'),title:'Fixture video',author:'Fixture channel',isLive:false}});
 </script></body></html>`;
+
+const nextFixture = { contents: { twoColumnWatchNextResults: { secondaryResults: { secondaryResults: { results:
+  Array.from({length:6}, (_, i) => ({compactVideoRenderer:{videoId:`r${i}`,title:{simpleText:`Recommendation ${i}`}}}))
+} } } } };
+function nextOrPage(route, options) {
+  return route.request().url().includes('/youtubei/v1/next') ? route.fulfill({json:nextFixture}) : route.fulfill(options);
+}
+
+test('InnerTube recommendations and playlist queue work without native cards and retain queue navigation', { timeout: 60000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, language: 'en' }));
+  const body = fixture.replace(/<ytd-watch-next-secondary-results-renderer>[\s\S]*?<\/ytd-watch-next-secondary-results-renderer>/, '');
+  const calls = [];
+  const queue = { playlistId: 'PLtest', contents: [
+    { playlistPanelVideoRenderer: { videoId: 'fixture', title: { simpleText: 'Current' }, selected: true, navigationEndpoint: { watchEndpoint: { videoId: 'fixture', playlistId: 'PLtest', index: 0 } } } },
+    { playlistPanelVideoRenderer: { videoId: 'queued', title: { simpleText: 'Queued video' }, navigationEndpoint: { watchEndpoint: { videoId: 'queued', playlistId: 'PLtest', index: 1 } } } }
+  ] };
+  await context.route('https://www.youtube.com/**', async route => {
+    if (route.request().url().includes('/youtubei/v1/next')) {
+      calls.push(route.request().postDataJSON());
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return route.fulfill({ json: { contents: { twoColumnWatchNextResults: { ...nextFixture.contents.twoColumnWatchNextResults, playlist: { playlist: queue } } } } });
+    }
+    return route.fulfill({ contentType: 'text/html', body });
+  });
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/watch?v=fixture&list=PLtest&index=1');
+  const host = page.locator('#ytg-watch');
+  await host.locator('.card').first().waitFor({ state: 'attached' });
+  assert.equal(await page.locator('ytd-compact-video-renderer').count(), 0);
+  assert.equal(calls[0].videoId, 'fixture');
+  assert.equal(calls[0].playlistId, 'PLtest');
+  assert.equal(calls[0].index, 0);
+  assert.equal(await host.locator('.card').count(), 7);
+  const setPad = await virtualPad(context, page);
+  await page.bringToFront(); await setPad({ connected: true });
+  await page.waitForFunction(() => document.documentElement.classList.contains('ytg-theater'));
+  await setPad({ connected: true, button: 13 }); await page.waitForTimeout(200); await setPad({ connected: true });
+  const queued = host.locator('.card').filter({ hasText: 'Queued video' });
+  await queued.waitFor({ state: 'visible' });
+  assert.match(await queued.innerText(), /Playlists/);
+  await queued.click();
+  await page.waitForURL('**/watch?v=queued&list=PLtest&index=2');
+});
+
+test('saved playback layouts reach the real content bridge and restore native controls', { timeout: 60000 }, async t => {
+  const { context, worker, options } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, playbackLayout: 'wide' }));
+  const body = fixture.replace('<div id="movie_player">', '<div id="movie_player"><button class="ytp-size-button" onclick="this.closest(\'ytd-watch-flexy\').toggleAttribute(\'theater\')">Theater</button>');
+  await context.route('https://www.youtube.com/**', route => nextOrPage(route, { contentType: 'text/html', body }));
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/watch?v=fixture');
+  await page.waitForFunction(() => document.querySelector('ytd-watch-flexy')?.hasAttribute('theater'));
+  assert.equal(await page.evaluate(() => document.documentElement.classList.contains('ytg-watch-layout')), false);
+  await options.goto(options.url().split('#')[0] + '#display');
+  await options.locator('#playbackLayout').selectOption('page');
+  await page.waitForFunction(() => document.documentElement.classList.contains('ytg-watch-layout'));
+  await options.locator('#playbackLayout').selectOption('normal');
+  await page.waitForFunction(() => !document.documentElement.classList.contains('ytg-watch-layout') && !document.querySelector('ytd-watch-flexy').hasAttribute('theater'));
+  assert.equal(await page.locator('#ytg-watch').isVisible(), false);
+});
 
 test('held media previews and commits on release through real extension input', { timeout: 60000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, language: 'en', rightHandMode: false, repeatDelay: 350, repeatInterval: 140 }));
-  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: fixture,
+  await context.route('https://www.youtube.com/**', route => nextOrPage(route, { contentType: 'text/html', body: fixture,
     headers: { 'content-security-policy': "require-trusted-types-for 'script'; trusted-types 'none'" } }));
   const page = await context.newPage(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -77,6 +139,18 @@ test('held media previews and commits on release through real extension input', 
   assert.equal(await host.locator('.seek-target').count(), 0);
   await neutral(); assert.equal(await count(), 2);
 
+  // Volume buttons live in the quick menu, not the playback toolbar.
+  await page.locator('video').evaluate(video => { video.volume = .4; });
+  await command('help');
+  const menu = page.locator('#yt-gamepad-menu');
+  await menu.waitFor({ state: 'visible' });
+  await menu.getByRole('button', { name: 'Volume +', exact: true }).click();
+  await page.waitForFunction(() => Math.abs(document.querySelector('video').volume - .45) < 1e-9);
+  assert.equal(await menu.locator('#message').textContent(), 'Done');
+  await menu.getByRole('button', { name: 'Volume −', exact: true }).click();
+  await page.waitForFunction(() => Math.abs(document.querySelector('video').volume - .4) < 1e-9);
+  await command('back'); await menu.waitFor({ state: 'hidden' });
+
   await page.locator('video').evaluate(video => { video.volume = .5; });
   await setPad({ connected: true, button: 7 });
   await page.waitForFunction(() => document.querySelector('video').volume >= .65);
@@ -95,7 +169,7 @@ test('held media previews and commits on release through real extension input', 
 test('R3 temporary speed restores the saved rate on release, menu and disconnect', { timeout: 60000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, language: 'en' }));
-  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: fixture,
+  await context.route('https://www.youtube.com/**', route => nextOrPage(route, { contentType: 'text/html', body: fixture,
     headers: { 'content-security-policy': "require-trusted-types-for 'script'; trusted-types 'none'" } }));
   const page = await context.newPage();
   await page.goto('https://www.youtube.com/watch?v=fixture');
@@ -147,7 +221,7 @@ for (const trustedTypes of [false, true]) {
   test(`production Vue playback retains gamepad focus and native navigation (Trusted Types: ${trustedTypes})`, {timeout:60000}, async t => {
     const {context, worker} = await launchExtension(t);
     await worker.evaluate(() => chrome.storage.local.set({enabled:true,autoFullscreen:false}));
-    await context.route('https://www.youtube.com/**', route => route.fulfill({contentType:'text/html',body:fixture,
+    await context.route('https://www.youtube.com/**', route => nextOrPage(route, {contentType:'text/html',body:fixture,
       headers:trustedTypes ? {'content-security-policy':"require-trusted-types-for 'script'; trusted-types 'none'"} : {}}));
     const page=await context.newPage(), errors=[];
     page.on('pageerror', error=>errors.push(error.message));
@@ -169,6 +243,7 @@ for (const trustedTypes of [false, true]) {
     await cdp.detach();
     await setPad({connected:true}); await page.bringToFront();
     await page.waitForFunction(()=>document.documentElement.classList.contains('ytg-theater'));
+    await page.waitForFunction(()=>document.documentElement.dataset.ytgMode === 'playback');
     const press=async button=>{
       await setPad({connected:true}); await page.waitForTimeout(120);
       await setPad({connected:true,button}); await page.waitForTimeout(140);

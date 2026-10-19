@@ -197,7 +197,7 @@ test('quick menu edits settings inline with physical icons and hierarchical game
   }), [1, 0]);
   const icon = menu.locator('[data-setting="1"] [data-inline-key]');
   assert.equal(await icon.getAttribute('data-ytg-first-key'), 'B');
-  assert.match(await icon.evaluate(node => getComputedStyle(node).backgroundImage), /data:image\/svg\+xml;base64/);
+  assert.match(await icon.evaluate(node => (getComputedStyle(node, '::before').maskImage !== 'none' ? getComputedStyle(node, '::before').maskImage : getComputedStyle(node).backgroundImage)), /data:image\/svg\+xml;base64/);
   await page.screenshot({ path: 'output/playwright/inline-settings-buttons.png' });
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('yt-gamepad-action', { detail: { action: 'back' } })));
   await menu.locator('[data-setting="resetBindings"]').click();
@@ -235,19 +235,38 @@ test('virtual controller traverses both worlds: fullscreen, hidden tab, disconne
   await page.waitForFunction(() => window.__testConnected);
   const windowState = () => worker.evaluate(async () => (await chrome.windows.getAll())[0].state);
   await waitUntil(async () => (await windowState()) === 'fullscreen');
+  const sourceTab = await worker.evaluate(async () => Object.values((await chrome.storage.session.get('ytg-fullscreen-windows'))['ytg-fullscreen-windows'])[0].tabId);
   await pad({ connected: true, button: 15 });
   await page.waitForFunction(() => document.documentElement.dataset.ytgInputMode === 'gamepad');
+  // Headless Chromium keeps tabs visible. Supply the browser visibility signal
+  // in both manifest worlds, just as virtualPad supplies the physical controller.
+  const visibilitySession = await context.newCDPSession(page);
+  const visibilityWorlds = [];
+  visibilitySession.on('Runtime.executionContextCreated', ({ context: world }) => visibilityWorlds.push(world.id));
+  await visibilitySession.send('Runtime.enable');
+  for (const contextId of visibilityWorlds) await visibilitySession.send('Runtime.evaluate', { contextId, expression: `
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => document.documentElement.hasAttribute('data-test-hidden') });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => document.hidden ? 'hidden' : 'visible' });
+  ` });
+  const setHidden = hidden => page.evaluate(hidden => {
+    document.documentElement.toggleAttribute('data-test-hidden', hidden);
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);
   const other = await context.newPage();
   await other.goto('https://www.youtube.com/results?search_query=test');
   await ready(other);
   await other.bringToFront();
-  await page.waitForFunction(() => document.hidden);
-  const selected = await page.evaluate(() => document.querySelector('.ytg-selected a[href],a.ytg-selected[href]')?.getAttribute('href'));
+  await setHidden(true);
+  // Background tabs stop animation frames, so visibility checks need timer polling.
+  await page.waitForFunction(() => document.hidden, undefined, { polling: 100 });
+  const selected = await page.evaluate(() => window.__pageDOM.querySelector('.ytg-selected a[href],a.ytg-selected[href]')?.getAttribute('href'));
   await page.waitForTimeout(600); // exceeds repeat delay: a held input must stay stopped
-  assert.equal(await page.evaluate(() => document.querySelector('.ytg-selected a[href],a.ytg-selected[href]')?.getAttribute('href')), selected);
+  assert.equal(await page.evaluate(() => window.__pageDOM.querySelector('.ytg-selected a[href],a.ytg-selected[href]')?.getAttribute('href')), selected);
   assert.equal(await page.evaluate(() => document.documentElement.dataset.ytgInputMode), 'mouse');
   await pad({ connected: true });
+  await worker.evaluate(tabId => chrome.tabs.update(tabId, { active: true }), sourceTab);
   await page.bringToFront();
+  await setHidden(false);
   await page.waitForFunction(() => !document.hidden && document.hasFocus());
   await page.waitForTimeout(100); // allow neutral input to be sampled
   await pad({ connected: true, button: 14 });
@@ -255,6 +274,10 @@ test('virtual controller traverses both worlds: fullscreen, hidden tab, disconne
   await pad({ connected: false });
   await page.waitForFunction(() => !window.__testConnected && document.documentElement.dataset.ytgInputMode === 'mouse');
   await waitUntil(async () => (await windowState()) === 'normal');
+  // The UI sees disconnection before the extension's 500ms polling bridge.
+  // Wait for its acknowledgement before reconnecting, even if Chrome already
+  // left fullscreen while opening the other tab.
+  await waitUntil(() => worker.evaluate(async () => Object.keys((await chrome.storage.session.get('ytg-fullscreen-windows'))['ytg-fullscreen-windows'] || {}).length === 0));
   await pad({ connected: true });
   await waitUntil(async () => (await windowState()) === 'fullscreen');
   await options.locator('[data-category-link="general"]').click();

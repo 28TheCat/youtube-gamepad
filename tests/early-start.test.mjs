@@ -4,16 +4,22 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript-vue';
 
-function fixture(invalidated = false) {
+function fixture(invalidated = false, lateRoot = false, pathname = '/') {
   const attributes = new Map();
-  const root = { setAttribute: (k, v) => attributes.set(k, v), removeAttribute: k => attributes.delete(k), hasAttribute: k => attributes.has(k), append() { throw new Error('Unexpected late loading UI'); } };
+  const children = new Set();
+  const root = { setAttribute: (k, v) => attributes.set(k, v), removeAttribute: k => attributes.delete(k), hasAttribute: k => attributes.has(k), append(node) { children.add(node); } };
+  const document = { documentElement: lateRoot ? null : root, createElement() {
+    return { textContent: '', remove() { children.delete(this); } };
+  } };
   const window = new EventTarget();
-  let timeout, resolveStorage;
+  let timeout, resolveStorage, observed, frame;
   const exports = {};
   const source = ts.transpileModule(readFileSync(new URL('../src/app/early-start.ts', import.meta.url), 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
   }).outputText;
-  vm.runInNewContext(source, { exports, window, document: { documentElement: root }, matchMedia: () => ({ matches: true }),
+  vm.runInNewContext(source, { exports, window, document, location: { pathname }, matchMedia: () => ({ matches: true }),
+    MutationObserver: class { constructor(callback) { this.callback = callback; } observe() { observed = this.callback; } disconnect() { observed = undefined; } },
+    requestAnimationFrame: callback => { frame = callback; return 1; }, cancelAnimationFrame: () => { frame = undefined; },
     navigator: { getGamepads: () => [{ connected: true, mapping: 'standard' }] },
     chrome: { storage: { local: { get: () => {
       if (invalidated) throw new Error('Extension context invalidated.');
@@ -21,7 +27,9 @@ function fixture(invalidated = false) {
     } } } },
     setTimeout: callback => { timeout = callback; return 1; }, clearTimeout: () => { timeout = undefined; } });
   exports.startEarly();
-  return { attributes, window, exports, expire: () => timeout?.(), resolve: value => resolveStorage(value) };
+  return { attributes, window, exports, children, paint: () => frame?.(),
+    attachRoot() { document.documentElement = root; observed?.(); },
+    expire: () => timeout?.(), resolve: value => resolveStorage(value) };
 }
 
 test('early startup settles privately after application readiness and preserves native theme', () => {
@@ -32,7 +40,10 @@ test('early startup settles privately after application readiness and preserves 
   f.window.dispatchEvent(new Event('ytg-main-failed'));
   assert.equal(f.attributes.has('data-ytg-boot'), true);
   f.exports.finishEarlyContent();
+  assert.equal(f.children.size, 1, 'keep native page hidden until queued view updates finish');
+  f.paint();
   assert.equal(f.attributes.size, 0);
+  assert.equal(f.children.size, 0);
 });
 
 test('timeout clears preparation and late storage cannot recreate UI', async () => {
@@ -41,6 +52,36 @@ test('timeout clears preparation and late storage cannot recreate UI', async () 
   f.resolve({ uiTheme: 'light' });
   await Promise.resolve();
   assert.equal(f.attributes.size, 0);
+  assert.equal(f.children.size, 0);
+});
+
+test('guard attaches when html arrives and hides body without changing layout', () => {
+  const f = fixture(false, true);
+  assert.equal(f.children.size, 0);
+  f.attachRoot();
+  assert.equal(f.attributes.get('data-ytg-boot'), 'starting');
+  const [style] = f.children;
+  assert.match(style.textContent, /html > body.*opacity: 0 !important/);
+  assert.match(style.textContent, /pointer-events: none !important/);
+  f.exports.abortEarlyContent();
+  assert.equal(f.children.size, 0);
+});
+
+test('disabled extension reveals native page immediately', async () => {
+  const f = fixture();
+  f.resolve({ enabled: false });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.children.size, 0);
+  assert.equal(f.attributes.size, 0);
+});
+
+for (const pathname of ['/watch', '/shorts/first']) test(`startup on ${pathname} never hides or blocks native playback`, () => {
+  const f = fixture(false, false, pathname);
+  const [style] = f.children;
+  assert.equal(f.attributes.get('data-ytg-boot'), 'starting');
+  assert.equal(style.textContent, '', 'slow storage or application mounting cannot blank the video');
+  f.exports.abortEarlyContent();
+  assert.equal(f.children.size, 0);
 });
 
 test('startup failure and page exit clear markers', () => {

@@ -40,7 +40,7 @@ onMounted(() => {
 });
 onUnmounted(() => {
   stopped = true; clearInterval(interval);
-  chrome.storage.onChanged.removeListener(settings.changed); settings.dispose();
+  chrome.storage?.onChanged?.removeListener?.(settings.changed); settings.dispose();
 });
 </script>
 

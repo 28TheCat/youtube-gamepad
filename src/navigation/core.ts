@@ -1,4 +1,5 @@
-import type { Action, CoreDependencies, CoreModule, Direction, ModuleFactory } from '../../types/ports';
+import { pageShadowRoots, pageActiveElement, pageQueryAll } from '../shared/page-dom';
+import type { Action, CoreDependencies, CoreModule, Direction, ModuleFactory, MeasuredItem } from '../../types/ports';
 
 import type { NavigationConfig, NavigationRoot, NavigationMemory, BrowseRestore, OverlayView, NavigationReads } from '../../types/core';
 export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTGamepad: CoreModule | undefined;
@@ -7,12 +8,13 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     /** @param {import('../../types/ports.js').CoreDependencies} dependencies */
     create({ runtime, navigation, focusManager, interaction, controllerStyle, mountOverlay }: import('../../types/ports.js').CoreDependencies) {
   const lifecycle = runtime.scope('core');
-  let config: NavigationConfig = {}, current: HTMLElement | null = null, enabled = true, helpVisible = false, observer: MutationObserver | undefined, navigating = false;
+  let config: NavigationConfig = {}, current: HTMLElement | null = null, enabled = true, helpVisible = false, observer: MutationObserver | undefined, browseObserver: MutationObserver | undefined, navigating = false;
   let activeScope: NavigationRoot = document, route = location.pathname + location.search, restoring = false;
   const memories: Map<string, NavigationMemory> = new Map();
   let restoreTimer: number|undefined, restoreDeadline = 0, browseRestore: BrowseRestore = {};
   let contentReturn: {route:string;el:HTMLElement;key?:string|Element} | null = null, adjustingTarget: HTMLElement | null = null;
   let controllerCardFocus: HTMLElement | null = null;
+  const indexedGrid = (el: HTMLElement | null | undefined) => el?.dataset?.browseId ? el.closest<HTMLElement>('[data-ytg-indexed-feed]') : null;
   function endAdjustment() { adjustingTarget?.classList?.remove('ytg-adjusting'); adjustingTarget = null; }
   const rowFocus = navigation?.createRowFocus?.();
   function returnToContent(list: HTMLElement[]) {
@@ -22,8 +24,39 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
   }
   const scopeLayers: NavigationRoot[] = [];
   const scopeViews: Map<NavigationRoot, OverlayView[]> = new Map();
+  type TargetIdentity = { key: string | Element | undefined; section: string; occurrence: number };
+  type TargetIndex = { list: import('../../types/core').InteractiveElement[];
+    identities: Map<HTMLElement, TargetIdentity>; positions: Map<HTMLElement, number>;
+    keys: Map<string, (string | Element | undefined)[]> };
+  const targetIndexes = new Map<NavigationRoot, TargetIndex>();
+  const overlayKeys = new Map<NavigationRoot, string | null | undefined>();
+  let measurements = new WeakMap<HTMLElement[], MeasuredItem[]>();
+  function invalidateGeometry() {
+    measurements = new WeakMap();
+    if (reads) { reads.rects = new WeakMap(); reads.styles = new WeakMap(); }
+  }
+  function invalidateTargets() {
+    targetIndexes.clear(); overlayKeys.clear(); invalidateGeometry();
+    if (reads) { reads.candidates.clear(); reads.scope = null; }
+  }
+  function relevantMutation(record: MutationRecord) {
+    if (host.contains(record.target) || (record.target as HTMLElement).closest?.('#ytg-watch,#yt-gamepad-menu') || config.ignoreMutation?.(record)) return false;
+    if (record.type === 'attributes' && record.attributeName === 'class') {
+      const strip = (value: string) => value.replace(/\bytg-(?:selected|adjusting)\b/g, '').trim();
+      if (strip(record.oldValue || '') === strip((record.target as HTMLElement).getAttribute('class') || '')) return false;
+    }
+    return true;
+  }
+  // An action may run before MutationObserver's microtask. Drain pending
+  // changes first so cached references never authorize a removed/hidden item.
+  function consumeMutations() {
+    const records = [...(observer?.takeRecords?.() || []), ...(browseObserver?.takeRecords?.() || [])];
+    if (records.some(record => record.type === 'childList' && record.target === document.body)) observeNativeNavigation();
+    if (records.some(relevantMutation)) invalidateTargets();
+  }
   function syncView(root: NavigationRoot) {
-    const key = config.getOverlayView?.(root);
+    if (!overlayKeys.has(root)) overlayKeys.set(root, config.getOverlayView?.(root));
+    const key = overlayKeys.get(root);
     if (!key) return;
     const views: OverlayView[] = scopeViews.get(root) || [];
     if (views.at(-1)?.key === key) return;
@@ -36,10 +69,12 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     const target = saved && (list.find((el) => config.getKey?.(el) === saved.itemKey) || list[saved.index ?? 0]);
     if (!config.getPriorityLayer?.()) select(target || list[0], false);
   }
-  // DOM reads live only for one synchronous action; no stale cross-frame cache.
+  // Selection paint uses fresh reads. Candidate membership and geometry are
+  // indexed until a structure/layout notification invalidates them.
   let reads: NavigationReads | null = null;
   function withReads<T>(fn: () => T): T {
     if (reads) return fn();
+    consumeMutations();
     reads = { rects: new WeakMap(), styles: new WeakMap(), candidates: new Map() };
     try { return fn(); } finally { reads = null; }
   }
@@ -62,7 +97,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
   const style = document.createElement('style');
   style.textContent = `
     #ring{position:fixed;left:0;top:0;border:var(--ytg-focus-width,3px) solid var(--ytg-focus-color,#f1f1f1);border-radius:var(--ytg-card-radius,14px);box-sizing:border-box;display:none}
-    /* Finish before the default 140ms held-direction repeat. Scroll updates snap. */
+    /* Focus animation can retarget during held-direction repeats. Scroll updates snap. */
     @media(prefers-reduced-motion:no-preference){#ring{transition:transform var(--ytg-focus-duration,120ms) var(--ytg-focus-easing,cubic-bezier(.26,.86,.44,.985)),width var(--ytg-focus-duration,120ms) var(--ytg-focus-easing,cubic-bezier(.26,.86,.44,.985)),height var(--ytg-focus-duration,120ms) var(--ytg-focus-easing,cubic-bezier(.26,.86,.44,.985))}}
     #help{position:fixed;bottom:var(--ytg-space-6);left:var(--ytg-space-6);background:var(--ytg-overlay-panel);color:var(--ytg-overlay-text);padding:var(--ytg-space-4) var(--ytg-space-5);border-radius:var(--ytg-button-radius);font:var(--ytg-font-small)/1.8 var(--ytg-font-family);display:none;max-width:360px}
   `;
@@ -88,25 +123,68 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
   function scope() {
     if (reads?.scope) return reads.scope;
     // A dialog owns input from the start of its fade-in, before it becomes opaque.
-    const result = Array.from(document.querySelectorAll<HTMLElement>(config.overlays || '[role="dialog"]')).filter(el => visible(el, true)).at(-1) || document;
+    const result = pageQueryAll<HTMLElement>(config.overlays || '[role="dialog"]').filter(el => visible(el, true)).at(-1) || document;
     if (reads) reads.scope = result;
     return result;
   }
+  function scopeContains(element: HTMLElement) {
+    const root = scope();
+    return root.contains(element) || (root === document && pageShadowRoots().some(shadow => shadow.contains(element)));
+  }
   function candidates(root = scope()) {
     if (reads?.candidates.has(root)) return reads.candidates.get(root)!;
-    const list = Array.from(root.querySelectorAll<HTMLInputElement>(root === document ? (config.selectors || 'a[href],button,input,[role="button"]') : (config.overlayItems || 'a[href],button,input,[role="button"],[role="menuitem"],tp-yt-paper-item'))).filter(el => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true' && !el.closest<HTMLElement>('#yt-gamepad-overlay'));
+    const indexed = targetIndexes.get(root);
+    if (indexed) { reads?.candidates.set(root, indexed.list); return indexed.list; }
+    const selectors = config.selectors || 'a[href],button,input,[role="button"]';
+    const browse = root === document && document.documentElement.classList.contains('ytg-custom-browse') ?
+      document.getElementById?.('ytg-browse-root')?.shadowRoot : null;
+    // Hidden native cards are neither queried nor measured in custom browse mode.
+    const nodes = root !== document ? Array.from(root.querySelectorAll<HTMLInputElement>(config.overlayItems || 'a[href],button,input,[role="button"],[role="menuitem"],tp-yt-paper-item')) :
+      browse ? Array.from(browse.querySelectorAll<HTMLInputElement>(selectors)) : pageQueryAll<HTMLInputElement>(selectors);
+    const list = nodes.filter(el => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true' && !el.closest<HTMLElement>('#yt-gamepad-overlay'));
     const result = config.filterCandidates?.(list) || list;
+    const identities = new Map<HTMLElement, TargetIdentity>(), positions = new Map<HTMLElement, number>();
+    const keys = new Map<string, (string | Element | undefined)[]>(), occurrences = new Map<string, Map<string | Element | undefined, number>>();
+    for (const [position, el] of result.entries()) {
+      const section = config.getSection?.(el) || 'content', key = config.getKey?.(el);
+      if (!keys.has(section)) { keys.set(section, []); occurrences.set(section, new Map()); }
+      const counts = occurrences.get(section)!, occurrence = counts.get(key) || 0;
+      counts.set(key, occurrence + 1); keys.get(section)!.push(key);
+      identities.set(el, { key, section, occurrence }); positions.set(el, position);
+    }
+    targetIndexes.set(root, { list: result, identities, positions, keys });
     reads?.candidates.set(root, result);
     return result;
   }
   function remember() {
     if (!current || !current.isConnected || activeScope !== document || restoring || navigating || route !== location.pathname + location.search) return;
-    const region = candidates().filter((el) => config.getSection?.(el) === config.getSection?.(current));
-    const peers = region.filter((el) => config.getKey?.(el) === config.getKey?.(current));
-    memories.set(route, { key: config.getKey?.(current), occurrence: peers.indexOf(current), section: config.getSection?.(current), x: scrollX, y: scrollY,
-      keys: region.map((el) => config.getKey?.(el)),
+    // The Vue feed owns order and selection. Saving its current identity must
+    // not enumerate or measure every mounted card on each focus/scroll event.
+    if (indexedGrid(current)) {
+      const key = config.getKey?.(current);
+      memories.set(route, { key, occurrence: 0, section: 'content', x: scrollX, y: scrollY,
+        keys: key ? [key] : [], browse: config.captureBrowseState?.() });
+      if (memories.size > 30) memories.delete(memories.keys().next().value!);
+      return;
+    }
+    candidates();
+    const index = targetIndexes.get(document), identity = index?.identities.get(current);
+    if (!identity) return;
+    memories.set(route, { ...identity, x: scrollX, y: scrollY,
+      keys: index!.keys.get(identity.section) || [],
       browse: config.captureBrowseState?.() });
     if (memories.size > 30) memories.delete(memories.keys().next().value!);
+  }
+  function rememberScroll(event: Event) {
+    if (!enabled || !current?.isConnected || activeScope !== document || restoring || navigating || route !== location.pathname + location.search) return;
+    const saved = memories.get(route);
+    if (!saved) return;
+    // Selection changes already saved identity/order. Scrolling only changes
+    // offsets; never rediscover or measure every candidate in this hot path.
+    saved.x = scrollX; saved.y = scrollY;
+    const target = event.target as HTMLElement | null;
+    if (saved.browse && target?.matches?.('[data-ytg-browse-grid]'))
+      saved.browse.gridScroll = target.scrollTop;
   }
   function initial(list: HTMLElement[]) {
     const saved = memories.get(route);
@@ -184,7 +262,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
         update(); return;
       }
     }
-    if (!config.getPriorityLayer?.() && !(activeScope === document && config.isFocusOwned?.()) && current && (!visible(current) || !scope().contains(current))) {
+    if (!config.getPriorityLayer?.() && !(activeScope === document && config.isFocusOwned?.()) && current && (!visible(current) || !scopeContains(current))) {
       // Repair within the selected region before falling back to the page.
       // The previous order survives DOM replacement and removed cards.
       const list = candidates(), saved = memories.get(route);
@@ -209,7 +287,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
   }
   function update(animate = false) {
     if (!overlay) ring.style.transition = animate ? '' : 'none';
-    if (!enabled || config.shouldShowSelection?.({ scope: activeScope }) === false || config.getPriorityLayer?.() || !current || config.ownsSelectionPaint?.(current) || !current || !visible(current) || !scope().contains(current)) { if (overlay) overlay.update({ visible: false }); else ring.style.display = 'none'; return; }
+    if (!enabled || config.shouldShowSelection?.({ scope: activeScope }) === false || config.getPriorityLayer?.() || !current || config.ownsSelectionPaint?.(current) || !visible(current) || !scopeContains(current)) { if (overlay) overlay.update({ visible: false }); else ring.style.display = 'none'; return; }
     const target = config.getSelectionTarget?.(current) || config.getContainer?.(current) || current;
     if (!overlay) ring.style.borderColor = adjustingTarget === current ? 'var(--ytg-adjusting-color,#fbbf24)' : '';
     if (!overlay) ring.style.borderRadius = config.getSelectionRadius?.(current) || 'var(--ytg-card-radius, 14px)';
@@ -219,23 +297,54 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     else Object.assign(ring.style, { display: 'block', transform: `translate3d(${r.left - inset}px,${r.top - inset}px,0)`, width: `${r.width + inset * 2}px`, height: `${r.height + inset * 2}px` });
   }
   function measure(list: HTMLElement[]) {
-    return list.map((el) => {
+    const cached = measurements.get(list);
+    if (cached) return cached;
+    const items = list.map((el) => {
       const section = activeScope === document ? (config.getSection?.(el) || 'content') : 'overlay';
       return { el, section,
         key: config.sections?.[section]?.retainRowFocus ? (config.getKey?.(el) || el) : el,
         row: activeScope === document ? config.getRow?.(el) : null,
         rect: rect(config.getContainer?.(el) || el) };
     });
+    measurements.set(list, items);
+    return items;
   }
   function alignSelection(el: HTMLElement) {
-    if (el.closest('[data-ytg-browse-grid]')) {
-      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
-      if (reads) reads.rects = new WeakMap();
+    const grid = el.closest<HTMLElement>('[data-ytg-browse-grid]');
+    if (grid) {
+      if (indexedGrid(el)) {
+        // Logical neighbours are already resolved by ID. Only the destination
+        // and viewport need measuring to reveal the full card/shelf.
+        const target = rect(el.closest<HTMLElement>('.shorts-shelf') || el);
+        const bounds = rect(grid), style = computed(grid);
+        const top = bounds.top + (parseFloat(style.scrollPaddingTop) || 0);
+        const bottom = bounds.bottom - (parseFloat(style.scrollPaddingBottom) || 0);
+        const delta = target.top < top ? target.top - top : target.bottom > bottom ? target.bottom - bottom : 0;
+        if (Math.abs(delta) <= 1) return false;
+        const behavior = window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches ? 'smooth' : 'instant';
+        grid.scrollTo({ top: Math.max(0, grid.scrollTop + delta), behavior });
+        invalidateGeometry();
+        return true;
+      }
+      const items = measure(candidates().filter(item => item.closest('[data-ytg-browse-grid]') === grid));
+      const from = items.find(item => item.el === el);
+      if (!from) return false;
+      const bounds = rect(grid), style = computed(grid);
+      const top = parseFloat(style.scrollPaddingTop) || 0, bottom = parseFloat(style.scrollPaddingBottom) || 0;
+      const delta = navigation.rowScroll(from, items, { top: bounds.top + top, bottom: bounds.bottom - bottom });
+      // Reveal the entire row, including its title and channel, at a row boundary.
+      if (Math.abs(delta) <= 1) return false;
+      const behavior = window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches ? 'smooth' : 'instant';
+      grid.scrollTo({ top: Math.max(0, grid.scrollTop + delta), behavior });
+      invalidateGeometry();
       return true;
     }
     const section = config.getSection?.(el) || 'content';
     if (activeScope !== document || config.sections?.[section]?.layout !== 'grid' || config.sections?.[section]?.alignRows === false) {
+      const before = rect(el);
       el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      const after = el.getBoundingClientRect();
+      if (before.top !== after.top || before.left !== after.left) invalidateGeometry();
       if (reads) reads.rects = new WeakMap();
       return true;
     }
@@ -244,8 +353,10 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     const viewport = config.getViewport?.() || { top: 16, bottom: innerHeight - 16 };
     const delta = navigation.rowScroll(from, items, viewport);
     if (Math.abs(delta) > 1) {
-      window.scrollTo({ left: scrollX, top: Math.max(0, scrollY + delta), behavior: 'instant' });
-      if (reads) reads.rects = new WeakMap();
+      const top = Math.max(0, scrollY + delta);
+      if (top === scrollY) return false;
+      window.scrollTo({ left: scrollX, top, behavior: 'instant' });
+      invalidateGeometry();
       return true;
     }
     return false;
@@ -257,8 +368,8 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     (config.getContainer?.(current) || current)?.classList?.remove('ytg-selected');
     current = el || null;
     const view = scopeViews.get(activeScope)?.at(-1);
-    if (view && current) { view.itemKey = config.getKey?.(current); view.index = candidates(activeScope).indexOf(current); }
-    if (rowFocus && current && activeScope === document && config.sections?.[config.getSection?.(current) || 'content']?.retainRowFocus) {
+    if (view && current) { candidates(activeScope); view.itemKey = config.getKey?.(current); view.index = targetIndexes.get(activeScope)?.positions.get(current); }
+    if (rowFocus && current && !indexedGrid(current) && activeScope === document && config.sections?.[config.getSection?.(current) || 'content']?.retainRowFocus) {
       const items = measure(candidates()), item = items.find((entry) => entry.el === current);
       if (item) rowFocus.remember(item, items, keepColumn);
     }
@@ -272,7 +383,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     const container = config.getContainer?.(el);
     controllerCardFocus = activeScope === document && el && container && container !== el &&
       document.documentElement.classList.contains('ytg-gamepad-input') &&
-      document.activeElement === el ? el : null;
+      pageActiveElement() === el ? el : null;
     // Re-read the selected target after class/focus writes, not the whole list.
     if (current) {
       reads.rects.delete(current);
@@ -286,6 +397,10 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     if (!reads) return withReads(() => navigate(direction));
     syncScope();
     restoring = false;
+    // Browse shelves also own horizontal scrolling and logical neighbours.
+    if (activeScope === document && current?.closest?.('[data-ytg-browse-grid]') &&
+      !current.dispatchEvent(new CustomEvent('ytg-browse-direction', { bubbles: true, composed: true, cancelable: true,
+        detail: { direction, focus: (node: HTMLElement) => select(node, true, true) } }))) return;
     const list = candidates();
     if (!current || !list.includes(current)) {
       select(initial(list));
@@ -295,6 +410,17 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     const from = items.find((item) => item.el === current);
     if (!from) return;
     let best = navigation.choose(from, items, direction, activeScope === document ? config.sections : { overlay: {} }, rowFocus);
+    // Returning from the first video row must preserve the active feed category.
+    // Geometric proximity can otherwise focus (and activate) a different chip.
+    if (activeScope === document && from.section === 'content' && direction === 'up' && best?.section === 'categories') {
+      best = items.find((item) => {
+        if (item.section !== 'categories') return false;
+        const chip = item.el.closest<HTMLElement>('[data-ytg-category]') || item.el;
+        return chip.getAttribute('selected') === '' || chip.getAttribute('selected') === 'true' ||
+          chip.getAttribute('aria-selected') === 'true' || chip.getAttribute('aria-pressed') === 'true' ||
+          Boolean(chip.querySelector?.('[aria-selected="true"],[aria-pressed="true"],.ytChipShapeActive'));
+      }) || best;
+    }
     if (activeScope === document && config.rememberRegionReturn?.() &&
       ((from.section === 'sidebar' && direction === 'right') ||
        (['header', 'searchEntry', 'categories'].includes(from.section) && direction === 'down') ||
@@ -302,13 +428,24 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
       const saved = returnToContent(list);
       if (saved && (!best || best.section === 'content')) best = items.find((item) => item.el === saved) ?? null;
     }
-    if (best) select(best.el, true, true);
+    if (best) {
+      let scroll = true;
+      if (activeScope === document && from.section === 'categories' && direction === 'down' && best.section === 'content') {
+        const grid = best.el.closest<HTMLElement>('[data-ytg-browse-grid]');
+        const bounds = grid ? rect(grid) : config.getViewport?.() || { top: 16, bottom: innerHeight - 16 };
+        const row = navigation.rowOf(best, items);
+        // Entering an already visible row should only move focus. Scroll padding
+        // is an alignment preference, not an obstruction to the visible cards.
+        scroll = !row.every(item => item.rect.top >= bounds.top - 1 && item.rect.top + item.rect.height <= bounds.bottom + 1);
+      }
+      select(best.el, scroll, true);
+    }
     // No target means stay on the current card; never scroll by an arbitrary distance.
   }
   // A layer must explicitly pass an action before a lower layer can see it.
   const outcome = (result: unknown) => result === 'handled' ? 'handled' : result === 'pass' ? 'pass' : 'blocked';
   function pageAction(action: Action) {
-    if (adjustingTarget && (adjustingTarget !== current || !current || !visible(current) || !scope().contains(current))) endAdjustment();
+    if (adjustingTarget && (adjustingTarget !== current || !current || !visible(current) || !scopeContains(current))) endAdjustment();
     if (adjustingTarget) {
       if (action === 'confirm' || action === 'back') { endAdjustment(); update(); return 'handled'; }
       if (action === 'left' || action === 'right') { config.adjustSlider?.(current, action === 'left' ? -1 : 1); return 'handled'; }
@@ -321,7 +458,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     }
     if (['up', 'down', 'left', 'right'].includes(action)) { navigate(action as Direction); return 'handled'; }
     if (action === 'confirm') {
-      if (!current || !current || !visible(current) || !scope().contains(current)) select(initial(candidates()));
+      if (!current || !visible(current) || !scopeContains(current)) select(initial(candidates()));
       remember();
       if (current && config.isSlider?.(current)) {
         adjustingTarget = current; current.classList?.add('ytg-adjusting'); update(); return 'handled';
@@ -376,17 +513,23 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
   }
   YTGamepad = {
     destroy: lifecycle.destroy,
-    registerSite(values) { endAdjustment(); config = values; current = null; rowFocus?.reset(); },
-    configure(values) { if (values.enabled === false) endAdjustment(); enabled = values.enabled !== false; if (!enabled) { (config.getContainer?.(current) || current)?.classList?.remove('ytg-selected'); current = null; config.onSelectionChange?.(null, document); config.onDisable?.(); setHelp(false); helpVisible = false; } update(); },
+    registerSite(values) { endAdjustment(); config = values; current = null; invalidateTargets(); rowFocus?.reset(); },
+    configure(values) { invalidateTargets(); if (values.enabled === false) endAdjustment(); enabled = values.enabled !== false; if (!enabled) { (config.getContainer?.(current) || current)?.classList?.remove('ytg-selected'); current = null; config.onSelectionChange?.(null, document); config.onDisable?.(); setHelp(false); helpVisible = false; } update(); },
     navigate, act,
-    focus(el) { if (el && candidates().includes(el)) select(el, false); },
+    focus(el) {
+      if (!el) return;
+      withReads(() => {
+        const root = scope(); candidates(root);
+        if (targetIndexes.get(root)?.positions.has(el) && visible(el)) select(el, false);
+      });
+    },
     resetContentFocus() {
       restoring = false; lifecycle.clearTimeout(restoreTimer);
       rowFocus?.reset();
       contentReturn = null; memories.delete(route);
       select(candidates().find((el) => config.getSection?.(el) === 'content'));
     },
-    refresh: recover,
+    refresh() { invalidateTargets(); recover(); },
     get hasTemporaryLayer() { return helpVisible || scope() !== document; },
     get hasOverlay() { return activeScope !== document; },
     get current() { return current; }, get section() { return config.getSection?.(current); },
@@ -396,7 +539,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     active: () => enabled && (activeScope !== document || !config.isFocusOwned?.()),
     capture() {
       const list = candidates(activeScope);
-      const active = document.activeElement as HTMLElement | null;
+      const active = pageActiveElement() as HTMLElement | null;
       const el = active && list.includes(active) ? active : current;
       if (!el || !list.includes(el)) return null;
       return { el, pageScroll: activeScope === document ? { x: scrollX, y: scrollY } : null,
@@ -419,14 +562,21 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
   });
   if (unregisterFocus) lifecycle.cleanup(unregisterFocus);
   lifecycle.listen(window, 'yt-gamepad-action', e => { if (typeof e.detail?.action === 'string') act(e.detail.action); });
-  lifecycle.listen(document, 'focusin', e => withReads(() => { if (enabled && current !== e.target && candidates().includes(e.target as HTMLElement)) select(e.target as HTMLElement, false); }));
+  const followFocus = (e: FocusEvent) => withReads(() => {
+    const target = (e.composedPath?.()[0] || e.target) as HTMLElement;
+    if (!enabled || current === target) return;
+    if (indexedGrid(target) && scope() === document && visible(target)) select(target, false);
+    else if (candidates().includes(target)) select(target, false);
+  });
+  lifecycle.listen(document, 'focusin', followFocus);
   lifecycle.listen(document, 'yt-navigate-start', () => { remember(); navigating = true; });
   for (const event of ['yt-navigate-finish', 'yt-navigate-cancel', 'yt-navigate-error']) lifecycle.listen(document, event, () => { navigating = false; });
   function routeChanged(event: { type: string; }) {
+    invalidateTargets();
     if (!event || event.type === 'yt-navigate-finish') navigating = false;
     const next = location.pathname + location.search;
     if (next === route) { recover(); return; }
-    const focused = current || document.activeElement as HTMLElement | null;
+    const focused = current || pageActiveElement() as HTMLElement | null;
     const sidebarKey = config.getSection?.(focused) === 'sidebar' ? config.getKey?.(focused) : null;
     (config.getContainer?.(current) || current)?.classList?.remove('ytg-selected');
     endAdjustment();
@@ -443,20 +593,29 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
   }
   lifecycle.listen(document, 'yt-navigate-finish', routeChanged);
   lifecycle.listen(window, 'popstate', routeChanged);
-  let pending = false, pendingAlignment = false;
-  function scheduleRecover(alignGamepad = false) {
+  let pending = false, pendingAlignment = false, pendingRecovery = false;
+  function scheduleFrame() {
     if (!enabled || document.hidden) return;
-    pendingAlignment ||= alignGamepad === true;
     if (pending) return;
     pending = true;
     lifecycle.frame(() => {
-      const align = pendingAlignment;
-      pending = false; pendingAlignment = false;
-      if (!document.hidden) recover(align);
+      const align = pendingAlignment, repair = pendingRecovery;
+      pending = false; pendingAlignment = false; pendingRecovery = false;
+      if (!enabled || document.hidden) return;
+      if (repair) recover(align);
+      else withReads(() => update());
     });
   }
-  lifecycle.listen(window, 'scroll', () => { scheduleRecover(); remember(); }, true);
-  lifecycle.listen(window, 'resize', () => scheduleRecover(true));
+  function scheduleRecover(alignGamepad = false) {
+    if (!enabled || document.hidden) return;
+    pendingRecovery = true; pendingAlignment ||= alignGamepad === true;
+    scheduleFrame();
+  }
+  function scrolled(event: Event) { rememberScroll(event); invalidateGeometry(); scheduleFrame(); }
+  lifecycle.listen(window, 'scroll', scrolled, { capture: true, passive: true });
+  lifecycle.listen(window, 'resize', () => { invalidateTargets(); scheduleRecover(true); });
+  lifecycle.listen(document, 'fullscreenchange', () => { invalidateTargets(); scheduleRecover(true); });
+  if (document.fonts) lifecycle.listen(document.fonts, 'loadingdone', () => { invalidateTargets(); scheduleRecover(); });
   lifecycle.listen(window, 'yt-gamepad-input-mode', event => {
     const mode = event.detail?.mode;
     if (mode !== 'gamepad') {
@@ -464,28 +623,59 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
       controllerCardFocus = null;
       // The native focus ring is no longer suppressed in mouse mode. Remove
       // only our own lingering DOM focus; keep current for controller return.
-      if (mode === 'mouse' && target && document.activeElement === target) target.blur();
+      if (mode === 'mouse' && target && pageActiveElement() === target) target.blur();
     }
     scheduleRecover(mode === 'gamepad');
   });
-  lifecycle.listen(document, 'visibilitychange', () => { if (!document.hidden) scheduleRecover(); });
+  lifecycle.listen(document, 'visibilitychange', () => { if (!document.hidden) { invalidateTargets(); scheduleRecover(); } });
+  // Vue owns browse updates. Only native player controls and popup layers
+  // need DOM observation; never subscribe to the hidden native feed subtree.
+  const observeNativeNavigation = () => {
+    observer!.disconnect();
+    observer!.observe(document.documentElement, { attributes: true, attributeOldValue: true,
+      attributeFilter: ['class', 'style', 'lang', 'dir', 'data-ytg-language', 'data-ytg-native'] });
+    observer!.observe(document.body, { childList: true });
+    for (const root of document.querySelectorAll('#movie_player,ytd-popup-container')) {
+      observer!.observe(root, { childList: true, subtree: true, attributes: true, attributeOldValue: true,
+        characterData: true, attributeFilter: ['hidden', 'aria-hidden', 'aria-expanded', 'disabled', 'aria-disabled', 'inert', 'style', 'class'] });
+    }
+  };
   observer = lifecycle.observer(records => {
-    if (!enabled || document.hidden || pending || records.every(record => host.contains(record.target) ||
-      (record.target as HTMLElement).closest?.('#ytg-watch,#yt-gamepad-menu') || config.ignoreMutation?.(record) ||
-      (record.type === 'attributes' && record.attributeName === 'class' &&
-        (record.oldValue || '').replace(/\bytg-selected\b/g, '').trim() ===
-        ((record.target as HTMLElement).getAttribute('class') || '').replace(/\bytg-selected\b/g, '').trim()))) return;
+    if (records.some(record => record.type === 'childList' && record.target === document.body)) observeNativeNavigation();
+    if (!records.some(relevantMutation)) return;
+    invalidateTargets();
     scheduleRecover(true);
   });
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['hidden', 'aria-hidden', 'aria-expanded', 'style', 'class', 'data-ytg-category-hidden', 'data-ytg-category-order'] });
+  observeNativeNavigation();
+  lifecycle.listen(document, 'yt-navigate-finish', observeNativeNavigation);
+  const observeBrowse = () => {
+    const roots = pageShadowRoots();
+    for (const root of roots) if (!observedBrowseRoots.has(root)) {
+      observedBrowseRoots.add(root);
+      // Focus transitions within a shadow tree are retargeted to the same
+      // host and do not reach document. Listen at the owning boundary too.
+      lifecycle.listen(root, 'focusin', followFocus);
+      lifecycle.listen(root, 'scroll', scrolled, { capture: true, passive: true });
+      browseObserver!.observe(root, { childList: true, subtree: true, attributes: true, attributeOldValue: true, characterData: true,
+        attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'aria-expanded', 'aria-pressed', 'selected', 'disabled', 'aria-disabled', 'inert', 'data-ytg-category-hidden', 'data-ytg-category-order'] });
+    }
+    if (roots.length) scheduleRecover();
+  };
+  // Rendering a feed or changing focus must not realign a saved scroll position.
+  // The browse surface explicitly refreshes after Vue patches; repair only
+  // removals/visibility here, without observing our own selection class writes.
+  browseObserver = lifecycle.observer(records => { if (records.some(relevantMutation)) { invalidateTargets(); scheduleRecover(); } });
+  const observedBrowseRoots = new Set<ShadowRoot>();
+  lifecycle.cleanup(() => observedBrowseRoots.clear());
+  lifecycle.listen(document, 'ytg-browse-mounted', observeBrowse);
+  observeBrowse();
   const published = YTGamepad;
-  published.destroy = lifecycle.destroy;
   lifecycle.cleanup(() => { if (YTGamepad === published) YTGamepad = undefined; });
   lifecycle.cleanup(() => {
     endAdjustment();
     enabled = false; (config.getContainer?.(current) || current)?.classList?.remove('ytg-selected');
     scopeLayers.splice(0).forEach(layer => focusManager?.close(layer, false));
-    current = null; memories.clear(); scopeViews.clear(); contentReturn = null; host.remove?.();
+    current = null; memories.clear(); scopeViews.clear(); invalidateTargets(); contentReturn = null; host.remove?.();
   });
   return published;
   } };

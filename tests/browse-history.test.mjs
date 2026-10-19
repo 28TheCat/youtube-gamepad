@@ -29,7 +29,7 @@ test('a new controller restores category, loaded pages, focus and continuation w
     feed: { categories() { throw new Error('native categories not ready'); }, cancel() {},
       async request(category, page) { assert.equal(category, 'music'); requestedPage = page; return { items: [] }; } },
     restoreState: () => state, getRoute: () => '/', isVisible: () => true, isRestoring: () => false,
-    stopBatch() {}, changed() {}, loadingChanged() {}, afterRender: async () => {}, canResetFocus: () => false, resetFocus() {} });
+    changed() {}, loadingChanged() {}, afterRender: async () => {}, canResetFocus: () => false, resetFocus() {} });
   assert.equal(controller.initialize(), true);
   assert.equal(store.category, 'music');
   assert.equal(store.activeItemId, 'b');

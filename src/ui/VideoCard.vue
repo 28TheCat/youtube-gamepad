@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue';
 import { useThumbnail } from './use-thumbnail';
-import type { BrowseItem } from '../sites/youtube-browse';
+import type { BrowseItem } from '../shared/browse-data';
 const props = defineProps<{ item: BrowseItem; selected: boolean; register: (id: string, node: HTMLAnchorElement | null) => void }>();
 const emit = defineEmits<{ select: [id: string]; open: [id: string] }>();
 const { source, failed, loaded, imageError } = useThumbnail(() => props.item);
@@ -23,8 +23,9 @@ onBeforeUnmount(() => press?.cancel());
     :data-browse-id="item.id" :data-selected="selected" @focus="emit('select', item.id)"
     @click.prevent="open">
     <div ref="cover" class="card-cover" :data-loading="!!source && !failed && !loaded">
-      <img v-if="source && !failed" :key="source" :src="source" :data-loaded="loaded" alt="" loading="lazy" @load="loaded = true" @error="imageError">
+      <img v-if="source && !failed" :key="source" :src="source" :data-loaded="loaded" alt="" loading="lazy" decoding="async" @load="loaded = true" @error="imageError">
       <span v-else class="thumbnail-placeholder"></span>
+      <slot name="cover-overlay" />
     </div>
     <div class="card-copy"><strong>{{ item.title }}</strong><span class="channel">{{ item.channel }}</span></div>
   </a>

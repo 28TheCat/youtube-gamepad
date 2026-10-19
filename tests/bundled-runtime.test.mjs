@@ -25,9 +25,9 @@ test(`extension invalidation disposes the bundled application ${connected ? 'wit
   }; Object.defineProperty(navigator,'getGamepads',{value:()=>${connected ? "[{index:0,connected:true,mapping:'standard',axes:[0,0],buttons:Array.from({length:17},()=>({pressed:false,value:0}))}]" : '[]'},configurable:true});`);
   await page.addScriptTag({ content: bundleSource('bundles/main.js') });
   await isolated(bundleSource('bundles/content.js'));
-  await page.locator('#yt-gamepad-settings-launcher').waitFor();
+  await page.locator('#ytg-sidebar-settings').waitFor();
   if (connected) await page.waitForFunction(() => document.documentElement.classList.contains('ytg-theater'));
-  await page.locator('#yt-gamepad-settings-launcher').getByRole('button').click();
+  await page.locator('#ytg-sidebar-settings').click();
   await page.locator('#yt-gamepad-menu').locator('[data-setting="general"]:not(:disabled)').waitFor();
   await isolated(`globalThis.invalidCalls=0;
     ${connected ? '' : 'chrome.runtime.id=undefined;'}
@@ -45,7 +45,7 @@ test(`extension invalidation disposes the bundled application ${connected ? 'wit
 });
 }
 
-for (const mode of ['late', 'missing', 'cancelled']) {
+for (const mode of ['late', 'missing', 'cancelled', 'settings']) {
   test(`ISOLATED startup handles ${mode} MAIN without leaving preparation behind`, { timeout: 30000 }, async t => {
     const page = await browserPage(t);
     const body = mode === 'missing' ? fixture.replace('</body>', '<div id="movie_player"><video class="html5-main-video"></video></div></body>') : fixture;
@@ -63,23 +63,36 @@ for (const mode of ['late', 'missing', 'cancelled']) {
       runtime: { id:'test', getManifest:()=>({version:'0.2.0'}), sendMessage:async()=>({ok:true}), onMessage:{addListener(){},removeListener(){}} },
       storage: {local:{ get(keys, callback) { const data={...(Array.isArray(keys)?{}:keys),enabled:true}; callback?.(data); return Promise.resolve(data); },set:async()=>{} },onChanged:{addListener(){},removeListener(){}}}
     }`);
+    if (mode === 'settings') await isolated(`const originalGet = chrome.storage.local.get;
+      chrome.storage.local.get = (keys, callback) => callback && Object.hasOwn(keys, 'enabled') ? new Promise(resolve => {
+        globalThis.releaseSettings = () => { const data={...keys,enabled:true}; callback(data); resolve(data); };
+      }) : originalGet(keys, callback);`);
     if (mode === 'missing') await isolated(`Object.defineProperty(navigator, 'getGamepads', {
       value:()=>[{index:0,mapping:'standard',connected:true,axes:[0,0],buttons:Array.from({length:17},()=>({pressed:false,value:0}))}], configurable:true
     })`);
     await isolated(bundleSource('bundles/early.js'));
+    assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).opacity), mode === 'missing' ? '1' : '0');
+    assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).pointerEvents), mode === 'missing' ? 'auto' : 'none');
     await isolated(bundleSource('bundles/content.js'));
     assert.equal(await page.locator('#yt-gamepad-overlay').count(), 0);
     assert.equal(await page.getAttribute('html', 'data-ytg-boot'), 'starting');
     // A page event cannot claim successful application initialization.
     await page.evaluate(() => window.dispatchEvent(new Event('ytg-main-ready')));
     assert.equal(await page.getAttribute('html', 'data-ytg-boot'), 'starting');
-    if (mode === 'late') {
+    if (mode === 'late' || mode === 'settings') {
       await page.addScriptTag({ content: bundleSource('bundles/main.js') });
+      if (mode === 'settings') {
+        await page.locator('#ytg-sidebar-settings').waitFor();
+        assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).opacity), '0', 'mounting alone cannot reveal before settings apply');
+        await isolated('releaseSettings()');
+      }
     } else if (mode === 'cancelled') {
       await isolated("window[Symbol.for('yt-gamepad.main.dispose')]()");
       await page.addScriptTag({ content: bundleSource('bundles/main.js') });
     }
     await page.waitForFunction(() => !document.documentElement.hasAttribute('data-ytg-boot'));
+    assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).opacity), '1');
+    assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).pointerEvents), 'auto');
     if (mode === 'cancelled') {
       await page.waitForTimeout(200);
       assert.equal(await page.locator('#yt-gamepad-overlay').count(), 0);

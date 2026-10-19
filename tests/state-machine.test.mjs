@@ -10,6 +10,17 @@ runInNewContext(['src/app/route-state.ts', 'src/app/state-machine.ts'].map(file 
 const { createState, createStore, transition } = window.YTGamepadStateMachine;
 const plain = value => JSON.parse(JSON.stringify(value));
 const effects = result => result.effects.map(effect => effect.type).join(',');
+
+test('playlist picker uses panel navigation and closes without triggering comment loading', () => {
+  const store = createStore(createState('/watch?v=first'));
+  store.dispatch({ type: 'WATCH_PANEL', panel: 'playlists' });
+  const input = action => store.dispatch({ type: 'WATCH_INPUT', action, commentCount: 2, scrollDelta: 0 });
+  assert.equal(effects(input('down')), 'focus');
+  assert.equal(store.state.watch.panelIndex, 1);
+  assert.equal(effects(input('confirm')), 'panelClick');
+  assert.equal(effects(input('back')), 'closePanel');
+  assert.equal(store.state.watch.panel, '');
+});
 test('hidden playback controls allow direct directional seeking without moving invisible focus', () => {
   const store = createStore(createState('/watch?v=first'));
   store.dispatch({ type: 'MODE', value: 'playback', route: '/watch?v=first' });

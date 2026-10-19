@@ -1,0 +1,7 @@
+Generic Gamepad Template
+Author: nicefrog
+Source: https://opengameart.org/content/generic-gamepad-template
+License: Creative Commons Zero (CC0 1.0)
+https://creativecommons.org/publicdomain/zero/1.0/
+The author states that attribution is optional.
+Original SVG geometry is retained. CSS controls display color and scale.

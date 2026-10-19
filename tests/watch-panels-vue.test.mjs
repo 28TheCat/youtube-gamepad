@@ -37,10 +37,13 @@ for (const trustedTypes of [false, true]) {
           if (event.type === 'WATCH_FOCUS') window.state.panelIndex = event.index;
           if (event.type === 'WATCH_PANEL_COUNT') window.state.panelIndex = Math.min(window.state.panelIndex, event.count); },
         focus() { [close, ...window.panels.buttons][window.state.panelIndex]?.focus(); },
-        controllerStyle: { hint(node, text) { node.textContent = text; return node; } },
+        controllerStyle: { hint(node, text) { node.textContent = text; return node; }, bind() { return () => {}; } },
         controller: { readRoute: () => ({ key: window.routeKey }), readComments: () => window.records,
+          readCommentsStatus: () => window.commentsStatus,
           readWatchFeatures: () => ({ comments: window.failed ? 'failed' : 'available' }),
           request(type, value) { window.requests.push([type, value]);
+            if (type === 'playlists') return Promise.resolve([{ key: '0', title: '<img> My playlist', selected: false }]);
+            if (type === 'savePlaylist') return Promise.resolve(!window.failSave);
             if (type === 'replies') window.records[0].expanded = ['<script>reply</script>']; return true; } },
         get descriptionText() { return window.descriptionText; }
       });
@@ -72,6 +75,33 @@ for (const trustedTypes of [false, true]) {
     assert.match(await host.getByRole('status').textContent(), /still loading/);
     await page.evaluate(() => { window.failed = true; window.panels.refresh(); });
     assert.match(await host.getByRole('status').textContent(), /unavailable/);
+    await page.evaluate(() => { window.commentsStatus = { loading: true, failed: false, hasMore: true }; window.panels.refresh(); });
+    assert.match(await host.getByRole('status').textContent(), /Loading comments/);
+    await page.evaluate(() => { window.commentsStatus = { loading: false, failed: true, hasMore: true }; window.panels.refresh(); });
+    assert.match(await host.getByRole('status').textContent(), /Could not load comments/);
+    await host.getByRole('button', { name: 'Retry', exact: true }).click();
+    assert.equal(await page.evaluate(() => window.requests.at(-1)[0]), 'comments');
+    await page.evaluate(() => { window.commentsStatus = { loading: false, failed: false, hasMore: false }; window.panels.refresh(); });
+    assert.match(await host.getByRole('status').textContent(), /No more comments/);
+    assert.equal(await host.locator('[data-focus-id="comments:more"]').count(), 0);
+    await page.evaluate(() => { window.panels.hide(); window.panels.open('playlists'); });
+    const playlist = host.locator('[data-focus-id="playlist:0"]');
+    await playlist.waitFor();
+    assert.equal(await playlist.getAttribute('aria-pressed'), 'false');
+    assert.equal(await host.locator('img').count(), 0);
+    await page.evaluate(() => { window.failSave = true; });
+    await playlist.click();
+    await page.waitForFunction(() => document.querySelector('#panels').shadowRoot.querySelector('[role="status"]')?.textContent.includes('Could not update playlists'));
+    assert.equal(await playlist.getAttribute('aria-pressed'), 'false');
+    await host.getByRole('button', { name: 'Retry', exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector('#panels').shadowRoot.querySelector('[data-focus-id="playlist:0"]').disabled);
+    assert.equal(await page.evaluate(() => window.requests.at(-1)[0]), 'playlists');
+    await page.evaluate(() => { window.failSave = false; });
+    await playlist.click();
+    await page.waitForFunction(() => document.querySelector('#panels').shadowRoot.querySelector('[data-focus-id="playlist:0"]').getAttribute('aria-pressed') === 'true');
+    assert.deepEqual(await page.evaluate(() => window.requests.at(-1)), ['savePlaylist', '0']);
+    await host.getByRole('button', { name: 'Back', exact: true }).click();
+    assert.equal(await host.locator('[data-vue-playlists]').count(), 0);
     await page.setViewportSize({ width: 390, height: 720 });
     await page.evaluate(() => { window.panels.destroy(); window.panels.refresh(); window.panels.open('comments'); window.panels.destroy(); });
     assert.equal(await host.locator('[data-vue-comments]').count(), 0);

@@ -177,7 +177,7 @@ test('Escape outside fullscreen falls back and rejects inactive or foreign sende
 });
 
 function connectionBridge() {
-  const sent = [], events = {}, warnings = [];
+  const sent = [], events = {}, warnings = [], published = [];
   let tick, result = { ok: true }, pads = [{ connected: true, mapping: 'standard' }];
   const document = { hidden: false, addEventListener(name, fn) { events[name] = fn; } };
   const chrome = {
@@ -191,13 +191,13 @@ function connectionBridge() {
   // Start with an empty snapshot so each test controls the first request.
   const initialPads = pads; pads = [];
   runInNewContext(moduleSource('src/app/content.ts'), {
-    window: { addEventListener(name, fn) { events[name] = fn; }, postMessage() {} }, chrome,
+    window: { addEventListener(name, fn) { events[name] = fn; }, postMessage(message) { published.push(message); } }, chrome,
     console: { warn(...args) { warnings.push(args); } }, document,
     navigator: { getGamepads: () => pads }, location: { origin: 'https://www.youtube.com' },
     setInterval(fn) { tick = fn; }
   });
   pads = initialPads;
-  return { sent, events, document, warnings, tick: () => tick(),
+  return { sent, events, document, warnings, published, tick: () => tick(),
     setResult(value) { result = value; }, disconnect() { pads = []; },
     flush: () => new Promise(resolve => setImmediate(resolve)) };
 }
@@ -211,6 +211,53 @@ test('bridge retries failed fullscreen requests and stops polling messages after
     s.tick(); await s.flush();
     assert.equal(s.sent.length, 2);
   }
+});
+
+const closedChannelErrors = [
+  'A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received',
+  'The message port closed before a response was received.',
+  'Could not establish connection. Receiving end does not exist.'
+];
+
+test('lost fullscreen replies retry quietly and only stop after acknowledgement', async () => {
+  for (const message of closedChannelErrors) {
+    const s = connectionBridge();
+    s.setResult(new Error(message)); s.tick(); await s.flush();
+    s.tick(); await s.flush();
+    assert.equal(s.sent.length, 2);
+    assert.equal(s.warnings.length, 0);
+    s.setResult({ ok: true }); s.tick(); await s.flush();
+    s.tick(); await s.flush();
+    assert.equal(s.sent.length, 3);
+  }
+});
+
+test('disconnect after a closed channel reports the current state', async () => {
+  const s = connectionBridge();
+  s.setResult(new Error(closedChannelErrors[0])); s.tick(); await s.flush();
+  s.disconnect(); s.setResult({ ok: true }); s.tick(); await s.flush();
+  assert.equal(s.sent[1].connected, false);
+  assert.equal(s.warnings.length, 0);
+});
+
+test('Escape falls back after a closed channel without warning', async () => {
+  const s = connectionBridge();
+  s.setResult(new Error(closedChannelErrors[0]));
+  s.events['yt-gamepad-escape-request']({ detail: { key: 'Escape', isTrusted: true }, preventDefault() {} });
+  await s.flush();
+  assert.equal(s.sent[0].type, 'ytg-exit-fullscreen');
+  assert.equal(s.published.at(-1).source, 'yt-gamepad-escape-back');
+  assert.equal(s.warnings.length, 0);
+});
+
+test('unexpected fullscreen failures remain visible and retryable', async () => {
+  const s = connectionBridge();
+  s.setResult(new Error('Window update failed')); s.tick(); await s.flush();
+  assert.equal(s.warnings[0][1], 'Window update failed');
+  s.setResult({ ok: false, error: 'Window access denied' }); s.tick(); await s.flush();
+  assert.equal(s.warnings[1][1], 'Window access denied');
+  s.setResult({ ok: true }); s.tick(); await s.flush();
+  assert.equal(s.sent.length, 3);
 });
 
 test('forced settings refresh failures also retry an already acknowledged connection', async () => {

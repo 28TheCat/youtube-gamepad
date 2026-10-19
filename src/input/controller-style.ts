@@ -22,6 +22,8 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
   let bindings = YTGamepadBindings.normalize();
   const actionForKey = Object.fromEntries(Object.entries(YTGamepadBindings.defaults).map(([action, button]) => [YTGamepadBindings.keys[button], action]));
   const boundKey = (key: string) => actionForKey[key] ? YTGamepadBindings.keys[bindings[actionForKey[key]]] : key;
+  const keyboardKeys: Record<string, string> = { A: 'Enter', B: 'Esc', X: 'Space', Y: '/', LB: 'PageUp', RB: 'PageDown', LT: '−', RT: '=', Start: 'F1' };
+  const keyboardMode = () => document.documentElement.dataset.ytgInputMode === 'keyboard';
   function identify(id = '') {
     if (/playstation|dualshock|dualsense|\bsony\b|054c|\bps[345]\b/i.test(id)) return 'playstation';
     if (/nintendo|switch|joy[- ]?con|057e/i.test(id)) return 'switch';
@@ -31,7 +33,7 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
   const keysPattern = /\b(?:Start|LB|RB|LT|RT|L3|R3|A|B|X|Y)\b|[←→↑↓]/g;
   const navigationText = (text: string) => document.documentElement.dataset.ytgNavigationStick === 'right'
     ? text.replace(/left stick/gi, 'right stick').replace(/左摇杆/g, '右摇杆') : text;
-  const format = (text: string) => navigationText(text).replace(keysPattern, (key: string) => profiles[family][boundKey(key)] || boundKey(key));
+  const format = (text: string) => navigationText(text).replace(keysPattern, (key: string) => keyboardMode() ? keyboardKeys[key] || key : profiles[family][boundKey(key)] || boundKey(key));
   function repaint() {
     for (const root of roots) for (const node of root.querySelectorAll<HTMLElement>('[data-ytg-key],[data-ytg-text],[data-ytg-title],[data-ytg-aria],[data-ytg-hint]')) paint(node);
   }
@@ -44,7 +46,7 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
       const parts = key.split(' / ').map(boundKey);
       node.setAttribute('data-ytg-first-key', parts[0]);
       node.setAttribute('data-ytg-second-key', parts[1] || parts[0]);
-      node.setAttribute('data-ytg-icon', parts.every((part) => Object.hasOwn(profiles[family], part) || /^[←→↑↓]$/.test(part)) ? 'true' : 'false');
+      node.setAttribute('data-ytg-icon', !keyboardMode() && parts.every((part) => Object.hasOwn(profiles[family], part) || /^[←→↑↓]$/.test(part)) ? 'true' : 'false');
       node.setAttribute('aria-label', format(key));
     }
     const sourceHint = node.getAttribute('data-ytg-hint');
@@ -60,7 +62,6 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
         paint(icon); pieces.push(icon); offset = match.index + match[0].length;
       }
       if (offset < hint.length) text(hint.slice(offset));
-      node.textContent = format(hint);
       node.replaceChildren(...pieces);
       node.setAttribute('aria-label', format(hint));
     }
@@ -99,6 +100,7 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
   document.documentElement.dataset.ytgController = family;
   lifecycle.listen(document, 'ytg-language-changed', repaint);
   lifecycle.listen(window, 'yt-gamepad-navigation-stick', repaint);
+  lifecycle.listen(window, 'yt-gamepad-input-mode', repaint);
   const published = YTGamepadControllerStyle;
   lifecycle.cleanup(() => { roots.clear(); delete document.documentElement.dataset.ytgController; if (YTGamepadControllerStyle === published) YTGamepadControllerStyle = undefined; });
 })();

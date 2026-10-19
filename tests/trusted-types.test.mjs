@@ -41,6 +41,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
     return el;
   };
   const window = { YTGamepadSite: { perform() { return true; } } };
+  const searches = [];
   runInNewContext(['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/navigation/focus.ts', 'src/search/keyboard.ts', 'src/search/pinyin-data.ts', 'src/search/pinyin.ts', 'src/ui/styles.ts', 'src/search/search.ts'].map(file => moduleSource(file)).join('\n') + moduleSource('src/ui/menu.ts'), { window, document, location: { pathname: '/', search: '' }, Event: class {}, innerWidth: 1200, innerHeight: 800, HTMLInputElement: class {} });
   window.YTGamepadFocus.register('page', {
     active: () => true,
@@ -50,7 +51,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
     apply: () => document.activeElement?.focus()
   });
   runInNewContext(moduleSource('src/sites/youtube.ts'), {
-    window, document, location: { pathname: '/', search: '' }, Event: class {}, HTMLInputElement: class {}
+    window, document, URLSearchParams, location: { pathname: '/', search: '', assign(href) { searches.push(href); } }, Event: class {}, HTMLInputElement: class {}
   });
   window.YTGamepadMenu.connect(window.YTGamepadSite);
   assert.equal(window.YTGamepadMenu.handle('playPause'), 'pass');
@@ -110,7 +111,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
   let restored = false, restoreRequests = 0;
   window.YTGamepadFocus.close = () => { restoreRequests++; };
   let updates = 0;
-  const target = { value: 'existing query', isConnected: true, focus() { restored = true; }, setSelectionRange() {}, dispatchEvent() { updates++; } };
+  const target = { value: 'existing query', isConnected: true, matches: selector => selector === '[data-ytg-search-input]', focus() { restored = true; }, setSelectionRange() {}, dispatchEvent() { updates++; } };
   document.activeElement = target;
   window.YTGamepadMenu.openSearch(target);
   assert.equal(root.querySelector('#query').value, 'existing query');
@@ -121,13 +122,12 @@ test('menu renders and switches views when HTML string assignments are blocked',
   assert.equal(window.YTGamepadMenu.opened, false);
   assert.equal(restoreRequests, 1);
   assert.equal(restored, false); // The menu delegates restoration; the owner performs DOM focus.
-  let searches = 0;
-  document.querySelector = selector => selector.includes('search-icon-legacy') ? { click() { searches++; } } : target;
+  document.querySelector = () => target;
   window.YTGamepadMenu.openSearch(target);
   root.querySelector('#query').value = '  fullscreen search  ';
   root.querySelector('#query').input();
   window.YTGamepadMenu.handle('volumeUp');
-  assert.equal(searches, 1);
+  assert.deepEqual(searches, ['/results?search_query=fullscreen+search']);
   assert.equal(target.value, 'fullscreen search');
   assert.equal(window.YTGamepadMenu.opened, false);
   target.value = '';
@@ -136,9 +136,9 @@ test('menu renders and switches views when HTML string assignments are blocked',
   for (const letter of 'NIHAO') press(letter);
   assert.equal(root.querySelector('#query').value, '');
   assert.ok(root.querySelector('#composition').children[0].textContent.includes('nihao'));
-  const beforeSearch = searches;
+  const beforeSearch = searches.length;
   window.YTGamepadMenu.handle('volumeUp');
-  assert.equal(searches, beforeSearch);
+  assert.equal(searches.length, beforeSearch);
   assert.equal(root.activeElement.dataset.row, '-1');
   press('你好');
   assert.equal(target.value, '你好');
@@ -167,7 +167,7 @@ test('menu renders and switches views when HTML string assignments are blocked',
   assert.equal(window.YTGamepadMenu.opened, true);
   assert.equal(target.value, '你好中国');
   window.YTGamepadMenu.handle('volumeUp');
-  assert.equal(searches, beforeSearch + 1);
+  assert.equal(searches.length, beforeSearch + 1);
   assert.equal(target.value, '你好中国');
 
 });

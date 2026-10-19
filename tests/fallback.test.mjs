@@ -6,6 +6,8 @@ import { runInNewContext } from 'node:vm';
 
 function setup({ missing = '', throwing = false, pathname = '/watch', connected = true, language = 'en' } = {}) {
   let now = 0, tick, port, refresh, config;
+  const frames = [];
+  const flush = () => { while (frames.length) frames.shift()(); };
   const classes = new Set(), events = new Map(), nodes = new Map();
   const listeners = (name, callback) => {
     if (!events.has(name)) events.set(name, []);
@@ -17,7 +19,7 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
       classList: { add: name => names.add(name), remove: name => names.delete(name), contains: name => names.has(name), toggle(name, on) { on ? names.add(name) : names.delete(name); } },
       append(...items) { this.children.push(...items); for (const item of items) if (item.id) nodes.set(item.id, item); },
       attachShadow() { this.shadow = node(); return this.shadow; },
-      setAttribute() {}, addEventListener(name, callback) { handlers[name] = callback; },
+      setAttribute() {}, removeAttribute() {}, addEventListener(name, callback) { handlers[name] = callback; },
       click() { handlers.click?.(); }, closest: () => null, querySelectorAll: () => [],
       getBoundingClientRect: () => ({ width: 100, height: 100 }), focus() {} };
   }
@@ -52,14 +54,14 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
     YTGamepad: { registerSite(value) { config = value; }, configure() {}, refresh() {} } };
   const location = { pathname, search: pathname === '/watch' ? '?v=current' : '', origin: 'https://www.youtube.com' };
   const context = { window, document, location, URL, URLSearchParams, history: {}, Date: { now: () => now },
-    setInterval(fn) { tick = fn; }, setTimeout: () => 1, clearTimeout() {},
+    setInterval(fn) { tick = fn; }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, setTimeout: () => 1, clearTimeout() {},
     getComputedStyle: () => ({ display: 'block' }) };
   for (const file of ['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/sites/youtube.ts', 'src/app/coordinator.ts']) {
     runInNewContext(moduleSource(file), context);
   }
   return { window, document, classes, location, video, player, watch, menu, nodes, get config() { return config; }, get port() { return port; },
     setMissing(value) { missing = value; }, setThrowing(value) { throwing = value; }, setRefresh(value) { refresh = value; },
-    advance(ms) { now += ms; tick(); }, event(name, value = {}) { for (const callback of events.get(name) || []) callback(value); },
+    advance(ms) { now += ms; tick?.(); flush(); }, event(name, value = {}) { for (const callback of events.get(name) || []) callback(value); flush(); },
     get status() { return window.YTGamepadCoordinator.adaptation.status; } };
 }
 
@@ -101,7 +103,7 @@ test('controller playback and synchronous play exceptions share failure recovery
       if (synchronous) throw error;
       return Promise.reject(error);
     };
-    assert.equal(s.config.interceptAction('confirm'), true);
+    assert.equal(s.config.onAction('playPause', { scope: s.document }), synchronous ? 'pass' : 'handled');
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(s.status, 'fallback');
   }
@@ -122,20 +124,19 @@ test('late playback rejection cannot replace a new video or disabled interface',
   }
 });
 
-test('connection gates the entire UI across settings, navigation, disconnect and reconnect', () => {
-  const s = setup({ connected: false, missing: 'player' });
+test('keyboard and mouse UI survives controller disconnect and respects the saved off switch', () => {
+  const s = setup({ connected: false });
   const coordinator = s.window.YTGamepadCoordinator;
-  assert.equal(coordinator.state.enabled, false);
-  assert.equal(s.status, 'inactive');
+  assert.equal(coordinator.state.enabled, true);
+  assert.equal(s.status, 'ready');
   s.advance(6000);
   s.event('yt-gamepad-local-settings', { detail: { enabled: true } });
   s.event('yt-navigate-finish');
-  assert.equal(s.status, 'inactive');
+  assert.equal(s.status, 'ready');
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.nodes.has('ytg-fallback-notice'), false);
-  assert.equal(coordinator.request('media', 'pause'), false);
-  assert.equal(coordinator.prepareVideo('/watch?v=next'), false);
-  assert.equal(s.video.paused, false);
+  assert.equal(coordinator.request('media', 'pause'), true);
+  assert.equal(s.video.paused, true);
 
   s.setMissing('');
   s.window.YTGamepadInput.connected = true;
@@ -144,11 +145,10 @@ test('connection gates the entire UI across settings, navigation, disconnect and
   assert.equal(s.classes.has('ytg-watch-active'), true);
   s.menu.opened = true;
   s.window.YTGamepadInput.connected = false;
-  s.event('yt-gamepad-exit');
   s.event('yt-gamepad-connection');
-  assert.equal(coordinator.state.enabled, false);
-  assert.equal(s.menu.opened, false);
-  for (const name of ['ytg-theater', 'ytg-playback', 'ytg-controls', 'ytg-watch-active', 'ytg-watch-layout']) assert.equal(s.classes.has(name), false);
+  assert.equal(coordinator.state.enabled, true);
+  assert.equal(s.menu.opened, true);
+  assert.equal(s.classes.has('ytg-watch-active'), true);
   s.window.YTGamepadInput.connected = true;
   s.event('yt-gamepad-connection');
   assert.equal(coordinator.state.enabled, true, 'idle reconnection reactivates the UI');
@@ -197,12 +197,27 @@ test('normal async loading takes over only once all essential capabilities arriv
   assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
 });
 
+test('watch health polling stops on browse pages, background tabs and disable, then resumes when needed', () => {
+  const s = setup({ pathname: '/' });
+  const polling = () => Object.hasOwn(s.window.YTGamepadRuntime.resources, 'watch-health');
+  assert.equal(polling(), false);
+  s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
+  assert.equal(polling(), true, 'pending video navigation still needs readiness checks');
+  s.document.hidden = true; s.event('visibilitychange');
+  assert.equal(polling(), false);
+  s.document.hidden = false; s.event('visibilitychange');
+  assert.equal(polling(), true);
+  s.event('yt-gamepad-local-settings', { detail: { enabled: false } });
+  assert.equal(polling(), false);
+});
+
 test('controller confirmation shows status and gives the watch player immediate layout before readiness', () => {
   const s = setup({ pathname: '/' });
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next'), true);
   assert.equal(s.nodes.get('ytg-watch-loading').hidden, false);
   assert.equal(s.classes.has('ytg-player-pending'), false, 'browse list keeps its own layout');
+  assert.equal(s.classes.has('ytg-player-primed'), true, 'late native player is positioned before the watch URL arrives');
   s.location.pathname = '/watch'; s.location.search = '?v=next';
   s.advance(500);
   assert.equal(s.classes.has('ytg-player-pending'), true);
@@ -262,12 +277,15 @@ test('canceling controller navigation or disabling controls clears TV loading', 
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
   s.event('yt-navigate-cancel');
   assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
+  assert.equal(s.classes.has('ytg-player-primed'), false);
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
   s.event('yt-navigate-finish');
   assert.equal(s.nodes.get('ytg-watch-loading').hidden, true, 'a finish on the unchanged route clears the transition');
+  assert.equal(s.classes.has('ytg-player-primed'), false);
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
   s.event('yt-gamepad-local-settings', { detail: { enabled: false } });
   assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
+  assert.equal(s.classes.has('ytg-player-primed'), false);
 });
 
 test('losing the video closes custom layers while retaining the gamepad player layout', () => {
@@ -358,11 +376,8 @@ test('disabling or leaving a failed watch route removes the notice and clears th
  test('optional reads and commands fail independently without exiting controls', async () => {
   const s = setup(); const site = s.window.YTGamepadSite;
   s.window.YTGamepadCoordinator.setMode('controls');
-  const original = s.document.querySelectorAll;
-  s.document.querySelectorAll = selector => {
-    if (selector.startsWith('ytd-comments') || selector.startsWith('ytd-compact-video-renderer')) throw new Error('changed optional DOM');
-    return original(selector);
-  };
+  s.window.__testComments = () => { throw new Error('comments unavailable'); };
+  s.window.__testWatchNext = () => { throw new Error('next unavailable'); };
   assert.equal(s.port.readComments().length, 0);
   assert.equal(s.port.readWatchPage().recommendations.length, 0);
   assert.equal(s.port.readWatchFeatures().comments, 'failed');
@@ -371,7 +386,8 @@ test('disabling or leaving a failed watch route removes the notice and clears th
   site.performWatchAction = () => { throw new Error('native action failed'); };
   assert.equal(s.port.request('watchAction', 'like'), false);
   assert.equal(s.status, 'ready');
-  s.document.querySelectorAll = original;
+  s.window.__testComments = () => ({ route: '/watch?v=current', items: [], loading: false, failed: false, hasMore: false });
+  s.window.__testWatchNext = () => ({ route: '/watch?v=current', recommendations: [], queue: [], loading: false, failed: false });
   s.advance(500); assert.notEqual(s.port.readWatchFeatures().comments, 'failed');
  });
 

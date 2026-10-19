@@ -45,9 +45,68 @@ async function setup(t, trustedTypes = false) {
 
 const focused = page => page.evaluate(() => document.querySelector('#yt-gamepad-menu').shadowRoot.activeElement?.dataset.setting);
 
+test('sidebar settings opens plugin preferences and restores keyboard focus on close', { timeout: 60000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, theater: true, autoFullscreen: false, uiLanguage: 'zh-CN' }));
+  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: fixture }));
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/');
+  const entry = page.locator('#ytg-sidebar-settings'), menu = page.locator('#yt-gamepad-menu');
+  await entry.waitFor();
+  assert.equal(await page.locator('#yt-gamepad-settings-launcher').count(), 0, 'the floating settings entry is removed');
+  assert.equal(await entry.getAttribute('aria-label'), '设置');
+  const url = page.url();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await entry.click();
+  await menu.locator('[data-setting="general"]').waitFor();
+  assert.equal(page.url(), url, 'opens plugin preferences without navigating away');
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    const panel = menu.locator('.settings-panel');
+    const before = await panel.boundingBox();
+    const contentWidth = await panel.evaluate(element => element.clientWidth);
+    for (const category of ['general', 'controller', 'display', 'help']) {
+      await menu.locator(`[data-setting="${category}"]`).click();
+      const after = await panel.boundingBox();
+      assert.deepEqual(after, before, `settings window stays fixed for ${category} at ${viewport.width}px`);
+      assert.equal(await panel.evaluate(element => element.clientWidth), contentWidth,
+        'scrollbars do not change the content width');
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await menu.locator('[data-setting="display"]').click();
+  await menu.locator('[data-setting="playback-wide"]').click();
+  await menu.locator('[data-setting="playback-wide"][aria-pressed="true"]:not(:disabled)').waitFor();
+  assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('playbackLayout')).playbackLayout), 'wide');
+  await menu.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await menu.waitFor({ state: 'hidden' });
+  await entry.focus();
+  await page.keyboard.press('Enter');
+  await menu.locator('[data-setting="general"]').waitFor();
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('#yt-gamepad-menu').hasAttribute('data-settings'));
+  await page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'hidden' });
+  assert.equal(await page.evaluate(() => window.__pageDOM.activeElement?.id), 'ytg-sidebar-settings');
+  const setPad = await virtualPad(context, page);
+  await setPad({ connected: true });
+  await page.waitForFunction(() => window.__testConnected);
+  await page.waitForTimeout(100); // Sample the neutral pad before its first press.
+  await entry.focus();
+  await setPad({ connected: true, button: 0 });
+  await menu.locator('[data-setting="general"]').waitFor();
+  await setPad({ connected: true });
+  await menu.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await menu.waitFor({ state: 'hidden' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await entry.scrollIntoViewIfNeeded();
+  assert.equal(await entry.isVisible(), true);
+  assert.equal(await entry.getAttribute('title'), '设置');
+});
+
 test('side settings work without a gamepad, persist edits and fit both screen sizes', { timeout: 60000 }, async t => {
   const { context, worker } = await launchExtension(t);
-  await worker.evaluate(() => chrome.storage.local.set({ enabled: false, theater: true, autoFullscreen: false }));
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, theater: true, autoFullscreen: false }));
   await context.route('https://www.youtube.com/**', route => route.fulfill({
     contentType: 'text/html', body: fixture,
     headers: { 'content-security-policy': "require-trusted-types-for 'script'; trusted-types 'none'" }
@@ -56,16 +115,17 @@ test('side settings work without a gamepad, persist edits and fit both screen si
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('https://www.youtube.com/');
-  const launcher = page.locator('#yt-gamepad-settings-launcher').getByRole('button');
+  const launcher = page.locator('#ytg-sidebar-settings');
   const menu = page.locator('#yt-gamepad-menu');
   await launcher.click();
   await menu.getByRole('navigation', { name: 'Settings categories' }).waitFor();
   await menu.locator('[data-setting="display"]').click();
-  await menu.locator('[data-setting="theater"]').click();
-  await menu.locator('[data-setting="theater"][aria-pressed="false"]:not(:disabled)').waitFor();
-  assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('theater')).theater), false);
-  assert.equal(await menu.isVisible(), true, 'disabled gamepad controls do not close mouse settings');
+  await menu.locator('[data-setting="playback-wide"]').click();
+  await menu.locator('[data-setting="playback-wide"][aria-pressed="true"]:not(:disabled)').waitFor();
+  assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('playbackLayout')).playbackLayout), 'wide');
+  assert.equal(await menu.isVisible(), true, 'mouse settings work without a controller');
   await menu.locator('[data-setting="controller"]').click();
+  if (await menu.locator('.inline-action-list').getAttribute('open') === null) await menu.locator('[data-setting="action-list"]').click();
   await menu.locator('[data-setting="confirm"]').click();
   await menu.locator('[data-setting="display"]').click();
   await menu.locator('[data-setting="controller"]').click();
@@ -83,11 +143,14 @@ test('side settings work without a gamepad, persist edits and fit both screen si
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.waitForTimeout(250);
   await page.screenshot({ path: 'output/playwright/side-settings-entry.png' });
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, theater: true }));
   await launcher.click();
   await menu.locator('[data-setting="general"]:not(:disabled)').waitFor();
   await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('#yt-gamepad-menu').hasAttribute('data-settings'));
+  await page.keyboard.press('Escape');
   await menu.waitFor({ state: 'hidden' });
-  assert.equal(await page.locator('#yt-gamepad-settings-launcher').count(), 1);
+  assert.equal(await page.locator('#yt-gamepad-settings-launcher').count(), 0);
   assert.deepEqual(errors, []);
 });
 
@@ -108,6 +171,7 @@ test('Vue settings keep gamepad focus and return through each level to the origi
   assert.equal(await focused(page), 'controller');
   await press(0);
   assert.equal(await focused(page), 'layout-browse');
+  if (await menu.locator('.inline-action-list').getAttribute('open') === null) await menu.locator('[data-setting="action-list"]').click();
   await menu.locator('[data-setting="confirm"]').click();
   assert.equal(await focused(page), '0');
   await press(1);
@@ -125,6 +189,7 @@ test('Vue settings keep gamepad focus and return through each level to the origi
 test('Vue settings preserve independent bindings, external updates and narrow-screen layout', { timeout: 60000 }, async t => {
   const { page, menu, worker, press } = await setup(t, true);
   await menu.locator('[data-setting="controller"]').click();
+  if (await menu.locator('.inline-action-list').getAttribute('open') === null) await menu.locator('[data-setting="action-list"]').click();
   await menu.locator('[data-setting="confirm"]').click();
   await menu.locator('[data-setting="1"]').click();
   await menu.locator('[data-setting="1"][aria-pressed="true"]:not(:disabled)').waitFor();
@@ -135,6 +200,7 @@ test('Vue settings preserve independent bindings, external updates and narrow-sc
   await press(0); // Back is now the physical bottom button on browse pages.
   assert.equal(await focused(page), 'confirm');
   await menu.locator('[data-setting="layout-watch"]').click();
+  if (await menu.locator('.inline-action-list').getAttribute('open') === null) await menu.locator('[data-setting="action-list"]').click();
   await menu.locator('[data-setting="confirm"]').click();
   assert.equal(await focused(page), '0');
   await menu.locator('[data-inline-back]').click();
@@ -182,4 +248,56 @@ test('inline right-hand preset updates input and restores custom bindings withou
   await page.waitForFunction(() => document.documentElement.dataset.ytgNavigationStick === 'left');
   assert.equal(await menu.locator('[data-setting="confirm"]').isDisabled(), false);
   assert.deepEqual(await worker.evaluate(() => chrome.storage.local.get(['bindings', 'bindingLayouts'])), before);
+});
+
+test('controller diagram assigns actions from physical buttons and refreshes its icons', { timeout: 60000 }, async t => {
+  const { page, menu, worker, press } = await setup(t);
+  await menu.locator('[data-setting="controller"]').click();
+  const padA = menu.locator('[data-setting="pad-A"]');
+  assert.equal(await menu.locator('.inline-pad-key [data-inline-key]').count(), 12);
+  await padA.click();
+  await menu.locator('[data-setting="assign-playPause"]').click();
+  await menu.locator('[data-setting="assign-playPause"][aria-pressed="true"]:not(:disabled)').waitFor();
+  const saved = await worker.evaluate(() => chrome.storage.local.get('bindingLayouts'));
+  assert.equal(saved.bindingLayouts.browse.playPause, 0);
+  assert.equal(saved.bindingLayouts.browse.confirm, 2);
+  assert.equal(saved.bindingLayouts.watch.confirm, 0);
+  await menu.getByRole('button', { name: 'Back to gamepad settings', exact: true }).click();
+  assert.equal(await focused(page), 'pad-A');
+  assert.match(await padA.getAttribute('aria-label'), /Play \/ pause/);
+  await page.evaluate(() => document.documentElement.dataset.ytgController = 'playstation');
+  await padA.locator('[data-ytg-family="playstation"]').waitFor();
+  await padA.click();
+  await menu.locator('[data-shortcut-recorder]').click();
+  await page.keyboard.press('m');
+  await menu.locator('[data-shortcut-recorder]:not(:disabled)').waitFor();
+  assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('shortcutLayouts')).shortcutLayouts.browse.A), 'm');
+  await menu.getByRole('button', { name: 'Back to gamepad settings', exact: true }).click();
+  assert.match(await padA.getAttribute('aria-label'), / · m · Mute/);
+  assert.match(await menu.locator('[data-setting="summary-A"]').textContent(), /m/);
+  await menu.locator('.settings-panel').evaluate(node => node.scrollTop = 0);
+  await page.screenshot({ path: 'output/playwright/controller-bindings-desktop.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await menu.locator('section').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+  await menu.locator('[data-setting="pad-Select"]').click();
+  await menu.locator('[data-setting="assign-search"]').click();
+  await menu.locator('[data-setting="assign-search"][aria-pressed="true"]:not(:disabled)').waitFor();
+  assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('bindingLayouts')).bindingLayouts.browse.search), 8);
+  await page.screenshot({ path: 'output/playwright/controller-binding-editor-mobile.png' });
+  await page.evaluate(() => window.addEventListener('yt-gamepad-action', event => { window.__bindingAction = event.detail.action; }));
+  await menu.getByRole('button', { name: 'Close settings', exact: true }).click();
+  await menu.waitFor({ state: 'hidden' });
+  await press(0);
+  assert.equal(await page.evaluate(() => window.__bindingAction), 'mute', 'stored shortcut reaches the live input module');
+  await worker.evaluate(() => chrome.storage.local.set({ uiLanguage: 'zh-CN' }));
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.locator('#ytg-sidebar-settings').click();
+  await menu.locator('[data-setting="controller"]').click();
+  await page.evaluate(() => document.documentElement.dataset.ytgController = 'xbox');
+  await menu.locator('.controller-binding-overview').screenshot({ path: 'output/playwright/controller-bindings-overview.png' });
+  for (const width of [800, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    assert.equal(await menu.locator('.controller-binding-overview').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+  }
+  await menu.locator('.controller-binding-overview').screenshot({ path: 'output/playwright/controller-bindings-overview-mobile.png' });
 });

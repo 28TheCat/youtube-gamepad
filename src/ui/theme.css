@@ -14,17 +14,16 @@
   --ytg-icon-stroke: 2.5;
   --ytg-line-body: 1.5;
   --ytg-line-heading: 1.3;
-  --ytg-focus-color: #1769d2;
+  --ytg-focus-color: #000;
   --ytg-client-background: #f5f6f8;
   --ytg-client-surface: #fff;
-  --ytg-client-active: #e8eef8;
+  --ytg-client-active: #ededed;
   --ytg-adjusting-color: #fbbf24;
   /* Make the active gamepad target readable from a couch distance. */
-  --ytg-focus-width: 4px;
+  --ytg-focus-width: 6px;
   --ytg-focus-offset: 4px;
   --ytg-focus-duration: 120ms;
   --ytg-focus-easing: cubic-bezier(.26,.86,.44,.985);
-  --ytg-motion-press: 140ms;
   --ytg-motion-panel: 220ms;
   --ytg-motion-easing: cubic-bezier(.2,.8,.2,1);
   --ytg-motion-spring: cubic-bezier(.34,1.3,.64,1);
@@ -39,7 +38,6 @@
   --ytg-background: #fff;
   --ytg-text: #171717;
   --ytg-muted: #555;
-  --ytg-sidebar-text: var(--ytg-muted);
   --ytg-surface: #f3f4f6;
   --ytg-border: #d1d5db;
   --ytg-current-background: var(--ytg-surface);
@@ -47,30 +45,24 @@
   --ytg-selected-background: var(--ytg-text);
   --ytg-selected-text: var(--ytg-background);
   --ytg-overlay-backdrop: #0009;
-  --ytg-overlay-panel: #181818ed;
-  --ytg-comments-background: #181818;
-  --ytg-overlay-surface: #222;
+  --ytg-overlay-panel: #1c1e26f2;
+  --ytg-comments-background: #1c1e26;
+  --ytg-overlay-surface: #252832;
   --ytg-overlay-button: #ffffff20;
   --ytg-overlay-subtle: #ffffff0d;
-  --ytg-overlay-border: #ffffff55;
+  --ytg-overlay-border: #ffffff24;
   --ytg-overlay-text: #fff;
-  --ytg-overlay-muted: #ccc;
+  --ytg-overlay-muted: #b7bdca;
   --ytg-overlay-selected-text: #111;
   --ytg-overlay-gradient: linear-gradient(180deg,rgba(0,0,0,.55),transparent 30%,rgba(0,0,0,.12) 45%,rgba(0,0,0,.85));
   --ytg-panel-shadow: 0 24px 80px #0008;
   --ytg-text-shadow: 0 2px 8px #0008;
-  --ytg-rail-shadow: 24px 0 40px #0002;
-  --ytg-rail-width: 88px;
-  --ytg-rail-expanded-width: 248px;
-  --ytg-top-height: 72px;
-  --ytg-chips-height: 64px;
   --ytg-brand-color: #ff0033;
   --ytg-space-half: 2px;
   /* Semantic spacing aliases use the same four-pixel scale as the UI. */
   --ytg-space-small: var(--ytg-space-2);
   --ytg-space-between: var(--ytg-space-3);
   --ytg-space-wide: var(--ytg-space-4);
-  --ytg-space-inset: var(--ytg-space-6);
   --ytg-space-1: 4px;
   --ytg-space-2: 8px;
   --ytg-space-3: 12px;
@@ -82,29 +74,39 @@
 }
 html[dark] {
   color-scheme: dark;
-  --ytg-background: #0f0f0f;
+  --ytg-background: #14151a;
   --ytg-text: #f1f1f1;
-  --ytg-muted: #aaa;
-  --ytg-surface: #272727;
-  --ytg-border: #454545;
-  --ytg-focus-color: #8ab4f8;
-  --ytg-client-background: #15171c;
-  --ytg-client-surface: #1c1f26;
-  --ytg-client-active: #2a3447;
+  --ytg-muted: #a6abb8;
+  --ytg-surface: #252832;
+  --ytg-border: #363a46;
+  --ytg-focus-color: #000;
+  --ytg-client-background: #14151a;
+  --ytg-client-surface: #1c1e26;
+  --ytg-client-active: #303030;
+  --ytg-current-background: #2b2e39;
+  --ytg-selected-background: #f1f1f1;
+  --ytg-selected-text: #171717;
+  --ytg-shadow-control: 0 2px 8px #00000026, inset 0 1px 0 #ffffff05;
+  --ytg-shadow-focus: 0 8px 28px #00000055, 0 0 0 2px #ffffff24;
 }
 html:not([dark]) { color-scheme: light; }
 /* The extension popup has no YouTube document; use its system preference. */
 @media (prefers-color-scheme: dark) {
   html[data-ytg-popup]:not([data-ytg-theme-synced]) {
     color-scheme: dark;
-    --ytg-background: #0f0f0f;
+    --ytg-background: #14151a;
     --ytg-text: #f1f1f1;
-    --ytg-muted: #aaa;
-    --ytg-surface: #272727;
-    --ytg-border: #454545;
-    --ytg-focus-color: #8ab4f8;
-    --ytg-client-background: #15171c;
-    --ytg-client-surface: #1c1f26;
-    --ytg-client-active: #2a3447;
+    --ytg-muted: #a6abb8;
+    --ytg-surface: #252832;
+    --ytg-border: #363a46;
+    --ytg-focus-color: #000;
+    --ytg-client-background: #14151a;
+    --ytg-client-surface: #1c1e26;
+    --ytg-client-active: #303030;
+  --ytg-current-background: #2b2e39;
+  --ytg-selected-background: #f1f1f1;
+  --ytg-selected-text: #171717;
+  --ytg-shadow-control: 0 2px 8px #00000026, inset 0 1px 0 #ffffff05;
+  --ytg-shadow-focus: 0 8px 28px #00000055, 0 0 0 2px #ffffff24;
   }
 }

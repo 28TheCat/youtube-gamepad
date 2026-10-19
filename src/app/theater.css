@@ -32,9 +32,10 @@ html.ytg-watch-layout #movie_player .ytp-chrome-bottom{width:calc(100% - 48px)!i
    native safety gate keeps custom controls disabled. Reserve the status strip. */
 html.ytg-player-pending,html.ytg-player-pending body{overflow:hidden!important}
 html.ytg-player-pending :is(ytd-masthead,#secondary,#below,ytd-guide-renderer,ytd-mini-guide-renderer){display:none!important}
-html.ytg-player-pending #movie_player{position:fixed!important;inset:48px 0 0!important;width:100vw!important;height:calc(100vh - 48px)!important;max-width:none!important;max-height:none!important;z-index:2147483645!important;background:#000!important}
-html.ytg-player-pending #movie_player .html5-video-container{width:100%!important;height:100%!important}
-html.ytg-player-pending #movie_player video.html5-main-video{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:contain!important}
+/* PREPARE_VIDEO also covers a native player revealed before the watch URL. */
+html:is(.ytg-player-pending,.ytg-player-primed) #movie_player{position:fixed!important;inset:48px 0 0!important;width:100vw!important;height:calc(100vh - 48px)!important;max-width:none!important;max-height:none!important;z-index:2147483645!important;background:#000!important}
+html:is(.ytg-player-pending,.ytg-player-primed) #movie_player .html5-video-container{width:100%!important;height:100%!important}
+html:is(.ytg-player-pending,.ytg-player-primed) #movie_player video.html5-main-video{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:contain!important}
 html.ytg-controls:not([data-ytg-native]) #movie_player .ytp-chrome-bottom{opacity:1!important;visibility:visible!important;display:block!important;pointer-events:auto!important}
 html.ytg-controls:not([data-ytg-native]) #movie_player .ytp-chrome-controls{opacity:1!important;visibility:visible!important}
 
@@ -52,15 +53,13 @@ html.ytg-watch-active:not([data-ytg-native]).ytg-settings-open #ytg-watch{visibi
 /* Account prompts, subscription menus and playlist choosers stay interactive. */
 html.ytg-watch-active:not([data-ytg-native]) ytd-popup-container{position:relative;z-index:2147483647!important}
 html.ytg-watch-active:not([data-ytg-native]) :is(tp-yt-paper-dialog,ytd-menu-popup-renderer){z-index:2147483647!important}
-/* Keep native comments measurable for lazy loading, but never paint the native
-   metadata/comments over the player. Opacity preserves intersection geometry. */
-html.ytg-playback.ytg-comments-preload:not([data-ytg-native]) #below,
-html.ytg-comments:not([data-ytg-native]) #below{opacity:0!important;pointer-events:none!important}
-html.ytg-playback.ytg-comments-preload:not([data-ytg-native]):not(.ytg-comments) #below{display:block!important;position:fixed!important;inset:0 0 0 auto!important;width:clamp(320px,36vw,680px)!important;height:100vh!important;overflow:auto!important;z-index:0!important;pointer-events:none!important}
-html.ytg-comments:not([data-ytg-native]) #below{display:block!important;position:fixed!important;inset:0 0 0 auto!important;width:clamp(320px,36vw,680px)!important;height:100vh!important;overflow:auto!important;z-index:0!important}
 html.ytg-watch-active:not([data-ytg-native]).ytg-controls:not(.ytg-comments) #movie_player .caption-window.ytp-caption-window-bottom{bottom:46vh!important}
 html.ytg-watch-active:not([data-ytg-native]).ytg-recommendations:not(.ytg-comments) #movie_player .caption-window.ytp-caption-window-bottom{bottom:68vh!important}
 
 /* A coordinator safety gate also protects against partially failed renders. */
-html.ytg-watch-active.ytg-recommendations-loading:not([data-ytg-native]) #secondary{display:block!important;position:fixed!important;inset:0 0 0 auto!important;width:400px!important;max-width:100vw!important;height:100vh!important;overflow-y:auto!important;z-index:0!important;pointer-events:none!important}
 html[data-ytg-native] #ytg-watch{display:none!important}
+
+/* Reserve the right panel and the metadata area without scrolling the watch page. */
+html.ytg-watch-layout body{background:var(--ytg-background)!important}
+html.ytg-watch-layout #movie_player{inset:0 auto auto 0!important;width:calc(100vw - clamp(300px,34vw,620px))!important;height:min(68vh,calc((100vw - clamp(300px,34vw,620px)) * 9 / 16))!important}
+html.ytg-watch-layout #movie_player .caption-window.ytp-caption-window-bottom{bottom:10%!important}

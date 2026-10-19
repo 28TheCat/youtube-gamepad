@@ -28,8 +28,9 @@ export const positions: Record<string, string> = {
   Select: 'View / Share / −', Start: 'Menu / Options / +', L3: 'Left stick press', R3: 'Right stick press'
 };
 export const positionsOnPad: Record<string, [number, number]> = {
-  A: [74.5, 46.75], B: [81, 37], X: [68, 37], Y: [74.5, 27.25], LB: [24, 16], RB: [76, 16], LT: [16, 7], RT: [84, 7],
-  Select: [43.2, 36.5], Start: [56.8, 36.5], L3: [26.3, 36.5], R3: [63, 57.5]
+  A: [71.932, 46.144], B: [79.198, 36.623], X: [64.566, 36.623], Y: [71.882, 25.743],
+  LB: [31.9, 10.5], RB: [68.1, 10.5], LT: [23.5, 7], RT: [76.5, 7],
+  Select: [45.769, 32.601], Start: [54.271, 32.533], L3: [35.636, 62.546], R3: [64.475, 62.407]
 };
 export function swapBinding(values: Bindings, action: BindingAction, button: number) {
   if (!Number.isInteger(button) || !Object.hasOwn(schema.keys, button)) throw new Error('Invalid physical button');

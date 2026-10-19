@@ -1,9 +1,20 @@
-/* The category surface owns its ring, avoiding a second native button ring. */
+/* Keep the native browse roots hidden for the entire custom-surface lifetime.
+   Leave their DOM intact for native playback and page navigation.
+   This manifest stylesheet applies to late/replaced roots before they paint. */
+html.ytg-custom-browse:not([data-ytg-native]) :is(ytd-page-manager,ytd-guide-renderer,ytd-mini-guide-renderer,tp-yt-app-drawer#guide){
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+html.ytg-custom-browse.ytg-api-categories :is(ytd-feed-filter-chip-bar-renderer,#chips-wrapper,yt-chip-cloud-chip-renderer){visibility:hidden!important;pointer-events:none!important}
+
+/* Preserve category visibility and configured order. */
 html.ytg-browse:not([data-ytg-native]) yt-chip-cloud-chip-renderer[data-ytg-category-hidden]{display:none!important}
 html.ytg-browse:not([data-ytg-native]) .ytg-category-list{display:flex!important;align-items:center;flex-wrap:nowrap!important}
 html.ytg-browse:not([data-ytg-native]) .ytg-category-list>yt-chip-cloud-chip-renderer{order:var(--ytg-category-order,0);flex-shrink:0}
-html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected:has(.ytChipShapeChip,#chip-shape-container):is(:focus,:focus-visible),
-html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected button:not(.ytChipShapeChip):not(#chip-shape-container):is(:focus,:focus-visible) {
+/* Native fill alone marks the active filter. */
+html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected,
+html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected :is(button,.ytChipShapeChip,#chip-shape-container) {
   outline:none!important;box-shadow:none!important;
 }
 /* A video card's DOM focus can land on its title link while the overlay
@@ -15,14 +26,6 @@ html.ytg-gamepad-input #ytg-browse-grid a[data-browse-id]:is(:focus,:focus-visib
   box-shadow:none!important;
 }
 
-/* Native fill marks the active filter; gamepad focus adds only an outline. */
-html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected .ytChipShapeChip,
-html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected #chip-shape-container:not(:has(.ytChipShapeChip)),
-html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected:not(:has(.ytChipShapeChip,#chip-shape-container)) {
-  border-radius:var(--ytg-chip-radius);
-  outline:var(--ytg-focus-width) solid var(--ytg-text)!important;
-  outline-offset:var(--ytg-focus-offset);
-}
 html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected .ytSpecTouchFeedbackShapeStroke,
 html.ytg-gamepad-input yt-chip-cloud-chip-renderer.ytg-selected .ytSpecTouchFeedbackShapeFill { display:none!important }
 
@@ -47,6 +50,12 @@ html.ytg-browse.ytg-gamepad-input:not([data-ytg-native]) .ytg-selected :is(a#thu
 }
 @media(prefers-reduced-motion:no-preference){
   html.ytg-browse:not([data-ytg-native]) :is(a#thumbnail,.yt-lockup-view-model__content-image){transition:box-shadow var(--ytg-focus-duration) var(--ytg-focus-easing)}
-  html.ytg-browse:not([data-ytg-native]) yt-chip-cloud-chip-renderer{transition:filter var(--ytg-focus-duration) ease}
-  html.ytg-browse.ytg-gamepad-input:not([data-ytg-native]) yt-chip-cloud-chip-renderer.ytg-selected{filter:drop-shadow(0 3px 6px #0002)}
 }
+
+/* Browse and non-immersive watch pages share our banner; retain native actions. */
+/* Keep the shared header geometry while preventing focus on hidden controls. */
+html:is(.ytg-browse-header,.ytg-custom-browse):not([data-ytg-native]) ytd-masthead{display:block!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important}
+html.ytg-browse-header[data-ytg-browse-mode="youtube"] ytd-app{--ytd-masthead-height:56px;--ytd-toolbar-height:56px}
+/* The account overlay owns scrolling until it closes. Lock both native roots
+   here because the overlay stylesheet lives inside the browse ShadowRoot. */
+html.ytg-account-open,html.ytg-account-open body{overflow:hidden!important}

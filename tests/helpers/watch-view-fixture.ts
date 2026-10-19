@@ -167,7 +167,7 @@ export let YTGamepadWatchView!: ModuleFactory<WatchViewDependencies,WatchView>;
     hintMode = key;
     const entries = mode === 'adjusting' ? [['← / →', 'Seek'], ['A', 'Finish adjusting'], ['B', 'Back to timeline']]
       : mode === 'progress' ? [['A', 'Adjust position'], ['↑', 'Hide controls'], ['↓ / B', 'Back to controls']]
-      : mode === 'recommendations' ? [['↑ / ↓', 'Change group'], ['← / →', 'Select video'], ['A', 'Play'], ['B', 'Back to controls'], ['Start', 'Menu']]
+      : mode === 'recommendations' ? [['↑ / ↓ / ← / →', 'Select video'], ['A', 'Play'], ['B', 'Back to controls'], ['Start', 'Menu']]
       : [['A', 'Confirm'], ['B', 'Back'], ...(canSeek ? [['↑', 'Timeline · A Adjust']] : []), ['↓', 'Recommendations'], ...(canSeek ? [['LB / RB', 'Rewind / forward']] : []), ['Start', 'Menu']];
     hint.replaceChildren();
     for (const [key, label] of entries) {
@@ -238,7 +238,6 @@ export let YTGamepadWatchView!: ModuleFactory<WatchViewDependencies,WatchView>;
       [...controls, progress, ...cards].forEach(node => node.classList.toggle('selected',
         node === progress ? selected === 'progress' : cards.includes(node) ? selected === 'recommendation:' + cards.indexOf(node) : selected === node.dataset.action));
     },
-    recommendationPage(start: number) { cards.forEach((card, index) => { card.hidden = index < start || index >= start + 4; }); },
     feedback(value: { label: string; icon?: string; level?: number } | null) {
       status.replaceChildren(); status.textContent = value?.label || '';
       if (value?.icon) status.append(icon(value.icon));

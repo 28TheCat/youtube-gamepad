@@ -43,7 +43,7 @@ onMounted(() => {
 });
 onUnmounted(() => {
   window.removeEventListener('hashchange', showCategory);
-  chrome.storage.onChanged.removeListener(settings.changed);
+  chrome.storage?.onChanged?.removeListener?.(settings.changed);
   settings.dispose();
 });
 </script>
@@ -79,6 +79,12 @@ onUnmounted(() => {
 <input class="toggle" id="autoFullscreen" :checked="settings.values.autoFullscreen" @change="saveSetting('autoFullscreen', $event)" type="checkbox" aria-describedby="fullscreenHelp fullscreenDetails">
 </div>
 <VideoGridSettings :values="settings.values" :disabled="!settings.ready || settings.saving" @save="settings.saveValues" @reset="resetGridColumns" />
+<div class="setting-row">
+  <div class="setting-copy"><label for="playbackLayout">{{ t('Default playback layout') }}</label><p>{{ t('Applies when opening a video. Normal and widescreen use YouTube controls; page fullscreen uses TV controls. Browser fullscreen is separate.') }}</p></div>
+  <select id="playbackLayout" :value="settings.values.playbackLayout" @change="settings.saveValues({ playbackLayout: ($event.target as HTMLSelectElement).value as 'normal' | 'wide' | 'page' })">
+    <option value="normal">{{ t('Normal') }}</option><option value="wide">{{ t('Widescreen') }}</option><option value="page">{{ t('Page fullscreen (TV controls)') }}</option>
+  </select>
+</div>
 <details class="help"><summary>{{ t("TV layout and fullscreen explained") }}</summary><div class="help-content" id="fullscreenDetails"><p>{{ t("TV layout changes the YouTube page. Automatic fullscreen expands the browser window containing the current YouTube tab, like pressing F11.") }}</p><p>{{ t("Disconnecting the gamepad, turning off automatic fullscreen, or disabling the extension restores the previous window state. Fullscreen entered manually stays active.") }}</p><p>{{ t("The page-filling video layout is also independent of browser fullscreen.") }}</p></div></details>
 <CategorySettings />
 </section>

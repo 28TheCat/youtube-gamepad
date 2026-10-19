@@ -5,7 +5,9 @@ import { launchExtension, fixture, virtualPad } from './helpers/extension.mjs';
 for (const trustedTypes of [false, true]) {
   test(`Vue search preserves editing, pinyin and back (Trusted Types: ${trustedTypes})`, { timeout: 60000 }, async t => {
     const { context, worker } = await launchExtension(t);
-    await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false }));
+    // This scenario restores focus to a native card; custom-feed ownership is
+    // covered separately by input-mode-extension and browse tests.
+    await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, browseMode: 'youtube' }));
     await context.route('https://www.youtube.com/**', route => route.fulfill({
       contentType: 'text/html', body: fixture,
       headers: trustedTypes ? { 'content-security-policy': "require-trusted-types-for 'script'; trusted-types 'none'" } : {}
@@ -79,7 +81,7 @@ for (const trustedTypes of [false, true]) {
     await press(1); // Quick menu -> original page focus.
     await menu.waitFor({ state: 'hidden' });
     assert.match(await page.evaluate(() => document.activeElement?.getAttribute('href') || ''), /\/watch\?v=/);
-    // Reopening reads the native query, with a fresh single Vue tree.
+    // Reopening mounts a fresh single Vue tree.
     await press(3);
     await menu.locator('[data-vue-search]').waitFor();
     assert.equal(await menu.locator('#query').count(), 1);
@@ -89,7 +91,7 @@ for (const trustedTypes of [false, true]) {
   });
 }
 
-test('Vue search submits through native adapter and bounds untrusted history', { timeout: 60000 }, async t => {
+test('Vue search submits API destinations without native controls and bounds untrusted history', { timeout: 60000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false }));
   await context.addInitScript(() => localStorage.setItem('ytg-recent-searches', JSON.stringify(['<img onerror=alert(1)>', 'x'.repeat(257), 42])));
@@ -102,14 +104,16 @@ test('Vue search submits through native adapter and bounds untrusted history', {
   await setPad({ connected: true });
   await page.waitForFunction(() => document.documentElement.classList.contains('ytg-theater'));
   const open = async () => {
+    await page.bringToFront();
+    await setPad({ connected: true }); await page.waitForTimeout(100);
     await setPad({ connected: true, button: 3 });
     await menu.locator('[data-vue-search]').waitFor();
     await setPad({ connected: true }); await page.waitForTimeout(100);
   };
   await page.evaluate(() => {
-    document.querySelector('#search-icon-legacy').addEventListener('click', () => {
-      document.documentElement.dataset.submittedSearch = document.querySelector('input#search').value;
-    });
+    const app = document.createElement('ytd-app');
+    app.navigate_ = endpoint => { document.documentElement.dataset.submittedSearch = endpoint.searchEndpoint.query; };
+    document.body.append(app);
   });
   await open();
   assert.equal(await menu.locator('#recent button').count(), 1);
@@ -120,11 +124,16 @@ test('Vue search submits through native adapter and bounds untrusted history', {
   assert.equal(await page.evaluate(() => document.documentElement.dataset.submittedSearch), 'Vue search');
   await open();
   assert.equal(await menu.locator('#recent button').first().textContent(), '↶ Vue search');
-  await page.evaluate(() => document.querySelector('#search-icon-legacy').remove());
-  await menu.locator('#query').fill('cannot submit');
+  await page.evaluate(() => { document.querySelector('#search-icon-legacy').remove(); document.querySelector('input#search').remove(); });
+  await menu.locator('#query').fill('without native controls');
+  await menu.locator('#query').press('Enter');
+  await menu.waitFor({ state: 'hidden' });
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.submittedSearch), 'without native controls');
+  await open();
+  await menu.locator('#query').fill('x'.repeat(257));
   await menu.locator('#query').press('Enter');
   assert.match(await menu.locator('#message').textContent(), /unavailable/);
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ytg-recent-searches')).includes('cannot submit')), false);
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ytg-recent-searches')).includes('x'.repeat(257))), false);
   await page.setViewportSize({ width: 390, height: 720 });
   assert.ok(await menu.locator('#query').isVisible());
   assert.equal(await page.evaluate(() => document.querySelector('#yt-gamepad-menu').shadowRoot.querySelector('section').scrollWidth <= innerWidth), true);

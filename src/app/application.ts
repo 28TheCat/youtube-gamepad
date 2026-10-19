@@ -1,4 +1,5 @@
 import { createVueWatchView } from '../ui/vue-watch-view';
+import { ui } from '../ui/ui-api';
 import { mountBrowseOverlay } from '../ui/browse-overlay';
 import { mountBrowseSurface } from '../ui/browse-surface';
 import { registerMainDispose } from './main-lifecycle.ts';
@@ -13,11 +14,11 @@ import { startContent } from './content';
 import { finishEarlyContent, abortEarlyContent } from './early-start';
 import { waitForPageServer } from '../bridge/page-ready';
 import { configureDiagnosticsChannel } from '../diagnostics/diagnostics';
-import { mountSettingsLauncher } from '../settings/inline-settings';
 import { mountBrowseCategorySettings } from '../sites/browse-category-settings';
 export const localChannel = createApplicationChannel();
 const startup = new AbortController();
 const startupScope = YTGamepadRuntime.scope('startup');
+startupScope.cleanup(ui.destroy);
 startupScope.cleanup(() => { startup.abort(); abortEarlyContent(); });
 startupScope.listen(window, 'pagehide', event => {
   if (!(event as PageTransitionEvent).persisted) YTGamepadRuntime.destroy();
@@ -27,6 +28,7 @@ registerMainDispose(() => YTGamepadRuntime.destroy());
 async function startApplication() {
 try {
 const pageAccess = createPageClient();
+startupScope.cleanup(() => pageAccess.destroy?.());
 await waitForPageServer(pageAccess, startup.signal);
 if (startup.signal.aborted) return;
 // Missing MAIN keeps playback native through the existing capability checks.
@@ -38,15 +40,16 @@ startCoordinator({ interaction, pageAccess, localChannel, remoteHistory: true, c
   mountBrowseGrid: dependencies => mountBrowseSurface(pinia, dependencies, localChannel),
   mountQuickMenu: (container, _interaction, items, onAction) => mountQuickMenu(pinia, container, items, onAction)
 });
-const disposeContent = startContent(localChannel, () => YTGamepadRuntime.destroy());
+let settingsApplied!: () => void;
+const initialSettings = new Promise<void>(resolve => { settingsApplied = resolve; });
+const disposeContent = startContent(localChannel, () => YTGamepadRuntime.destroy(), settingsApplied);
 if (startup.signal.aborted) return;
 const extensionServices = YTGamepadRuntime.scope('extension-services');
 extensionServices.cleanup(disposeContent);
 extensionServices.cleanup(mountBrowseCategorySettings(YTGamepadRuntime));
-extensionServices.cleanup(mountSettingsLauncher(() => {
-  localChannel.publish({ source: 'yt-gamepad-show-settings' });
-}));
 configureDiagnosticsChannel(localChannel);
+await initialSettings;
+if (startup.signal.aborted) return;
 finishEarlyContent();
 } catch (error) {
   YTGamepadRuntime.destroy();

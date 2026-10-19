@@ -54,7 +54,7 @@ function changed(changes: Record<string, chrome.storage.StorageChange>, area: st
   if (area === 'local' && (changes.bindings || changes.bindingLayouts)) void reload();
 }
 onMounted(() => { chrome.storage.onChanged.addListener(changed); void reload(); });
-onUnmounted(() => { disposed = true; chrome.storage.onChanged.removeListener(changed); });
+onUnmounted(() => { disposed = true; chrome.storage?.onChanged?.removeListener?.(changed); });
 </script>
 <template>
   <div class="section-heading shortcut-heading"><div><h2 id="shortcutsTitle">{{ t("Gamepad & buttons") }}</h2><p>{{ t("Assign buttons to actions. Changes apply to YouTube tabs that are already open.") }}</p></div><button id="resetBindings" type="button" class="secondary-button" :disabled="disabled" @click="save({ ...schema.defaults }, 'Default bindings restored')">{{ t("Restore default bindings") }}</button></div>
@@ -64,7 +64,7 @@ onUnmounted(() => { disposed = true; chrome.storage.onChanged.removeListener(cha
   <p class="binding-layout-hint" id="bindingLayoutHint">{{ t("两套布局独立保存，进入对应页面时自动切换。点击手柄上的按键，修改对应功能。") }}</p>
   <div class="controller-layout">
     <div id="bindingLeft" class="controller-side"><BindingRow v-for="action in left" :key="action" :action="action" :layout="layout" :value="values[action]" :disabled="disabled" @change="change" @focus="active = $event" @blur="active = undefined" /></div>
-    <div class="controller-figure"><div id="controllerHotspots" class="controller-hotspots"><img class="controller-outline" :src="layoutImage" alt="手柄按键位置示意图" width="600" height="400"><button v-for="([x, y], key) in positionsOnPad" :key="key" type="button" class="controller-hotspot" :class="{ 'is-active': active && schema.keys[values[active]] === key }" :data-key="key" :style="{ left: `${x}%`, top: `${y}%` }" :disabled="disabled || !actionFor(key)" :aria-label="hotspotLabel(key)" :title="hotspotLabel(key)" @click="focusButton(key)">{{ key }}</button></div><p class="controller-caption" id="controllerCaption">{{ t(schema.layouts[layout]) }}{{ t("布局") }}</p></div>
+    <div class="controller-figure"><div id="controllerHotspots" class="controller-hotspots"><div class="controller-outline" role="img" :aria-label="t('Gamepad button positions')" :style="{ backgroundImage: `url(${layoutImage})` }" /><button v-for="([x, y], key) in positionsOnPad" :key="key" type="button" class="controller-hotspot" :class="{ 'is-active': active && schema.keys[values[active]] === key }" :data-key="key" :style="{ left: `${x}%`, top: `${y}%` }" :disabled="disabled || !actionFor(key)" :aria-label="hotspotLabel(key)" :title="hotspotLabel(key)" @click="focusButton(key)"><span class="controller-physical-icon" aria-hidden="true" data-ytg-family="generic" :data-ytg-first-key="key" data-ytg-icon="true">{{ key }}</span></button></div><p class="controller-caption" id="controllerCaption">{{ t(schema.layouts[layout]) }}{{ t("布局") }}</p></div>
     <div id="bindingRight" class="controller-side"><BindingRow v-for="action in right" :key="action" :action="action" :layout="layout" :value="values[action]" :disabled="disabled" @change="change" @focus="active = $event" @blur="active = undefined" /></div>
     <div class="controller-navigation"><h3>{{ t(settings.values.rightHandMode ? 'Right stick · D-pad' : '左摇杆 · 十字键') }}</h3><p>{{ t("上下左右移动选择") }}</p><span>{{ t("导航方向固定") }}</span></div>
     <div id="bindingBottom" class="controller-bottom"><BindingRow action="help" :layout="layout" :value="values.help" :disabled="disabled" @change="change" @focus="active = $event" @blur="active = undefined" /></div>

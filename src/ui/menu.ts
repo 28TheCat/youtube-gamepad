@@ -1,6 +1,7 @@
 import type { Dispose, InteractionEvent, MenuDependencies, MenuModule, MenuPort, ModuleFactory } from '../../types/ports';
 
 import { YTGamepadActions } from '../shared/actions.ts';
+import { ui } from './ui-api';
 export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTGamepadMenu: MenuModule | undefined;
 (() => {
   YTGamepadMenuModule = {
@@ -40,14 +41,14 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
   lifecycle.listen(window, 'resize', positionSearch);
   lifecycle.listen(window, 'scroll', positionSearch, true);
   lifecycle.listen(host, 'click', event => { if (event.composedPath()[0] === host) close(); });
-  function buttons() { return Array.from(root.querySelectorAll<HTMLButtonElement>('button')).filter(button => !button.hidden && !button.disabled && !button.closest?.<HTMLElement>('[hidden]')); }
+  function buttons() { return Array.from(root.querySelectorAll<HTMLButtonElement>('button')).filter(button => !button.hidden && !button.disabled && !button.closest?.<HTMLElement>('[hidden]') && (!button.getClientRects || button.getClientRects().length > 0)); }
   function focus() { const list = buttons(); selected = Math.max(0, Math.min(selected, list.length - 1)); list[selected]?.focus({ preventScroll: true }); list[selected]?.scrollIntoView({ block: 'nearest' }); }
   const search = createSearch({ root, host, menuState, send, buttons, focus, feedback, close,
     get controller() { return controller; }, get selected() { return selected; }, set selected(value) { selected = value; }
   });
   function stopSettings() {
     if (!settingsOpened) return;
-    settingsOpened = false; publish({ source: 'yt-gamepad-close-settings' });
+    settingsOpened = false; host.toggleAttribute?.('data-settings', false); publish({ source: 'yt-gamepad-close-settings' });
   }
   function finishClose() { search.unmount?.(); stopQuickMenu(); stopSettings(); host.setAttribute('data-closing', ''); host.style.display = 'none'; search.setTarget(null); focusManager?.close(host); controller?.interactionChanged?.(); }
   function close() { if (!menuState().opened) return; send({ type: 'MENU_CLOSE' }); finishClose(); }
@@ -76,10 +77,18 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
     search.initializeQuery();
     positionSearch(); controller.interactionChanged?.();
   }
+  lifecycle.cleanup(ui.registerPanel('settings', {
+    isOpen: () => menuState().opened && settingsOpened,
+    open: () => { if (!controller) return false; openSettings(); }, close
+  }));
+  lifecycle.cleanup(ui.registerPanel('search', {
+    isOpen: () => menuState().opened && menuState().view === 'search',
+    open: () => { if (!controller) return false; openSearch(); }, close
+  }));
   function feedback(text: string) { controllerStyle.hint(root.querySelector<HTMLElement>('#message')!, text); }
   function activate(action: string, button: HTMLButtonElement) {
-    if (action === 'search') openSearch();
-    else if (action === 'extensionSettings') openSettings();
+    if (action === 'search') ui.openPanel('search');
+    else if (action === 'extensionSettings') ui.openPanel('settings');
     else if (action === 'close') close();
     else Promise.resolve(controller.perform(action as import('../../types/ports').Action)).then(ok => {
       if (!lifecycle.destroyed && menuState().opened && button.isConnected)
@@ -234,7 +243,6 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
     }
   };
   const published = YTGamepadMenu;
-  published.destroy = lifecycle.destroy;
   lifecycle.cleanup(() => { if (YTGamepadMenu === published) YTGamepadMenu = undefined; });
   lifecycle.cleanup(() => {
     stopQuickMenu();

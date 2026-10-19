@@ -1,20 +1,73 @@
 <script setup lang="ts">
+import InterfaceIcon from './InterfaceIcon.vue';
+import BrowseModeSwitch from './BrowseModeSwitch.vue';
+import AccountPage from './AccountPage.vue';
+import type { mountBrowseMode } from './browse-mode';
+const props = defineProps<{ browseMode: ReturnType<typeof mountBrowseMode>; refreshNavigation?: () => void; focusAccount?: (node: HTMLElement) => void }>();
 import { useI18n } from '../shared/use-i18n';
-import { onMounted, onBeforeUnmount, ref } from 'vue';
+import { createPageClient } from '../bridge/page-client';
+import { ui } from './ui-api';
+import type { AccountSnapshot } from '../sites/youtube-account';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 const { t } = useI18n();
-const accountAvailable = ref(false);
-const account = () => document.querySelector<HTMLElement>('ytd-masthead button#avatar-btn,ytd-masthead a[href*="accounts.google.com"]');
-function home() {
-  const link = document.querySelector<HTMLAnchorElement>('ytd-masthead a#logo');
-  if (link) link.click(); else location.assign('/');
+const account = ref<AccountSnapshot>();
+const accountLoading = ref(false), accountFailed = ref(false);
+const currentAccount = computed(() => account.value?.accounts.find(item => item.selected));
+const accountAvatar = computed(() => currentAccount.value?.avatar || '');
+const accountName = computed(() => currentAccount.value?.name || '');
+const page = createPageClient();
+let disposed = false, generation = 0;
+async function loadAccount(force = false) {
+  if (disposed || accountLoading.value && !force) return;
+  const version = ++generation; accountLoading.value = true; accountFailed.value = false;
+  try {
+    const value = await page.readAccount?.(force);
+    if (disposed || version !== generation) return;
+    account.value = value; accountFailed.value = !value;
+  } catch { if (!disposed && version === generation) { account.value = undefined; accountFailed.value = true; } }
+  finally { if (!disposed && version === generation) { accountLoading.value = false; if (accountOpen.value) void nextTick(refresh); } }
 }
-let observer: MutationObserver;
+const reloadAccount = () => { void loadAccount(true); };
+const avatarFailed = ref(false);
+const accountOpen = ref(false);
+const accountButton = ref<HTMLElement>();
+const refresh = () => props.refreshNavigation?.();
+const focus = (node: HTMLElement) => props.focusAccount ? props.focusAccount(node) : node.focus();
+function showAccount() {
+  if (ui.state.openPanels.some(id => id === 'settings' || id === 'search')) return false;
+  accountOpen.value = true; reloadAccount();
+}
+function closeAccount(restore = true) {
+  accountOpen.value = false;
+  void nextTick().then(() => { refresh(); if (restore && accountButton.value) focus(accountButton.value); });
+}
+const routeChanged = () => closeAccount(false);
+watch(accountAvatar, () => { avatarFailed.value = false; });
+const home = () => { if (!page.openBrowseRoute?.('/')) location.assign('/'); };
+const releases: (() => void)[] = [];
 onMounted(() => {
-  const sync = () => { accountAvailable.value = !!account(); };
-  sync(); observer = new MutationObserver(sync);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  releases.push(ui.registerPanel('account', { isOpen: () => accountOpen.value,
+    open: showAccount, close: () => closeAccount() }));
+  releases.push(ui.registerFocus('account', () => {
+    if (!accountButton.value?.isConnected || ui.state.openPanels.length) return false;
+    focus(accountButton.value);
+    return (accountButton.value.getRootNode() as Document | ShadowRoot).activeElement === accountButton.value;
+  }));
+  void loadAccount();
+  document.addEventListener('yt-navigate-start', routeChanged);
+  document.addEventListener('yt-navigate-finish', reloadAccount);
+  document.addEventListener('yt-page-data-updated', reloadAccount);
+  window.addEventListener('focus', reloadAccount);
 });
-onBeforeUnmount(() => observer?.disconnect());
+onBeforeUnmount(() => {
+  for (const release of releases) release();
+  disposed = true; ++generation; page.destroy?.();
+  document.removeEventListener('yt-navigate-start', routeChanged);
+  document.removeEventListener('yt-navigate-finish', reloadAccount);
+  document.removeEventListener('yt-page-data-updated', reloadAccount);
+  window.removeEventListener('focus', reloadAccount);
+  document.documentElement.classList.remove('ytg-account-open');
+});
 </script>
 
 <template>
@@ -24,8 +77,11 @@ onBeforeUnmount(() => observer?.disconnect());
       <span>YouTube <small>Gamepad</small></span>
     </button>
     <div id="ytg-client-search"></div>
-    <button v-if="accountAvailable" class="client-account" type="button" :aria-label="t('Account')" @click="account()?.click()">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>
+    <BrowseModeSwitch :state="browseMode.state" :change="browseMode.change" />
+    <button ref="accountButton" :title="accountName" class="client-account" :class="{ 'has-avatar': accountAvatar && !avatarFailed }" type="button" :aria-label="t('Account')" aria-haspopup="dialog" :aria-expanded="accountOpen" @click="ui.openPanel('account')">
+      <img v-if="accountAvatar && !avatarFailed" :src="accountAvatar" alt="" @error="avatarFailed = true" />
+      <InterfaceIcon v-else name="person" />
     </button>
   </header>
+  <AccountPage v-if="accountOpen" :snapshot="account" :loading="accountLoading" :failed="accountFailed" :retry="reloadAccount" :refresh="refresh" :focus="focus" @close="ui.closePanel('account')" />
 </template>

@@ -4,7 +4,23 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
-test('live DVR uses moving seekable ranges and returns to the latest live edge', () => {
+test('VOD timeline covers the full duration despite partial or disjoint seekable ranges', () => {
+  const s = setup();
+  for (const ranges of [[[20, 35]], [[0, 35], [70, 80]]]) {
+    s.video.seekable = { length: ranges.length, start: i => ranges[i][0], end: i => ranges[i][1] };
+    const timeline = s.site.readPlayback().video.timeline;
+    assert.equal(timeline.start, 0);
+    assert.equal(timeline.end, 100);
+    assert.equal(s.site.seekTo(50), true);
+    assert.equal(s.video.currentTime, 50);
+    assert.equal(s.site.seekTo(200), true);
+    assert.equal(s.video.currentTime, 100);
+    assert.equal(s.site.seekTo(-10), true);
+    assert.equal(s.video.currentTime, 0);
+  }
+});
+
+test('live DVR uses moving seekable ranges and returns to the latest live edge', async () => {
   const s = setup(true);
   let ranges = [[100, 160], [180, 220]];
   s.video.duration = Infinity; s.video.currentTime = 200;
@@ -22,6 +38,7 @@ test('live DVR uses moving seekable ranges and returns to the latest live edge',
   ranges = [[190, 250]];
   s.site.perform('seekBack'); assert.equal(s.video.currentTime, 190);
   live.click(); assert.equal(s.video.currentTime, 250);
+  await Promise.resolve();
   assert.equal(live.disabled, true);
   assert.equal(s.video.paused, false);
   s.watch.show(); s.watch.handle('up'); s.watch.handle('confirm');
@@ -50,7 +67,11 @@ test('finite live metadata and unknown durations do not invent a DVR window', ()
 });
 
 function setup(integrated = false) {
-  let shadow, frame, clicks = 0, now = 0;
+  let shadow, frame, clicks = 0, now = 0, clockRegistrations = 0;
+  const frames = [];
+  const requestFrame = callback => { frames.push(callback); return frames.length; };
+  const setClock = callback => { clockRegistrations++; frame = callback; return 1; };
+  const clearClock = () => { frame = undefined; };
   const classes = new Set(), actions = [];
   function node(tag) {
     const listeners = {}, attributes = {}, names = new Set();
@@ -70,30 +91,29 @@ function setup(integrated = false) {
   }
   const video = { currentTime: 10, duration: 100, paused: false, pause() { this.paused = true; }, play() { this.paused = false; return Promise.resolve(); } };
   const native = node('button'); native.click = () => clicks++;
-  const anchor = node('a'); anchor.setAttribute('href', '/watch?v=next'); anchor.click = () => actions.push('navigate');
-  const nativeImage = node('img'); nativeImage.setAttribute('src', 'https://i.ytimg.com/vi/next/hqdefault.jpg');
-  const card = { querySelector(selector) {
-    if (selector.startsWith('a[')) return anchor;
-    if (selector.startsWith('#video-title')) return { textContent: '下一首歌' };
-    if (selector === 'img') return nativeImage;
-    return { textContent: '推荐频道' };
-  } };
-  let nativeCards = [card];
+  let nextItems = [{ key: 'next', href: '/watch?v=next', label: '下一首歌', channel: '推荐频道',
+    thumbnail: 'https://i.ytimg.com/vi/next/hqdefault.jpg', thumbnailFallback: 'https://i.ytimg.com/vi/next/hqdefault.jpg' }];
   const location = { pathname: '/watch', search: '?v=current', origin: 'https://www.youtube.com' };
   const events = {}, configs = [];
+  const listen = (name, callback) => {
+    const previous = events[name];
+    events[name] = event => { previous?.(event); callback(event); };
+  };
   const document = {
-    addEventListener(name, fn) { events[name] = fn; },
+    addEventListener: listen,
     createElement: node, createElementNS: (_ns, tag) => node(tag), body: node('body'),
-    documentElement: { dataset: {}, append() {}, classList: { contains: name => classes.has(name), add: name => classes.add(name), remove: name => classes.delete(name), toggle(name, value) { value ? classes.add(name) : classes.delete(name); } } },
+    documentElement: { dataset: {}, getAttribute: () => null, removeAttribute() {}, append() {}, classList: { contains: name => classes.has(name), add: name => classes.add(name), remove: name => classes.delete(name), toggle(name, value) { value ? classes.add(name) : classes.delete(name); } } },
     querySelector(selector) {
-      if (selector === '#movie_player') return { getPlayerResponse: () => ({ videoDetails: { videoId: 'current', title: '当前视频', author: '测试频道', shortDescription: '视频说明', viewCount: '123' } }) };
+      if (selector === '#movie_player') return { getPlayerResponse: () => ({ videoDetails: { videoId: 'current', channelId: 'UCcreator', title: '当前视频', author: '测试频道', shortDescription: '视频说明', viewCount: '123' } }) };
       if (selector.startsWith('video')) return video;
       if (selector === '.ytp-settings-menu') return null;
       if (selector.startsWith('.ytp-')) return native;
       return null;
-    }, querySelectorAll: selector => selector.startsWith('ytd-compact-video-renderer') ? nativeCards : []
+    }, querySelectorAll: () => []
   };
-  const window = { YTGamepadMenu: { opened: false, close() { this.opened = false; } }, addEventListener(name, fn) { events[name] = fn; }, postMessage() {}, YTGamepadInput: { connected: true, configure() {} }, YTGamepad: { refresh() {}, configure() {}, registerSite(config) { configs.push(config); } } };
+  const window = { YTGamepadMenu: { opened: false, close() { this.opened = false; } }, addEventListener: listen, postMessage() {}, YTGamepadInput: { connected: true, configure() {} }, YTGamepad: { refresh() {}, configure() {}, registerSite(config) { configs.push(config); } } };
+  window.__testWatchNext = () => ({ route: '/watch?v=current', recommendations: nextItems, queue: [], loading: false, failed: false });
+  window.__testOpenWatchVideo = () => { actions.push('navigate'); return true; };
   const controller = {
     state: { mode: 'playback', enabled: true, navigating: false },
     requestMode(mode) { this.state.mode = mode; window.YTGamepadWatch.sync(); },
@@ -109,11 +129,11 @@ function setup(integrated = false) {
     perform(action) { actions.push(action); if (action === 'playPause') video.paused = !video.paused; if (action === 'seekForward') video.currentTime += 10; return true; }
   };
   runInNewContext(['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/navigation/focus.ts', 'src/ui/styles.ts', 'src/ui/watch-view.ts', 'src/ui/watch-panels.ts', 'src/playback/watch.ts'].map(file => moduleSource(file)).join('\n'), {
-    window, document, location, URL, URLSearchParams, Date: { now: () => now }, getComputedStyle: () => ({ display: 'block' }), setTimeout: () => 1, clearTimeout() {}, setInterval(fn) { frame = fn; },
+    window, document, location, URL, URLSearchParams, Date: { now: () => now }, getComputedStyle: () => ({ display: 'block' }), requestAnimationFrame: requestFrame, setTimeout: () => 1, clearTimeout() {}, setInterval: setClock, clearInterval: clearClock,
     MutationObserver: class { observe() {} }
   });
   const watch = window.YTGamepadWatch;
-  const context = { window, document, location, URL, URLSearchParams, Date: { now: () => now }, history: { back() {} }, getComputedStyle: () => ({ display: 'block' }) };
+  const context = { window, document, location, URL, URLSearchParams, Date: { now: () => now }, history: { back() {} }, requestAnimationFrame: requestFrame, setInterval: setClock, clearInterval: clearClock, getComputedStyle: () => ({ display: 'block' }) };
   runInNewContext(moduleSource('src/sites/youtube.ts'), context);
   const site = window.YTGamepadSite;
   Object.assign(controller, {
@@ -138,8 +158,13 @@ function setup(integrated = false) {
     };
     watch.sync('playback', { enabled: true });
   }
-  return { watch, window, video, classes, actions, events, adapter: configs[0], anchor, nativeImage, site, document, location, get shadow() { return shadow; }, get clicks() { return clicks; }, tick: () => frame(), advance(ms) { now += ms; }, controller, clearCards() { nativeCards = []; watch.refresh(); } };
+  return { watch, window, video, classes, actions, events, adapter: configs[0], nextItems, site, document, location, get clockRegistrations() { return clockRegistrations; }, get shadow() { return shadow; }, get clicks() { return clicks; }, flushFrames() { while (frames.length) frames.shift()(); }, tick() { if (integrated) frame?.(); else { watch.refreshPlayback(); watch.checkIdle(); } this.flushFrames(); }, advance(ms) { now += ms; }, controller, clearCards() { nextItems = []; watch.refresh(); } };
 }
+
+test('watch creates no periodic timer and the coordinator supplies exactly one clock', () => {
+  assert.equal(setup().clockRegistrations, 0);
+  assert.equal(setup(true).clockRegistrations, 1);
+});
 
 test('watch controls observe asynchronous media failure and refresh playback after success', async () => {
   const s = setup(); s.video.paused = true;
@@ -160,25 +185,16 @@ test('watch controls observe asynchronous media failure and refresh playback aft
   assert.equal(button.getAttribute('aria-label'), 'Pause');
 });
 
-test('recommendation thumbnails recover from unloaded, placeholder and srcset images', () => {
+test('recommendation snapshots do not inspect native cards or unloaded images', () => {
   const s = setup();
-  const read = () => s.site.readWatchPage().recommendations[0].thumbnail;
-  const fallback = 'https://i.ytimg.com/vi/next/hqdefault.jpg';
-  s.nativeImage.setAttribute('src', '');
-  assert.equal(read(), fallback);
-  s.nativeImage.setAttribute('src', 'data:image/gif;base64,placeholder');
-  s.nativeImage.setAttribute('data-thumb', '//i.ytimg.com/vi/next/mqdefault.jpg');
-  assert.equal(read(), 'https://i.ytimg.com/vi/next/mqdefault.jpg');
-  s.nativeImage.setAttribute('data-thumb', '');
-  s.nativeImage.setAttribute('srcset', '//i.ytimg.com/vi/next/mqdefault.jpg 320w, //i.ytimg.com/vi/next/hqdefault.jpg 480w');
-  assert.equal(read(), fallback);
-  s.nativeImage.currentSrc = 'https://i.ytimg.com/vi/next/sddefault.jpg';
-  assert.equal(read(), s.nativeImage.currentSrc);
+  s.document.querySelectorAll = () => { throw new Error('native card scan'); };
+  assert.equal(s.site.readWatchPage().recommendations[0].thumbnail, 'https://i.ytimg.com/vi/next/hqdefault.jpg');
+  assert.equal(s.site.loadRecommendations(), false);
 });
 
 test('failed card images retry once and preserve their thumbnail container', () => {
   const s = setup();
-  s.nativeImage.setAttribute('src', 'https://i.ytimg.com/vi/next/expired.jpg');
+  s.nextItems[0].thumbnail = 'https://i.ytimg.com/vi/next/expired.jpg';
   s.watch.refresh();
   const find = (node, tag) => node.tagName === tag ? node : node.children?.map(child => find(child, tag)).find(Boolean);
   const findCard = n => n.dataset.videoId ? n : n.children?.map(findCard).find(Boolean);
@@ -199,6 +215,30 @@ test('watch shell uses safe DOM construction and restores the normal page when d
   assert.equal(s.watch.handle('up'), false);
   s.location.pathname = '/results'; s.watch.sync('browse', { enabled: true });
   assert.equal(s.classes.has('ytg-watch-active'), false);
+});
+
+test('showing controls reads page data once through the mode synchronization', () => {
+  const s = setup();
+  let reads = 0;
+  const readPage = s.controller.readWatchPage;
+  s.controller.readWatchPage = () => { reads++; return readPage(); };
+  s.watch.show();
+  assert.equal(reads, 1);
+  assert.equal(s.watch.state.mode, 'controls');
+});
+
+test('directional focus and page refresh do not read playback; media refresh does not read page data', () => {
+  const s = setup(); s.watch.show();
+  let pages = 0, playback = 0;
+  const readPage = s.controller.readWatchPage, readPlayback = s.controller.readPlayback;
+  s.controller.readWatchPage = () => { pages++; return readPage(); };
+  s.controller.readPlayback = () => { playback++; return readPlayback(); };
+  s.watch.handle('right'); s.watch.handle('left');
+  assert.equal(pages, 0); assert.equal(playback, 0);
+  s.watch.refreshPage();
+  assert.equal(pages, 1); assert.equal(playback, 0);
+  s.watch.refreshPlayback();
+  assert.equal(pages, 1); assert.equal(playback, 1);
 });
 
 test('progress requires A to adjust and A ends adjustment without hiding controls', () => {
@@ -255,7 +295,7 @@ test('description closes back to its original button and missing recommendations
   assert.equal(s.watch.state.row, 'controls'); assert.equal(s.watch.state.index, 4);
 });
 
-test('recommendations activate the source anchor and native settings remain delegated', () => {
+test('recommendations activate API destinations and native settings remain delegated', () => {
   const s = setup(); s.watch.show('recommendations'); s.watch.handle('confirm');
   assert.deepEqual(s.actions, ['/watch?v=next', 'navigate']);
   s.watch.show(); for (let i = 0; i < 7; i++) s.watch.handle('right');
@@ -285,25 +325,19 @@ test('returning from recommendations and progress preserves the chosen control',
   assert.equal(s.watch.state.index, 6);
 });
 
-test('recommendations discard external URLs and detached anchors', () => {
-  const s = setup(); s.anchor.setAttribute('href', 'https://example.com/watch?v=next'); s.watch.refresh();
+test('recommendations reject destinations removed from the current API snapshot', () => {
+  const s = setup(); s.watch.show('recommendations'); s.clearCards();
   assert.equal(s.watch.state.recommendations, 0);
-  s.anchor.setAttribute('href', '/watch?v=next'); s.watch.show('recommendations'); s.anchor.isConnected = false;
-  s.watch.handle('confirm'); assert.deepEqual(s.actions, []);
+  assert.equal(s.site.openRecommendation('next', () => { throw new Error('must not navigate'); }), 'missing');
+  assert.deepEqual(s.actions, []);
 });
 
-test('loaded comments remain text and activate the original reply control', () => {
+test('loaded comments remain text and request replies through the page port', () => {
   const s = setup(); let clicks = 0, expanded = [];
-  const replies = { textContent: '2 条回复', isConnected: true, click() { clicks++; expanded = [{ textContent: '回复内容' }]; } };
-  const thread = {
-    querySelector(selector) {
-      if (selector === '#author-text') return { textContent: '测试用户' };
-      if (selector === '#content-text') return { textContent: '<img src=x> 测试评论' };
-      return replies;
-    }, querySelectorAll: () => expanded
-  };
-  const original = s.document.querySelectorAll;
-  s.document.querySelectorAll = selector => selector.startsWith('ytd-comments') ? [thread] : original(selector);
+  s.window.__testComments = () => ({ route: '/watch?v=current', loading: false, failed: false, hasMore: false,
+    items: [{ key: 'comment', author: '测试用户', text: '<img src=x> 测试评论', hasReplies: true,
+      repliesLabel: '2 条回复', expanded }] });
+  s.window.__testCommentReplies = key => { assert.equal(key, 'comment'); clicks++; expanded = ['回复内容']; return true; };
   s.watch.show(); for (let i = 0; i < 4; i++) s.watch.handle('right');
   s.watch.handle('confirm'); s.watch.handle('down'); s.watch.handle('down'); s.watch.handle('confirm');
   assert.equal(clicks, 1);
@@ -343,9 +377,7 @@ test('coordinator connects the real watch and site through playback, controls an
   s.adapter.interceptAction('back'); assert.equal(coordinator.mode, 'controls');
   s.adapter.interceptAction('back'); assert.equal(coordinator.mode, 'playback');
   let clickedMode;
-  const original = s.document.querySelector;
-  s.document.querySelector = selector => selector.startsWith('ytd-video-owner-renderer #channel-name')
-    ? { textContent: '频道', click() { clickedMode = coordinator.mode; } } : original(selector);
+  s.location.assign = href => { assert.equal(href, '/channel/UCcreator'); clickedMode = coordinator.mode; };
   s.adapter.interceptAction('up'); for (let i = 0; i < 4; i++) s.watch.handle('left'); s.watch.handle('confirm');
   assert.equal(clickedMode, 'browse'); assert.equal(s.watch.state.mode, 'browse');
   assert.equal(s.classes.has('ytg-watch-active'), false);
@@ -385,6 +417,7 @@ test('video completion opens gamepad recommendations once and can open them agai
   const finish = () => {
     s.video.ended = true; s.video.paused = true;
     s.events.ended({ target: { tagName: 'VIDEO' } });
+    s.flushFrames();
   };
   finish();
   assert.equal(s.watch.state.mode, 'controls');
@@ -398,6 +431,19 @@ test('video completion opens gamepad recommendations once and can open them agai
   finish();
   assert.equal(s.watch.state.mode, 'controls');
   assert.equal(s.watch.state.row, 'recommendations');
+});
+
+test('playlist completion leaves the native queue in charge of the next video', () => {
+  const s = setup();
+  s.location.search = '?v=current&list=RDcurrent&start_radio=1';
+  s.watch.sync();
+  s.video.ended = true; s.video.paused = true;
+  s.watch.refresh();
+  assert.equal(s.watch.state.mode, 'playback', 'the recommendation overlay must not interrupt playlist transitions');
+  s.location.search = '?v=next&list=RDcurrent&index=2';
+  s.video.ended = false; s.video.paused = false;
+  s.watch.sync();
+  assert.equal(s.watch.state.mode, 'playback');
 });
 
 test('video completion preserves an open gamepad panel', () => {
@@ -518,7 +564,7 @@ test('adapter snapshots do not expose native media or recommendation nodes', () 
   playback.video.currentTime = 99;
   assert.equal(s.video.currentTime, 10);
   assert.doesNotThrow(() => JSON.stringify({ page, playback }));
-  s.anchor.setAttribute('href', 'https://example.com/watch?v=next');
+  s.clearCards();
   assert.equal(site.openRecommendation('next', () => { throw new Error('must not navigate'); }), 'missing');
 });
 
@@ -572,4 +618,17 @@ test('B hides controls before exiting page fullscreen and does not navigate in t
   s.adapter.interceptAction('back');
   await Promise.resolve();
   assert.equal(exits, 1); assert.equal(s.video.paused, false);
+});
+
+test('shoulders switch recommendations and comments without seeking, starting on recommendations', () => {
+  const s = setup();
+  s.watch.show();
+  assert.equal(s.watch.state.panel, '');
+  const time = s.video.currentTime;
+  assert.equal(s.watch.handleInput('seekForward'), 'handled');
+  assert.equal(s.watch.state.panel, 'comments');
+  assert.equal(s.watch.handleInput('seekBack'), 'handled');
+  assert.equal(s.watch.state.panel, '');
+  assert.equal(s.watch.state.row, 'recommendations');
+  assert.equal(s.video.currentTime, time);
 });

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
-const source = ['src/shared/actions.ts', 'src/input/bindings.ts', 'src/app/content.ts'].map(file => legacyModuleSource(file)).join('\n');
+const source = ['src/ui/ui-api.ts', 'src/shared/actions.ts', 'src/input/bindings.ts', 'src/app/content.ts'].map(file => legacyModuleSource(file)).join('\n');
 function setup() {
   const listeners = new Map(), intervals = new Set(), messages = [], storageListeners = new Set(), runtimeListeners = new Set();
   let observerCallback, disconnects = 0, themeWrites = 0, delayedSettings;
@@ -142,3 +142,65 @@ for (const trigger of ['poll', 'settings']) {
     assert.equal(s.disconnects, 1);
   });
 }
+
+for (const missing of ['runtime', 'storage', 'events']) {
+  for (const trigger of ['poll', 'pagehide']) {
+    test(`bridge cleanup tolerates missing ${missing} on ${trigger}`, () => {
+      const s = setup(); s.boot();
+      const warnings = [];
+      s.context.console = { ...console, warn: (...args) => warnings.push(args) };
+      if (missing === 'events') {
+        s.context.chrome.runtime.id = undefined;
+        s.context.chrome.runtime.onMessage = undefined;
+        s.context.chrome.storage.onChanged = undefined;
+      } else s.context.chrome[missing] = undefined;
+      assert.doesNotThrow(() => {
+        if (trigger === 'poll') [...s.intervals][0]();
+        else s.fire('pagehide', { persisted: false });
+      });
+      assert.equal(s.intervals.size, 0);
+      assert.equal([...s.listeners.values()].reduce((n, set) => n + set.size, 0), 0);
+      assert.equal(s.disconnects, 1);
+      assert.equal(warnings.length, 0, 'missing extension APIs must not produce cleanup warnings');
+      const count = s.messages.length;
+      s.lateSettings(); s.observe();
+      assert.equal(s.messages.length, count);
+    });
+  }
+}
+
+for (const missing of ['runtime', 'storage']) {
+  test(`runtime messages safely dispose a bridge with missing ${missing}`, () => {
+    const s = setup(); s.boot();
+    const callbacks = [...s.runtimeListeners];
+    const warnings = [], replies = [];
+    s.context.console = { ...console, warn: (...args) => warnings.push(args) };
+    s.context.chrome[missing] = undefined;
+    for (const callback of callbacks) {
+      assert.doesNotThrow(() => callback({ type: 'ytg-connection-status' }, { id: 'test' }, reply => replies.push(reply)));
+      assert.doesNotThrow(() => callback({ type: 'ytg-read-theme' }, { id: 'test' }, reply => replies.push(reply)));
+      assert.doesNotThrow(() => callback({ type: 'ytg-open-inline-settings' }, undefined, reply => replies.push(reply)));
+    }
+    assert.equal(s.intervals.size, 0);
+    assert.equal(replies.length, 0);
+    assert.equal(warnings.length, 0);
+    assert.equal(s.disconnects, 1);
+  });
+}
+
+test('runtime messages reject missing or unrelated senders and ignore callbacks after disposal', () => {
+  const s = setup(); s.boot();
+  const callbacks = [...s.runtimeListeners], replies = [];
+  const status = { type: 'ytg-connection-status' };
+  for (const callback of callbacks) {
+    assert.doesNotThrow(() => callback(status, undefined, reply => replies.push(reply)));
+    callback(status, { id: 'other-extension' }, reply => replies.push(reply));
+  }
+  assert.equal(replies.length, 0);
+  for (const callback of callbacks) callback(status, { id: 'test' }, reply => replies.push(reply));
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0].connected, false);
+  s.fire('pagehide', { persisted: false });
+  for (const callback of callbacks) callback(status, { id: 'test' }, reply => replies.push(reply));
+  assert.equal(replies.length, 1, 'disposed callbacks must never reply');
+});

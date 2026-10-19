@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { readFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { installPageDOM } from './page-dom.mjs';
 
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 export const extensionRoot = process.env.YTG_EXTENSION_ROOT === 'latest-release'
@@ -35,6 +36,7 @@ export async function launchExtension(t) {
     await session.detach();
   }
   const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 15000 });
+  await context.addInitScript(installPageDOM);
   // Observe public events without exposing extension module instances.
   await context.addInitScript(() => {
     window.__testConnected = false;

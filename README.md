@@ -1,12 +1,20 @@
 # YouTube Gamepad
 
+评论面板的评论、回复和后续分页默认使用 YouTube.js，通过当前页面会话直接请求接口，不依赖原生评论节点或滚动隐藏页面。加载中阻止重复请求；失败保留已有内容并支持重试；切换视频取消旧请求。界面显示加载、失败及没有更多评论的状态。为限制面板及桥接数据量，每个视频最多展示 100 条评论，每条最多 100 条回复，所有展示评论共用 200 条回复上限。
+
+频道页默认使用 YouTube.js 解析频道地址的返回结果、频道标签、排序筛选及列表分页。顶部分类栏显示频道提供的视频、Shorts、直播、播放列表等标签及 `Sort · …` 排序按钮，沿用鼠标、键盘和手柄导航。频道别名和标签参数由 YouTube 接口解析，不硬编码；未支持的响应布局保留原有列表解析回退。切换标签或排序时刷新数据及对应控件，播放后返回仍恢复列表、选中位置和续页状态。请求沿用页面登录状态，无需代理或导出 Cookie。自动验证使用模拟响应；真实频道布局和账号仍需现场验证。
+
 故障诊断：在“完整设置 → 诊断”中主动导出 JSON 或清空记录。诊断只保存在扩展本地存储，包含时间、版本、模块、操作、原始错误消息及堆栈、界面状态摘要；最多保留 100 条且序列化记录不超过 32,768 个字符，超限移除最早记录。错误文本截断并隐藏网址，不采集视频标题、评论或完整页面地址。页面侧诊断属于未经信任的遥测，桥接和后台均校验并限流，不授权设置修改或文件导出。
 
 用手柄浏览 YouTube、控制视频播放，并通过屏幕键盘搜索英文或中文。
 
 当前扩展界面使用英文，覆盖设置、工具栏弹窗、快捷菜单、播放控件和搜索提示；中文拼音输入仍可使用。本文档保留中英文说明。
 
-插件仅在浏览器检测到已连接的标准映射手柄、且扩展开关开启时生效。未连接或断开手柄时恢复 YouTube 原生界面，不接管页面操作或 Escape 键；重新连接后自动恢复。
+扩展开关开启后，鼠标、键盘和标准映射手柄均可操作界面，无需先连接手柄。断开手柄后可继续使用键鼠；关闭扩展开关恢复 YouTube 原生界面。
+
+操作逻辑参考 [wiliwili](https://github.com/xfangfang/wiliwili) 与其 Borealis 导航框架，按本项目的浏览器架构独立实现：各设备共用方向、确认、返回等动作与弹窗焦点恢复规则，实际操作时自动切换输入提示。键盘使用方向键移动、Enter 确认、Esc 返回、空格播放/暂停、`/` 搜索、F1 快捷菜单、PageUp/PageDown 切换分类或快退/快进。输入框、下拉框和滑块保留原生键盘操作，搜索时保留实体键盘与输入法输入。鼠标左键点击、滚轮滚动，自定义界面内右键返回；原生内容保留浏览器右键菜单。
+
+输入提示在同一标签页的跳转、刷新、失焦和隐藏后保留，长按状态仍会清除，手柄需回中后才能继续操作。鼠标点击和滚轮立即接管；移动需在 250 毫秒的一段手势内达到 24 像素净位移。手柄动作后 200 毫秒内的同功能键盘事件按重复输入忽略；编辑框中的输入及实体打字立即接管。最近 32 条输入来源与切换决定仅保留在内存，不记录输入文字。
 
 Browse YouTube, control video playback, and search in English or Chinese with a gamepad.
 
@@ -16,17 +24,54 @@ Browse YouTube, control video playback, and search in English or Chinese with a 
 
 独立的 Chrome / Edge Manifest V3 扩展，使用 TypeScript 模块、Vue 3 和 Pinia，无服务器。运行 `npm ci` 和 `npm run build:extension` 后加载 `dist/`；开发与发布使用可重复的检查和打包流程。
 
+### 本地界面接口
+
+界面控制统一使用 ISOLATED 模块内的 `src/ui/ui-api.ts`。YouTube.js 负责数据；本地接口委托已有设置通道、Vue 界面和导航控制器执行主题、布局、焦点及弹层操作，不向页面脚本公开。
+
+```ts
+import { ui } from './src/ui/ui-api';
+
+await ui.setTheme('dark');       // light / dark，保存到扩展设置
+await ui.setLayout('wide');      // normal / wide / page，沿用现有布局流程
+ui.focus('search');              // account / search / content / categories / sidebar
+ui.openPanel('account');         // account / settings / search / description / comments / playlists
+ui.closePanel();                 // 关闭当前最上层面板，也可指定名称
+const snapshot = ui.state;       // 当前主题、布局和已打开面板的展示快照
+```
+
+命令返回是否执行成功；保存类命令返回 Promise<boolean>。目标不可用、被弹层遮挡或已经卸载时返回 false。入口由所属界面注册并在销毁时注销；接口不保存另一份界面状态。简介、评论和收藏只在播放界面可用，设置和搜索仍使用原有状态机及焦点恢复。
+
+### YouTube.js 列表解析
+
+账号头像、昵称和账号列表通过 API 获取，自定义账号页不再读取或打开原生账号菜单。登录、账号管理和切换入口跳转官方页面；账号列表展示当前选中状态，不直接提交身份切换请求。
+
+首页、订阅、历史记录和稍后观看默认使用 YouTube.js 解析首屏及后续分页，共用搜索的卡片转换。请求仍由现有页面适配层发送，保留当前账号和分类参数；首屏、分类与分页均通过 API 获取，不读取页面的 `ytInitialData`。稍后观看保留播放列表及视频位置。未支持的条目或解析失败复用原响应回退，不额外发请求。频道、探索及普通播放列表暂时沿用原有解析。
+
+搜索结果及后续分页默认使用 YouTube.js 18.1.0 解析，无需添加地址参数。请求仍由 YouTube 页面中的现有适配层发送，沿用当前账号、筛选参数和登录状态，无需代理服务器或导出 Cookie；Vue 继续接收原有卡片数据和不透明分页 ID。解析失败或遇到未支持的卡片时复用同一响应回退。网络错误保留原页重试，切换页面或取消请求会丢弃旧响应。
+
+该接入只影响搜索页，其他页面沿用原有数据流程。自动检查覆盖模拟响应、认证信息、取消、分页恢复和解析回退；真实 YouTube 的匿名及登录账号仍需现场验证。
+
 ### 功能亮点
 
+- 在“画面与布局 → 默认播放布局”选择普通、宽屏或网页全屏（电视控件）。普通和宽屏使用 YouTube 原生播放控件；网页全屏保留现有电视式播放界面。保存后同步应用到已打开的播放页，并在进入下一个视频时自动应用；同一视频内的手动布局切换不会被持续覆盖。浏览器全屏仍由独立开关控制。
+
 - 用方向键或左摇杆浏览视频卡片、侧边栏、播放器按钮和弹窗。
+- Shorts 提供独立的竖屏手柄播放界面，显示标题、作者、进度及列表位置。从扩展列表打开时，通过普通 YouTube 视频页承载原生媒体，再由专用 Shorts 界面操作；不提取或重建视频流。↑/↓ 切换当前已加载列表中的短视频，A 或 X 播放/暂停，←/→（或 LB/RB）快退/快进 5 秒，LT/RT 调整音量，B 返回来源列表。切换短视频不累积额外的返回步骤。保留播放页按键映射和原生弹窗优先级；可点击 Use YouTube controls 恢复原生界面。视频节点超过 10 秒未出现时自动恢复原生界面。直接访问原生 /shorts/ 地址仍保留其列表导航；独立页的上下切换仅覆盖打开时已加载的短视频，不表示无限推荐流。
+- 短视频画面居中，右侧独立显示点赞、评论、收藏和更多操作。Start 打开短视频操作菜单；评论和收藏面板打开时，方向键只操作面板，B 先关闭面板。评论展开后视频向左让位，小屏改为上下布局。快速上下切换保留最新目标，显示目标封面并沿用 YouTube 页内播放；不再使用 450 毫秒的固定输入拦截。
+- 扩展列表距底部 400px 时直接使用接口 continuation 加载下一页，不滚动隐藏的原生页面。分页失败保留已有视频并支持原页重试；连续两页没有新增视频时暂停自动加载，可手动继续。
+- 探索入口使用独立的频道页，音乐、电影、直播等复用同一页面组件；各频道使用对应数据源，保留接口分页和返回恢复。
+- 首页、订阅、历史记录和稍后观看共用卡片界面及手柄导航，支持分页加载和播放后返回恢复选中位置；稍后观看保留播放列表及视频位置。页面组织参考 [BewlyCat](https://github.com/keleus/BewlyCat) 的共用框架与内容列表设计，数据仍来自 YouTube；创作管理入口打开原版 YouTube Studio。
 - 在“Display & layout → 分类栏内容调整”中设置顶部分类的显示、隐藏及顺序，支持拖动、上下移位和重置；完整设置和页面内设置自动同步。分类读取 YouTube 提供的筛选项与请求参数，由 Vue 管理选中状态并请求、渲染分类视频及后续分页；遇到新分类后自动加入设置列表；“全部”保留，正在使用的分类切换后隐藏。LB/RB 按自定义顺序切换，退出电视布局恢复原生分类栏。
 - 电视式视频页：视频背景、标题、独立进度条、大按钮和横向推荐卡片。
+
+- 推荐视频和播放列表队列默认复用 YouTube.js 解析卡片展示信息，支持按尺寸选择缩略图和读取时长覆盖层；保留现有播放列表序号、Mix 参数、选中状态、重复视频的不同位置、分页及返回缓存。单张卡片解析失败时自动回退，不新增接口请求。
 - 播放 / 暂停、快进 / 快退、调整音量与快捷菜单字幕切换。
 - 检测到标准映射手柄后自动进入浏览器窗口全屏。
 - 电视式搜索键盘，支持英文大小写、数字、符号和光标编辑。
 - 离线中文拼音输入，支持候选翻页与本地学习。
 - 返回列表时尝试恢复原卡片焦点与滚动位置。
 - 可调整摇杆死区、长按首次重复延迟与连续移动间隔。
+- 页面内“手柄与按键”支持点击手柄示意图上的按键，选择功能或录入网页快捷键，并在图旁查看当前绑定。播放页与主页分别保存；占用的功能自动交换绑定。支持 Enter、Esc、Space、/、F1、PageUp/PageDown、方向键、−、=、J/K/L/M/C；不支持浏览器或 Windows 系统组合键。
 - 手柄检测与校准：显示浏览器识别到的标准和非标准设备、实时按钮/扳机读数、摇杆轴及死区预览；静止采样后可主动应用建议死区。
 
 ### 手柄检测与校准
@@ -106,7 +151,7 @@ MAIN world 脚本通过 Manifest V3 静态声明加载，避免手动插入脚�
 
 「手柄快捷键」可为确认、返回、播放、搜索、快进快退、音量、快捷菜单及搜索键盘功能分配标准手柄按键。选择已占用的按键会自动交换两项功能，支持恢复默认按键；方向键和左摇杆保留导航用途。修改自动保存在本机，已打开的 YouTube 页面和按键提示同步更新。按键菜单使用项目现有的 Kenney CC0 图标和 Xbox / PlayStation 物理位置对照；菜单内的图标跟随当前手柄类型，Switch 以相同物理位置为准。
 
-界面会根据当前使用的标准映射手柄自动切换按键图标和提示：Xbox 显示 A / B / X / Y，PlayStation 显示 × / ○ / □ / △ 和 L1 / R1 / L2 / R2，Switch 显示对应位置的 B / A / Y / X 和 L / R / ZL / ZR。Xbox 和 PlayStation 按键复用 [Controller Font 手柄图标](https://github.com/xfangfang/wiliwili/tree/yoga/resources/font)，提取原始字形轮廓为本地 SVG；Switch 和方向键沿用 [Kenney Input Prompts](https://kenney.nl/assets/input-prompts) 的原版 SVG（CC0）。来源和授权见 [第三方说明](THIRD_PARTY_NOTICES.md)。素材随扩展本地打包，使用时无需联网加载。整体界面配色仍跟随 YouTube 主题。搜索、菜单和播放提示在手柄切换时实时更新；多个手柄连接时跟随正在操作的手柄。无法识别的型号使用通用 Xbox 命名，识别依赖浏览器报告的设备名称；按键动作仍采用 Gamepad API 标准位置。
+界面会根据当前使用的标准映射手柄自动切换按键图标和提示：Xbox 显示 A / B / X / Y，PlayStation 显示 × / ○ / □ / △ 和 L1 / R1 / L2 / R2，Switch 显示对应位置的 B / A / Y / X 和 L / R / ZL / ZR。Xbox、PlayStation、Switch 和通用手柄按键统一使用 [Kenney Input Prompts](https://kenney.nl/assets/input-prompts) 的原版 SVG（CC0），面键保留原始配色。来源和授权见 [第三方说明](THIRD_PARTY_NOTICES.md)。素材随扩展本地打包，使用时无需联网加载。整体界面配色仍跟随 YouTube 主题。搜索、菜单和播放提示在手柄切换时实时更新；多个手柄连接时跟随正在操作的手柄。无法识别的型号使用通用 Xbox 命名，识别依赖浏览器报告的设备名称；按键动作仍采用 Gamepad API 标准位置。
 
 浏览模式：方向键 / 左摇杆移动选择，A 打开，B 关闭弹窗或返回。LB / RB 直接切换到上一个 / 下一个分类，无需先选中分类栏；到达两端时停止。
 
@@ -153,7 +198,7 @@ Y / Start 只允许从页面或播放区域打开搜索 / 快捷菜单；菜单�
 
 上线前必须完成 [完整扩展与真实 YouTube 验收](ACCEPTANCE.md)。自动化全绿只证明对应测试范围，不代表 Chrome / Edge 与真实手柄兼容性已通过。
 
-- 搜索框按 A 自动打开手柄键盘，带入原搜索词；B 关闭后回到搜索框。搜索采用 YouTube 电视式整页视图：顶部搜索栏、左侧最近 5 次搜索、右侧 A–Z 字母网格和底部空格 / 清除 / 搜索。默认选中 A，数字符号通过 &123 切换；输入同步至网站搜索框，提交使用网站原搜索按钮，B 返回原页面。配色跟随网站浅色 / 深色主题，左右可在历史与键盘之间切换。清除按钮清空输入，RT 或搜索按钮提交。历史记录保存在当前浏览器的 YouTube 网站存储中。
+- 搜索框按 A 自动打开手柄键盘，带入原搜索词；B 关闭后回到搜索框。搜索采用 YouTube 电视式整页视图：顶部搜索栏、左侧最近 5 次搜索、右侧 A–Z 字母网格和底部空格 / 清除 / 搜索。默认选中 A，数字符号通过 &123 切换；输入保存在扩展自己的搜索框中，提交通过经过校验的搜索路由进入 API 结果页，不依赖网站原搜索按钮；B 返回原页面。配色跟随网站浅色 / 深色主题，左右可在历史与键盘之间切换。清除按钮清空输入，RT 或搜索按钮提交。历史记录保存在当前浏览器的 YouTube 网站存储中。
 
 - 首页与搜索结果：方向移动、A 打开；滚动后选中边框跟随。
 - 视频页：X 暂停播放，肩键快进快退，扳机音量，Y 进入搜索模式。
@@ -167,7 +212,7 @@ Y / Start 只允许从页面或播放区域打开搜索 / 快捷菜单；菜单�
 
 ### 导航分区与焦点
 
-B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返回规则](BACK_BEHAVIOR.md)。窗口全屏时 Escape 优先退出全屏；非全屏时两者共用 `back` 动作及导航锁。长按 Escape 不连续退层，也不退出手柄模式。手动退出全屏后，刷新与切换焦点不会重新进入；断开并重新连接手柄后可再次自动全屏。拔掉当前手柄会退出手柄模式；松开手柄按键和摇杆后，再操作可重新进入。
+B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返回规则](BACK_BEHAVIOR.md)。窗口全屏时 Escape 优先退出全屏；非全屏时两者共用 `back` 动作及导航锁。长按 Escape 不连续退层，使用 Escape 会切换到键盘提示。手动退出全屏后，刷新与切换焦点不会重新进入；断开并重新连接手柄后可再次自动全屏。拔掉当前手柄会切回鼠标输入，界面仍支持键鼠；松开手柄按键和摇杆后，再操作可重新进入手柄输入。
 
 快捷菜单或搜索覆盖原生弹窗时，统一焦点模块暂时给下层弹窗添加 `inert`，避免原生焦点限制把选择拉回后台。下层弹窗仍保留在返回栈中；关闭上层界面时先解除限制，再恢复原选项。页面原有的 `inert` 属性不改动。
 
@@ -187,7 +232,7 @@ B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返�
 
 普通 YouTube 的播放器、字幕和登录状态继续保留，扩展接管视频页展示。标题和频道显示在顶部，独立进度条、大按钮与推荐卡片显示在底部。播放时按钮区无操作 5 秒后自动收起；暂停、选择进度、浏览推荐或打开功能面板时保持显示。说明使用独立面板；清晰度、字幕语言等设置沿用原播放器菜单。关闭设置后恢复原按钮焦点。首页与搜索保留原站视频列表，大屏模式仅精简外围导航。关闭手柄操作后恢复普通视频页。
 
-推荐卡片来自页面已加载的数据，最多展示 12 张；切换推荐视频沿用原站导航。沿手柄打开的推荐链退出时返回最初的列表。底部左侧按频道头像、说明、订阅排列；中央为快退 10 秒、播放/暂停、快进 10 秒；右侧的点赞、点踩、评论、保存共用圆角底座，字幕和设置共用另一底座。订阅和评价状态来自原站，保存打开 YouTube 原生播放列表选择窗口；登录提示和账号操作沿用 YouTube。
+相关推荐和播放列表队列由 YouTube 内部 `next` 接口获取并分页，各最多保留 120 条；队列条目显示在推荐之前，并保留播放列表和序号参数。切换视频沿用原站导航，播放控制与连续播放继续由原生播放器处理。沿手柄打开的推荐链退出时返回最初的列表。底部左侧按频道头像、说明、订阅排列；中央为快退 10 秒、播放/暂停、快进 10 秒；右侧的点赞、点踩、评论、保存共用圆角底座，字幕和设置共用另一底座。视频详情、订阅及评价状态由 YouTube.js 解析 API 响应；点赞、点踩、订阅和取消订阅复用当前页面登录会话发送 API 请求。保存打开扩展内的播放列表选择面板，可添加到已有列表或从列表移除。操作确认成功后更新状态，写入失败不会自动重试；未登录或无法确认状态时禁用对应按钮。
 
 ### 手柄播放流程
 
@@ -205,7 +250,7 @@ B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返�
 
 首页搜索栏在手柄模式下是整条可选中的入口，显示搜索文字和当前搜索快捷键提示。确认或搜索快捷键打开现有电视键盘，关闭后恢复入口焦点；按下进入视频区，按左进入分类栏，最右分类按右进入搜索入口。按键提示跟随手柄型号及用户绑定更新。鼠标模式使用可直接输入的搜索框。
 
-连接标准手柄并开启大屏布局后，列表页面使用完整客户端布局：顶部为 YouTube Gamepad 标识、搜索和账号入口；左侧为首页、订阅、个人内容与探索导航；右侧为分类栏和独立滚动的视频网格。视频标题、频道信息、卡片间距和焦点反馈采用统一主题变量，支持明暗主题。窄屏侧栏收为图标导航，保留可访问名称；默认列数随内容区宽度调整为 1 / 2 / 3 / 4 / 4 / 5 列，用户自定义列数继续生效。搜索、账号入口和侧栏操作连接原站能力，分类由 Vue 管理并请求 YouTube 接口；关闭大屏布局或断开手柄后恢复原站界面。
+开启扩展和大屏布局后，列表页面使用完整客户端布局：顶部为 YouTube Gamepad 标识、搜索和账号入口；左侧为首页、订阅、个人内容与探索导航；右侧为分类栏和独立滚动的视频网格。视频标题、频道信息、卡片间距和焦点反馈采用统一主题变量，支持明暗主题。窄屏侧栏收为图标导航，保留可访问名称；默认列数随内容区宽度调整为 1 / 2 / 3 / 4 / 4 / 5 列，用户自定义列数继续生效。侧栏的地区探索分类和“我的视频”地址由 YouTube guide API 提供，接口暂不可用时显示内置入口，不再扫描原生侧栏。搜索、账号入口和侧栏导航连接原站能力，分类由 Vue 管理并请求 YouTube 接口；关闭大屏布局或扩展后恢复原站界面，断开手柄仍可用键鼠操作。
 
 视频区左边界按左进入侧边栏，按右或 B 回到原卡片；顶部边界按上进入分类或搜索，按下返回视频区时恢复原卡片，B 直接返回视频区。切换分类后等待新列表加载，再选择第一张卡片。页面跳转保留既有的返回列表与滚动恢复机制。搜索继续使用原有电视式键盘。
 
@@ -217,7 +262,7 @@ B / Escape 的逐层返回表、搜索入口记录与焦点恢复约定见 [返�
 
 ### 电视版键盘参考
 
-2026-10-03 核对了 youtube.com/tv 下发的 kabuki main 脚本：英文布局、共用数字符号布局、LETTER_LAYOUT / NUMBER_LAYOUT 和 TEXT / BACKSPACE / SPACE / CLEAR / SEARCH / SWITCH_LANGUAGE 动作。扩展独立实现这些布局与动作，通过网页版原搜索按钮提交；不加载或执行下载的参考脚本。语言按钮选择 English、中文拼音或实体键盘。官方 zh-CN 模块仅含中文标签和字母布局，未包含拼音引擎；扩展另行实现离线候选，不依赖官方电视服务。LT 大小写、肩键光标移动是扩展保留的快捷操作。
+2026-10-03 核对了 youtube.com/tv 下发的 kabuki main 脚本：英文布局、共用数字符号布局、LETTER_LAYOUT / NUMBER_LAYOUT 和 TEXT / BACKSPACE / SPACE / CLEAR / SEARCH / SWITCH_LANGUAGE 动作。扩展独立实现这些布局与动作，通过已校验的搜索路由提交并由 API 加载结果；不加载或执行下载的参考脚本。语言按钮选择 English、中文拼音或实体键盘。官方 zh-CN 模块仅含中文标签和字母布局，未包含拼音引擎；扩展另行实现离线候选，不依赖官方电视服务。LT 大小写、肩键光标移动是扩展保留的快捷操作。
 
 ### 中文拼音输入
 
@@ -242,6 +287,7 @@ YouTube Gamepad is an independent Manifest V3 extension for Chrome and Edge. It 
 ### Features
 
 - Navigate video cards, the sidebar, player buttons, and dialogs with the D-pad or left stick.
+- Home, subscriptions, history and Watch Later share the card interface and gamepad navigation, with pagination and selection restoration after playback. Watch Later preserves playlist context and position. Page organization follows BewlyCat's shared shell and content lists; data comes from YouTube and creator tools open YouTube Studio.
 - Play/pause, seek backward/forward, adjust volume, and toggle captions through the quick menu.
 - Automatically enter browser window fullscreen when a standard-mapped controller is detected.
 - Search with a TV-style keyboard supporting letters, case switching, numbers, symbols, and cursor editing.
@@ -320,7 +366,7 @@ Previous window states are stored in `chrome.storage.session`, allowing restorat
 - **Header:** Left/right move between items; down enters content or the player.
 - **Player:** Browsing mode navigates control buttons; playback mode uses the dedicated controls above.
 - **Dialogs:** Opening a dialog selects its first available item and confines navigation and confirmation to it. Closing restores the previous external selection. Real YouTube dialog dismissal still needs hands-on verification.
-- **Returning:** The current tab remembers the selected category, card keys and scroll position for the latest 30 routes. Returning from a video reuses YouTube's native list or activates the saved category and waits for its list to load, then restores the original card focus and scroll position. Navigation-time scroll changes cannot overwrite the saved position. Restoration retries for up to five seconds, including scrolling to trigger native lazy loading; a missing card falls back to a surviving neighbor. List contents and continuation tokens remain owned by YouTube, so a refreshed native feed can differ from the earlier list. A full refresh clears these records.
+- **Returning:** The current tab remembers the selected category, card keys and scroll position for the latest 30 routes. Returning from a video restores the cached InnerTube list, selected category, card focus and scroll position. Navigation-time scroll changes cannot overwrite the saved position. Restoration retries for up to five seconds while the custom interface renders; a missing card falls back to a surviving neighbor. API feeds preserve loaded cards and their next-page handles when returning. Continuation tokens stay in the InnerTube service; the extension grid requests the next page within 400px of its bottom without scrolling hidden native lists. Failed pages retain existing cards and retry the same continuation. Two consecutive pages without new videos pause automatic loading; the Load more button remains available.
 
 The page stays still while the selected row is fully visible. When the row leaves the viewport, its top is aligned below the fixed search and category bars with a 16-pixel gap. Alignment is immediate to avoid measurement drift during held input. If no candidate is available, the current selection is retained. Selection transitions respect the system's reduced-motion preference.
 
@@ -420,3 +466,5 @@ Focus restoration for temporary layers is centralized in `focus.ts`. Owners prov
 在完整设置或页面内设置的“手柄与按键”中开启“右手单手操作预设”。右摇杆取代左摇杆移动焦点，十字键仍可使用；按 Xbox 物理位置，A 确认、B 返回、X 播放/暂停、Y 搜索、RB 打开快捷菜单，原 RB 快进移至 Menu/Start。提示图标继续跟随手柄型号。主页、播放、搜索和设置共用此预设，音量、进度及搜索键盘功能可通过右摇杆选择界面控件完成。
 
 预设默认关闭，不覆盖原有主页与播放页自定义绑定。开启时按键编辑暂时禁用，关闭立即恢复原有绑定和左摇杆导航。切换模式、切换页面或失焦后需先松开按键并让当前导航摇杆回中，避免误操作。评论沿用既有方向导航，尚未增加右摇杆独立连续滚动或用户自定义组合键。
+
+YouTube.js 的已接入能力与可扩展接口见 [接口接入清单](YOUTUBE_API.md)。

@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { resolve, sep, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { installPageDOM } from './page-dom.mjs';
 
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 export const bundleRoot = process.env.YTG_EXTENSION_ROOT === 'latest-release'
@@ -15,6 +16,7 @@ export async function browserPage(t) {
     ...(process.env.YTG_BROWSER_EXECUTABLE ? { executablePath: process.env.YTG_BROWSER_EXECUTABLE } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage();
+  await page.addInitScript(installPageDOM);
   page.setDefaultTimeout(7000);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));

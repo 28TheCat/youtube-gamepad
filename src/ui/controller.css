@@ -1,5 +1,4 @@
-/* Xbox/PS outlines come from wiliwili's Controller Font derivatives.
-   Switch and D-pad artwork uses Kenney Input Prompts (CC0).
+/* All controller artwork uses original Kenney Input Prompts (CC0).
    scripts/build-styles.mjs embeds SVG files as local data URLs. */
 [data-ytg-key][data-ytg-icon="true"]{background-image:var(--ytg-first-image)}
 [data-ytg-key*=" / "][data-ytg-icon="true"]{background-image:var(--ytg-first-image),var(--ytg-second-image)}
@@ -8,3 +7,11 @@
 .key-controller-badge [data-ytg-icon="true"]{width:24px;height:24px;min-width:24px;background-size:24px 24px}
 .search-panel .key-row button.has-controller-badge:is([data-action="NUMBER_LAYOUT"],[data-action="LETTER_LAYOUT"]){padding-bottom:28px}
 [data-ytg-hint] [data-ytg-icon="true"]{width:24px;height:24px;min-width:24px;background-size:24px 24px;margin-inline:2px}
+/* Preserve original face-button colors; tint white glyphs for both themes. */
+[data-ytg-family][data-ytg-icon="true"],#inline-settings [data-inline-key][data-ytg-family][data-ytg-icon="true"]{position:relative;background-color:transparent;border-radius:0}
+[data-ytg-family][data-ytg-icon="true"]:not([data-ytg-first-key="A"]):not([data-ytg-first-key="B"]):not([data-ytg-first-key="X"]):not([data-ytg-first-key="Y"]){background-image:none!important}
+[data-ytg-family][data-ytg-icon="true"]:not([data-ytg-first-key="A"]):not([data-ytg-first-key="B"]):not([data-ytg-first-key="X"]):not([data-ytg-first-key="Y"])::before{content:"";position:absolute;inset:0;background-color:currentColor;mask-image:var(--ytg-first-image);mask-size:32px 32px;mask-repeat:no-repeat;mask-position:center}
+[data-ytg-family][data-ytg-key*=" / "][data-ytg-icon="true"]::before{mask-image:var(--ytg-first-image),var(--ytg-second-image);mask-position:left center,right center}
+.key-controller-badge [data-ytg-family][data-ytg-icon="true"]::before,[data-ytg-hint] [data-ytg-family][data-ytg-icon="true"]::before{mask-size:24px 24px}
+[data-ytg-family="switch"][data-ytg-icon="true"]{background-image:none!important}
+[data-ytg-family="switch"][data-ytg-icon="true"]::before{content:"";position:absolute;inset:0;background-color:currentColor;mask-image:var(--ytg-first-image);mask-size:32px 32px;mask-repeat:no-repeat;mask-position:center}

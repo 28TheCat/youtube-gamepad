@@ -20,6 +20,8 @@ import { YTGamepadBrowseModule } from './browse.ts';
 import { YTGamepadRouteController } from './route-controller.ts';
 import { YTGamepadBindings } from '../input/bindings.ts';
 import { YTGamepadSeeking } from '../playback/seek';
+import { YTGamepadShortsModule } from '../playback/shorts';
+import { isShortsPlaybackRoute } from '../shared/shorts-route';
 import { currentLanguage, t } from '../shared/i18n';
 
 export let YTGamepadCoordinator: CoordinatorModule | undefined;
@@ -46,33 +48,51 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       createPanels: port => panelsFactory.create(port)
     }, callbacks, lifecycle) });
   const input = YTGamepadInput || YTGamepadInputModule?.create({ ...shared, localChannel,
+    canHandleInput: () => preferences.enabled && adaptation().status !== 'fallback',
     canRepeatMedia,
     temporarySpeed,
     isSearchOpen: () => !!(menu?.opened && menu.state.view === 'search') });
-  YTGamepadBrowseModule?.create({ runtime, core, isMenuOpen: () => !!menu?.opened, mountGrid: mountBrowseGrid });
+  YTGamepadBrowseModule?.create({ runtime, core, isMenuOpen: () => !!menu?.opened, mountGrid: mountBrowseGrid,
+    prepareVideo: href => appState().navigation?.target === href || prepareVideo(href) });
   const routeFactory = YTGamepadRouteController;
   const lifecycle = runtime.scope('coordinator');
-  let site: SitePort, watch: WatchModule;
+  let site: SitePort, watch: WatchModule | undefined, watchRenderer: WatchModule | undefined;
   let heldSeek: { route: string; action: Action; origin: number; target: number; distance: number } | null = null;
   const appState = () => interaction.state.app;
   const send = (event: InteractionEvent) => interaction.dispatch(event);
   send({ type: 'APP_INIT', route: location.pathname + location.search });
-  let savedPreferences = { enabled: true, theater: true }, suspended = false;
-  // Connection is a mandatory gate, independent of the saved enable switch.
+  let savedPreferences = { enabled: true, theater: true, playbackLayout: 'page' as 'normal' | 'wide' | 'page' }, suspended = false;
+  // All devices share the saved enable switch; connection only controls gamepad polling.
   let preferences = { ...savedPreferences, enabled: false };
   const routeNow = () => location.pathname + location.search;
   let adaptationSince = 0, rendering = false, checking = false, notice: {host:HTMLElement;message:HTMLElement;retry:HTMLButtonElement} | undefined, loading: HTMLElement | undefined;
+  let healthPolling: import('../../types/ports').Scope | undefined;
+  function syncHealthPolling() {
+    if (preferences.enabled && (location.pathname === '/watch' || appState().openingVideo && !!appState().navigation) && !document.hidden) {
+      if (!healthPolling && typeof setInterval === 'function') {
+        healthPolling = runtime.scope('watch-health');
+        healthPolling.interval(() => scheduleWatchRefresh(false, true, true), 500);
+      }
+    } else { healthPolling?.destroy(); healthPolling = undefined; }
+  }
+  lifecycle.cleanup(() => { healthPolling?.destroy(); healthPolling = undefined; });
   const adaptation = (): AdaptationSnapshot => appState().adaptation || { status: 'inactive', reason: '' };
   const surfaceReady = () => adaptation().status === 'ready' && adaptation().route === routeNow();
-  const visibleMode = () => location.pathname === '/watch' && surfaceReady() ? appState().mode : 'browse';
+  const visibleMode = () => !isShortsPlaybackRoute() && location.pathname === '/watch' && surfaceReady() ? appState().mode : 'browse';
   function syncLoading() {
     const app = appState();
-    document.documentElement.classList.toggle('ytg-watch-layout', preferences.enabled && location.pathname === '/watch');
+    const pageLayout = preferences.playbackLayout === 'page' && !isShortsPlaybackRoute();
+    document.documentElement.classList.toggle('ytg-watch-layout', preferences.enabled && pageLayout && location.pathname === '/watch');
+    site?.syncPlaybackLayout?.(preferences.enabled && !isShortsPlaybackRoute() && location.pathname === '/watch' ? preferences.playbackLayout : null);
     const destinationReady = surfaceReady() && app.navigation?.target === routeNow();
-    const active = preferences.enabled && (app.openingVideo && !!app.navigation && !destinationReady ||
+    // YouTube can expose the destination player before updating the watch URL.
+    // Position that first frame without changing the still-visible browse page.
+    document.documentElement.classList.toggle('ytg-player-primed', preferences.enabled && pageLayout &&
+      app.openingVideo && !!app.navigation && !destinationReady && !app.returning && adaptation().status !== 'fallback');
+    const active = preferences.enabled && !isShortsPlaybackRoute() && (app.openingVideo && !!app.navigation && !destinationReady ||
       location.pathname === '/watch' && (adaptation().status === 'waiting' || app.returning));
     // Player layout does not depend on metadata, decoded frames or SPA finish.
-    document.documentElement.classList.toggle('ytg-player-pending', active && location.pathname === '/watch' &&
+    document.documentElement.classList.toggle('ytg-player-pending', pageLayout && active && location.pathname === '/watch' &&
       !app.returning && adaptation().status !== 'fallback');
     if (active && !loading && typeof document.createElement === 'function') {
       loading = document.createElement('div'); loading.id = 'ytg-watch-loading';
@@ -138,7 +158,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     try { site.restoreNativeInterface(); } catch (error) { diagnose('restore.nativeInterface', error, 'site'); }
   }
   function failAdaptation(reason = 'Video interface unavailable') {
-    if (!preferences.enabled || location.pathname !== '/watch') {
+    if (!preferences.enabled || isShortsPlaybackRoute() || location.pathname !== '/watch') {
       setAdaptation('inactive'); restoreNative();
       if (notice) notice.host.hidden = true;
       return;
@@ -155,7 +175,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       // The native player remains visible throughout that wait.
       const opening = preferences.enabled && appState().openingVideo && !!appState().navigation;
       if (opening && (location.pathname !== '/watch' || appState().navigation?.target !== routeNow())) return;
-      if (!preferences.enabled || location.pathname !== '/watch') {
+      if (!preferences.enabled || isShortsPlaybackRoute() || location.pathname !== '/watch') {
         setAdaptation('inactive');
         if (notice) notice.host.hidden = true;
         return;
@@ -188,16 +208,9 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     } catch (error) { diagnose('checkAdaptation', error, 'site'); failAdaptation(); }
     finally {
       checking = false;
+      syncHealthPolling();
       if (heldSeek && (!canRepeatMedia() || heldSeek.route !== routeNow())) cancelHeldSeek();
       syncLoading();
-      try {
-        site.syncCommentPreload?.(preferences.enabled && surfaceReady() && visibleMode() !== 'browse' &&
-          !appState().navigation && !appState().returning && !hasTemporaryLayer());
-      } catch (error) {
-        diagnose('syncCommentPreload', error, 'site');
-        // Optional comment loading must not trigger a player fallback.
-        document.documentElement.classList.toggle('ytg-comments-preload', false);
-      }
     }
   }
   function retryAdaptation() {
@@ -205,6 +218,32 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     adaptationSince = Date.now(); setAdaptation('waiting');
     if (notice) notice.host.hidden = true;
     checkAdaptation(); renderMode();
+  }
+  let refreshPending = false, refreshPage = false, refreshPlayback = false, refreshIdle = false, refreshRoute = '';
+  function scheduleWatchRefresh(page = true, playback = !page, idle = false) {
+    if (lifecycle.destroyed || document.hidden || !preferences.enabled ||
+      (location.pathname !== '/watch' && !(appState().openingVideo && appState().navigation)) || isShortsPlaybackRoute()) return;
+    const route = routeNow();
+    if (refreshRoute !== route) { refreshPage = false; refreshPlayback = false; refreshIdle = false; }
+    refreshRoute = route; refreshPage ||= page; refreshPlayback ||= playback; refreshIdle ||= idle;
+    if (refreshPending) return;
+    refreshPending = true;
+    lifecycle.frame(() => {
+      const updatePage = refreshPage, updatePlayback = refreshPlayback, updateIdle = refreshIdle, expectedRoute = refreshRoute;
+      refreshPending = false; refreshPage = false; refreshPlayback = false; refreshIdle = false;
+      if (document.hidden || !preferences.enabled || expectedRoute !== routeNow()) return;
+      const wasReady = surfaceReady();
+      checkAdaptation();
+      // Becoming ready already calls renderMode -> watch.sync -> readPage.
+      if ((updatePage || updatePlayback) && wasReady && surfaceReady()) {
+        try {
+          if ((updatePage && !watch?.refreshPage) || (updatePlayback && !watch?.refreshPlayback)) watch?.refresh();
+          else { if (updatePage) watch?.refreshPage?.(); if (updatePlayback) watch?.refreshPlayback?.(); }
+        }
+        catch (error) { diagnose('refresh', error, 'watch'); failAdaptation(); }
+      }
+      if (updateIdle && surfaceReady()) watch?.checkIdle?.();
+    });
   }
   function readSafely<T>(operation: string, read: () => T, empty: () => T, essential = true): T {
     try { return read(); }
@@ -262,7 +301,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   // Every view command shares the same enablement and navigation policy.
   // Views read this state; their render notifications cannot write it back.
   function canRepeatMedia() {
-    return !lifecycle.destroyed && preferences.enabled && location.pathname === '/watch' && surfaceReady() && visibleMode() !== 'browse' &&
+    return !lifecycle.destroyed && preferences.enabled && (isShortsPlaybackRoute() || location.pathname === '/watch' && surfaceReady() && visibleMode() !== 'browse') &&
       !appState().navigation && !appState().returning && !hasTemporaryLayer() &&
       !document.hidden && (document.hasFocus?.() ?? true);
   }
@@ -329,12 +368,14 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   function request(type: 'mode', value: Mode): OperationResult;
   function request(type: 'media', value: Action): OperationResult | Promise<OperationResult>;
   function request(type: 'watchAction', value: WatchAction): OperationResult | Promise<OperationResult>;
+  function request(type: 'playlists'): false | Promise<readonly import('../../types/ports').SavedPlaylistSnapshot[] | undefined>;
+  function request(type: 'savePlaylist', value: string): OperationResult | Promise<OperationResult>;
   function request(type: 'seek', value: number): OperationResult;
   function request(type: 'recommendation', value: string): RecommendationResult | false;
   function request(type: 'replies', value: string): OperationResult;
   function request(type: 'comments', value?: boolean): OperationResult;
   function request(type: 'settings' | 'backSettings' | 'channel'): OperationResult;
-  function request(...[type,value]: ['moreRecommendations'|'settings'|'backSettings'|'channel'] | ['mode',Mode] | ['media',Action] | ['watchAction',WatchAction] | ['seek',number] | ['recommendation'|'replies',string] | ['comments',boolean?]) {
+  function request(...[type,value]: ['moreRecommendations'|'settings'|'backSettings'|'channel'|'playlists'] | ['mode',Mode] | ['media',Action] | ['watchAction',WatchAction] | ['seek',number] | ['recommendation'|'replies'|'savePlaylist',string] | ['comments',boolean?]) {
     if (lifecycle.destroyed) return false;
     if (!preferences.enabled || appState().navigation || appState().returning) return false;
     if (type === 'mode' && value !== 'browse' && !surfaceReady()) return false;
@@ -347,6 +388,8 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
         core.refresh?.();
         return result;
       }
+      case 'playlists': return site.listPlaylists();
+      case 'savePlaylist': return site.togglePlaylist(value);
       case 'seek': return site.seekTo(value);
       case 'settings': return openSettings();
       case 'backSettings': return backSettings();
@@ -369,15 +412,18 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     return menu?.opened ? { handle: (action: Action) => menu.handle(action) } : null;
   }
   function handleShortcut(action: Action) {
+    if (action === 'help' && shorts?.handle(action)) return 'handled';
     if (!['search', 'help'].includes(action) || !menu) return 'pass';
     return menu.handle(action);
   }
   const routes = routeFactory.create({ runtime, interaction, routeNow, renderMode, hasTemporaryLayer,
     location, history, remoteHistory, window, document, enabled: () => preferences.enabled,
     pause: () => { void site.perform('pause'); }, closeMenu: () => menu?.close(),
-    onStart: () => { cancelHeldSeek(); site.syncCommentPreload?.(false); }
+    onStart: cancelHeldSeek
   });
   const prepareVideo = routes.prepareVideo, pageBack = routes.pageBack;
+  const shorts = YTGamepadShortsModule?.create({ runtime, controllerStyle, pageAccess, enabled: () => preferences.enabled,
+    canHandle: () => !menu?.opened && !core.hasTemporaryLayer, dispatch: action => core.act(action) });
   function setMode(value: Mode) {
     if (lifecycle.destroyed) return;
     send({ type: 'MODE', value, route: routeNow() }); renderMode();
@@ -387,12 +433,12 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     rendering = true;
     try {
       checkAdaptation();
+      shorts?.sync();
       const mode = visibleMode();
       document.documentElement.dataset.ytgMode = mode;
       document.documentElement.classList.toggle('ytg-playback', preferences.enabled && mode !== 'browse');
       document.documentElement.classList.toggle('ytg-controls', preferences.enabled && mode === 'controls');
       watch?.sync(mode, preferences);
-      if (!preferences.enabled || mode === 'browse') site.syncCommentPreload?.(false);
       core.refresh?.();
     } catch (error) { diagnose('renderMode', error, 'watch'); failAdaptation(); }
     finally { rendering = false; }
@@ -421,11 +467,13 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       }
     }
   }
-  function applyLayout(values: { enabled?: boolean; theater?: boolean; deadzone?: number; repeatDelay?: number; bindings?: Record<string,number>; bindingLayouts?: Record<string,Record<string,number>>; repeatInterval?: number; }) {
+  function applyLayout(values: { playbackLayout?: 'normal' | 'wide' | 'page'; enabled?: boolean; theater?: boolean; deadzone?: number; repeatDelay?: number; bindings?: Record<string,number>; bindingLayouts?: Record<string,Record<string,number>>; repeatInterval?: number; }) {
     const wasEnabled = preferences.enabled;
     const keepSettingsOpen = !wasEnabled && menu?.opened && menu.settingsOpened;
     savedPreferences = { ...savedPreferences, ...values };
-    preferences = { ...savedPreferences, enabled: savedPreferences.enabled && input?.connected === true && !suspended };
+    preferences = { ...savedPreferences, enabled: savedPreferences.enabled && !suspended };
+    watch = preferences.playbackLayout === 'page' ? watchRenderer : undefined;
+    if (!watch) watchRenderer?.sync('browse', preferences);
     core.configure?.(preferences);
     if (!preferences.enabled && !keepSettingsOpen) {
       menu?.close();
@@ -433,7 +481,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     send({ type: 'ENABLE', enabled: preferences.enabled, route: routeNow() });
     // Mouse settings remain usable without a connected/enabled gamepad.
     if (keepSettingsOpen) send({ type: 'MENU_OPEN' });
-    document.documentElement.classList.toggle('ytg-theater', preferences.enabled && preferences.theater && input?.connected === true);
+    document.documentElement.classList.toggle('ytg-theater', preferences.enabled && preferences.theater);
     setMode(!wasEnabled && preferences.enabled && location.pathname === '/watch' ? 'playback' : appState().mode);
   }
   function interceptAction(action: Action, { current }: Partial<ActionContext> = {}) {
@@ -451,6 +499,10 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     return result.disposition !== 'pass';
   }
   function shouldShowSelection({ scope }: ActionContext) {
+    if (!preferences.enabled) return false;
+    if (scope === document && isShortsPlaybackRoute() && !shorts?.native) return false;
+    if (scope === document && document.documentElement.getAttribute('data-ytg-browse-mode') === 'youtube' &&
+      location.pathname !== '/watch' && !isShortsPlaybackRoute()) return false;
     return !menu?.opened && (scope !== document || (visibleMode() !== 'playback' && !(watch && visibleMode() === 'controls')));
   }
   function handleRegion(action: Action, context: Partial<ActionContext> = {}) {
@@ -461,6 +513,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   }
   function handleBase(action: Action, context: Partial<ActionContext> = {}) {
     if (appState().navigation || appState().returning) return 'blocked';
+    if (shorts?.handle(action)) return 'handled';
     if (location.pathname !== '/watch' || !surfaceReady() || appState().mode !== 'playback') return 'pass';
     return interceptAction(action, context) ? 'handled' : 'pass';
   }
@@ -470,12 +523,13 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     core.refresh?.();
   }
   function initialize(ports: {site:SitePort;watch:WatchModule}) {
-    site = ports.site; watch = ports.watch;
-    watch?.connect({ request, observePlayback, hasTemporaryLayer, requestAutoHide,
-      get state() { return { mode: visibleMode(), enabled: preferences.enabled, surfaceReady: surfaceReady(), navigating: !!appState().navigation || appState().returning }; },
+    site = ports.site; watchRenderer = watch = ports.watch;
+    watch?.connect({ request, observePlayback, hasTemporaryLayer, requestAutoHide, requestRefresh: scheduleWatchRefresh,
+      get state() { return { mode: visibleMode(), enabled: preferences.enabled && !isShortsPlaybackRoute() && preferences.playbackLayout === 'page', surfaceReady: surfaceReady(), navigating: !!appState().navigation || appState().returning }; },
       dispatchAction: (action: Action) => core.act(action),
       readRoute: site.readRoute,
       readWatchFeatures: site.readWatchFeatures,
+      readCommentsStatus: site.readCommentsStatus,
       readWatchPage: () => readSafely('readWatchPage', site.readWatchPage, () => ({ ...site.readRoute(), title: '', channel: '', description: '', recommendations: [] }), false),
       readPlayback: () => readSafely('readPlayback', site.readPlayback, () => ({ video: null, captionsEnabled: false, settingsOpen: false })),
       readComments: () => readSafely('readComments', site.readComments, () => [], false), hasNativeLayer: site.hasNativeLayer,
@@ -501,17 +555,13 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       perform: (action: Action) => request('media', action),
       prepareVideo, onSettingsClosed, pageBack, get navigating() { return !!appState().navigation || appState().returning; }, get mode() { return visibleMode(); }
     }));
-    lifecycle.cleanup(site.observePage(() => {
-      checkAdaptation();
-      if (surfaceReady()) { try { watch?.refresh(); } catch (error) { diagnose('refresh', error, 'watch'); failAdaptation(); } }
-    }));
-    if (typeof setInterval === 'function') lifecycle.interval(checkAdaptation, 500);
+    lifecycle.cleanup(site.observePage(() => scheduleWatchRefresh()));
     lifecycle.listen(document, 'ended', event => {
-      if ((event.target as HTMLElement | null)?.tagName === 'VIDEO' && surfaceReady()) watch?.refresh();
+      if ((event.target as HTMLElement | null)?.tagName === 'VIDEO' && surfaceReady()) scheduleWatchRefresh(false);
     }, true);
     for (const type of ['loadeddata', 'canplay', 'playing']) {
       lifecycle.listen(document, type, event => {
-        if ((event.target as HTMLElement | null)?.tagName === 'VIDEO') checkAdaptation();
+        if ((event.target as HTMLElement | null)?.tagName === 'VIDEO') scheduleWatchRefresh(false);
       }, true);
     }
     lifecycle.listen(window, 'yt-gamepad-connection', () => {
@@ -532,11 +582,13 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
         enabled: raw.enabled !== false,
         rightHandMode: raw.rightHandMode === true,
         theater: raw.theater !== false,
+        playbackLayout: raw.playbackLayout === 'normal' ? 'normal' as const : raw.playbackLayout === 'wide' ? 'wide' as const : 'page' as const,
         deadzone: Number.isFinite(raw.deadzone) ? Math.min(.75, Math.max(.15, raw.deadzone)) : .35,
-        repeatDelay: Number.isFinite(raw.repeatDelay) ? Math.min(1000, Math.max(150, raw.repeatDelay)) : 350,
+        repeatDelay: Number.isFinite(raw.repeatDelay) ? Math.min(1000, Math.max(150, raw.repeatDelay)) : 150,
         bindings: YTGamepadBindings.normalize(raw.bindings),
         bindingLayouts: YTGamepadBindings.normalizeLayouts(raw.bindingLayouts, raw.bindings),
-        repeatInterval: Number.isFinite(raw.repeatInterval) ? Math.min(500, Math.max(80, raw.repeatInterval)) : 140
+        shortcutLayouts: YTGamepadBindings.normalizeShortcuts(raw.shortcutLayouts),
+        repeatInterval: Number.isFinite(raw.repeatInterval) ? Math.min(500, Math.max(80, raw.repeatInterval)) : 80
       };
       input.configure(values);
       applyLayout(values);
@@ -554,7 +606,6 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     get mode() { return visibleMode(); }, get navigating() { return !!appState().navigation || appState().returning; } };
   initialize({ site: siteInstance, watch: watchInstance });
   const published = YTGamepadCoordinator;
-  published.destroy = lifecycle.destroy;
   lifecycle.cleanup(() => { if (YTGamepadCoordinator === published) YTGamepadCoordinator = undefined; });
   lifecycle.listen(window, 'yt-gamepad-button-end', event => {
     const { action, cancelled } = (event as CustomEvent<{ action?: string; cancelled?: boolean }>).detail || {};
@@ -569,14 +620,18 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     if (mode !== 'gamepad') cancelHeldSeek();
   });
   lifecycle.listen(window, 'blur', cancelHeldSeek);
-  lifecycle.listen(document, 'visibilitychange', () => { if (document.hidden) cancelHeldSeek(); });
+  lifecycle.listen(document, 'visibilitychange', () => {
+    if (document.hidden) cancelHeldSeek();
+    syncHealthPolling();
+    if (!document.hidden) scheduleWatchRefresh(false, false);
+  });
   lifecycle.cleanup(cancelHeldSeek);
   lifecycle.cleanup(() => {
     preferences = { ...preferences, enabled: false };
     send({ type: 'ENABLE', enabled: false, route: routeNow() }); routes.destroy(); restoreNative();
     notice?.host.remove?.();
     loading?.remove?.();
-    document.documentElement.classList.remove('ytg-playback', 'ytg-controls', 'ytg-theater', 'ytg-settings-open', 'ytg-player-pending', 'ytg-watch-layout');
+    document.documentElement.classList.remove('ytg-playback', 'ytg-controls', 'ytg-theater', 'ytg-settings-open', 'ytg-player-pending', 'ytg-player-primed', 'ytg-watch-layout');
     delete document.documentElement.dataset.ytgAdaptation;
   });
   lifecycle.listen(window, 'pagehide', event => { if (!event.persisted) runtime.destroy(); });

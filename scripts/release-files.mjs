@@ -42,11 +42,11 @@ export function releaseFiles(root, { source = false } = {}) {
   const files = [...new Set(['manifest.json', manifest.background.service_worker, ...pages, ...assets,
     ...Object.values(manifest.icons || {}),
     ...manifest.content_scripts.flatMap(entry => [...entry.js, ...(entry.css || [])]),
-    controllerManifest, 'assets/controller/controller-font/prompts.json', 'assets/controller/controller-font/upstream-revision.txt',
-    'assets/controller/controller-font/keymap_keyboard.ttf', 'assets/controller/controller-font/FREEWARE.txt',
-    'licenses/controller-font-FREEWARE.txt', 'assets/controller/layout.svg', ...Object.keys(controllerAssets.files),
+    controllerManifest, 'assets/controller/template.json', 'licenses/nicefrog-gamepad-LICENSE.txt', ...Object.keys(controllerAssets.files),
     'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt', 'licenses/kenney-input-prompts-LICENSE.txt',
-    'licenses/vue-LICENSE.txt', 'licenses/pinia-LICENSE.txt'])].sort();
+    'licenses/vue-LICENSE.txt', 'licenses/pinia-LICENSE.txt', 'licenses/mingcute-LICENSE.txt',
+    'licenses/youtubei-LICENSE.txt', 'licenses/fflate-LICENSE.txt', 'licenses/meriyah-LICENSE.txt',
+    'licenses/protobuf-LICENSE.txt', 'licenses/protobuf-BSD-LICENSE.txt'])].sort();
   for (const file of files) {
     if (source && file in entries) {
       if (!lstatSync(safePath(root, entries[file])).isFile()) throw new Error(`Missing entry: ${entries[file]}`);

@@ -1,7 +1,8 @@
 import type { useBrowseStore } from './browse-store';
 import type { createFeedClient } from '../bridge/feed-client';
-import type { BrowseSnapshot } from '../sites/youtube-browse';
+import type { BrowseSnapshot } from '../shared/browse-data';
 import type { FeedCategory } from '../sites/youtube-feed';
+import { isInnerTubeBrowseRoute } from '../shared/explore-pages';
 
 export interface BrowseReturnState {
   categories: FeedCategory[];
@@ -18,18 +19,18 @@ interface BrowseFeedDependencies {
   getRoute: () => string;
   isVisible: () => boolean;
   isRestoring: () => boolean;
-  stopBatch: () => void;
   changed: () => void;
   loadingChanged: (loading: boolean) => void;
   afterRender: () => Promise<unknown>;
   canResetFocus: () => boolean;
   resetFocus: () => void;
   restoreState?: () => BrowseReturnState | undefined;
+  unavailable?: () => void;
 }
 
 // Owns category requests and bounded route/category caches; the surface owns DOM and focus.
 export function createBrowseFeedController({ store, feed, getRoute, isVisible, isRestoring,
-  stopBatch, changed, loadingChanged, afterRender, canResetFocus, resetFocus, restoreState }: BrowseFeedDependencies) {
+  changed, loadingChanged, afterRender, canResetFocus, resetFocus, restoreState, unavailable }: BrowseFeedDependencies) {
   let feedActive = false, feedVersion = 0, nextPage: string | undefined;
   let feedSnapshot: BrowseSnapshot | undefined;
   let disposed = false;
@@ -37,7 +38,7 @@ export function createBrowseFeedController({ store, feed, getRoute, isVisible, i
     !disposed && version === feedVersion && isVisible() && route === getRoute();
   // Keep loaded pages for SPA back navigation, including continuation items.
   // Category IDs alone are not unique across routes.
-  const feeds = new Map<string, { category: string; snapshot: BrowseSnapshot; nextPage?: string; loadedAt: number }>();
+  const feeds = new Map<string, { snapshot: BrowseSnapshot; nextPage?: string; loadedAt: number }>();
   const cacheLifetime = 2 * 60 * 1000;
   let loadedAt = 0;
   const routeCategories = new Map<string, string>();
@@ -48,7 +49,7 @@ export function createBrowseFeedController({ store, feed, getRoute, isVisible, i
     routeCategories.set(route, store.category);
     const key = feedKey(route, store.category);
     feeds.delete(key);
-    feeds.set(key, { category: store.category, snapshot: feedSnapshot, nextPage, loadedAt });
+    feeds.set(key, { snapshot: feedSnapshot, nextPage, loadedAt });
     if (feeds.size > 30) feeds.delete(feeds.keys().next().value!);
     if (routeCategories.size > 30) routeCategories.delete(routeCategories.keys().next().value!);
   }
@@ -59,13 +60,16 @@ export function createBrowseFeedController({ store, feed, getRoute, isVisible, i
     if (!append && feedActive && id === store.category && feedSnapshot?.route === getRoute() &&
       !store.error && (store.loading || feedSnapshot.items.length > 0)) return;
     const page = append ? nextPage : undefined;
-    if (!append) { cacheFeed(); feed.cancel(); stopBatch(); }
+    if (!append) { cacheFeed(); feed.cancel(); }
     const version = ++feedVersion;
     const route = getRoute();
     feedActive = true; store.category = id; store.loading = true; store.error = '';
     loadingChanged(true);
-    const cached = !append ? feeds.get(feedKey(route, id)) : undefined;
+    // Channel tab/sort switches refresh their controls and opaque endpoints
+    // together. SPA back restoration still uses the saved full return state.
+    const channelRoute = /^\/(?:@[^/]+|(?:channel|c|user)\/[^/]+)/.test(route);
     const restoring = isRestoring();
+    const cached = !append && (!channelRoute || restoring) ? feeds.get(feedKey(route, id)) : undefined;
     if (cached && (restoring || Date.now() - cached.loadedAt < cacheLifetime)) {
       nextPage = cached.nextPage; feedSnapshot = cached.snapshot; loadedAt = cached.loadedAt; store.loading = false;
       loadingChanged(false);
@@ -90,6 +94,7 @@ export function createBrowseFeedController({ store, feed, getRoute, isVisible, i
       loadedAt = Date.now();
       store.loading = false;
       loadingChanged(false);
+      refreshCategories();
       cacheFeed();
       changed();
       if (!append) {
@@ -97,17 +102,30 @@ export function createBrowseFeedController({ store, feed, getRoute, isVisible, i
         if (isCurrent(version, route) && canResetFocus()) resetFocus();
       }
     } catch {
-      if (isCurrent(version, route)) { store.loading = false; store.error = '无法加载分类视频，请重试。'; loadingChanged(false); }
+      if (isCurrent(version, route)) {
+        store.loading = false; store.error = '无法加载分类视频，请重试。'; loadingChanged(false);
+        if (!append && !feedSnapshot?.items.length) unavailable?.();
+      }
     }
   }
-  function reset() {
+  function reset(preserveView = false) {
     cacheFeed();
     ++feedVersion;
     if (feedActive || store.loading) feed.cancel();
     feedActive = false; feedSnapshot = undefined; nextPage = undefined;
+    if (preserveView) return;
     if (store.categories.length) store.categories = [];
     store.category = ''; store.loading = false; store.error = '';
     loadingChanged(false);
+  }
+  function refreshCategories() {
+    // Lists can start with only the synthetic All category. Discover response
+    // filters without restarting the current feed.
+    if (!disposed && isVisible() && isInnerTubeBrowseRoute(getRoute()) && store.categories.length) {
+      const categories = feed.categories();
+      if (categories.length && categories.some(item => item.id === store.category) &&
+        JSON.stringify(categories) !== JSON.stringify(store.categories)) store.categories = categories;
+    }
   }
   function initialize() {
     if (disposed || !isVisible()) return false;
@@ -150,7 +168,7 @@ export function createBrowseFeedController({ store, feed, getRoute, isVisible, i
     return { categories: store.categories, category: store.category, snapshot: feedSnapshot,
       nextPage, activeItemId: store.activeItemId, scrollTop };
   }
-  return { changeCategory, reset, initialize, destroy, captureReturnState,
+  return { changeCategory, reset, initialize, refreshCategories, destroy, captureReturnState,
     get active() { return feedActive; },
     get snapshot() { return feedSnapshot; } };
 }

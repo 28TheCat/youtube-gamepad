@@ -19,7 +19,7 @@ function setup() {
   const document = {
     body: {}, documentElement: { dataset: {}, append() {}, classList: { contains: () => false } },
     querySelectorAll() { return overlay ? [overlay] : []; },
-    addEventListener(name, fn) { events[name] = fn; },
+    addEventListener(name, fn) { const previous = events[name]; events[name] = event => { previous?.(event); fn(event); }; },
     contains(el) { return nodes.includes(el) || overlay?.contains(el); }
   };
   const rootQuery = document.querySelectorAll;
@@ -29,7 +29,7 @@ function setup() {
     created.push(node); return node;
   };
   const location = { pathname: '/', search: '' };
-  const window = { addEventListener(name, fn) { winEvents[name] = fn; }, scrollBy() {}, scrollTo(pos) { context.scrollX = pos.left; context.scrollY = pos.top; } };
+  const window = { addEventListener(name, fn) { const previous = winEvents[name]; winEvents[name] = event => { previous?.(event); fn(event); }; }, scrollBy() {}, scrollTo(pos) { context.scrollX = pos.left; context.scrollY = pos.top; } };
   const context = { window, document, location, scrollX: 0, scrollY: 0, innerWidth: 1000, innerHeight: 800, getComputedStyle: () => ({ visibility: 'visible', display: 'block', opacity: '1' }), requestAnimationFrame: fn => fn(), MutationObserver: class { constructor(fn) { mutation = fn; } observe() {} } };
   runInNewContext(['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/navigation/navigation.ts', 'src/navigation/focus.ts', 'src/navigation/core.ts'].map(file => moduleSource(file)).join('\n'), context);
   // Inject layer policy just as the application coordinator does. The core
@@ -44,6 +44,51 @@ function setup() {
   window.YTGamepad.registerSite({ getKey: el => el.key, getSection: () => 'content', defaultSection: 'content', onAction(action) { if (action === 'back') overlay = null; } });
   return { nodes, make, events, location, window, context, ring: created.find(node => node.id === 'ring'), refresh: () => mutation([{ target: document.body }]), show(value) { overlay = value; }, open(items) { overlay = { ...make('dialog'), querySelectorAll: () => items, contains: el => items.includes(el) }; return overlay; } };
 }
+
+test('up from the first video row returns to the active category regardless of distance', () => {
+  const s = setup();
+  const card = { ...s.make('video'), region: 'content' };
+  const active = { ...s.make('music'), region: 'categories', getAttribute: name => name === 'selected' ? '' : null,
+    getBoundingClientRect: () => ({ left: 700, top: 0, width: 60, height: 30 }) };
+  const nearby = { ...s.make('all'), region: 'categories',
+    getBoundingClientRect: () => ({ left: 100, top: 0, width: 60, height: 30 }) };
+  const lower = { ...s.make('lower'), region: 'content',
+    getBoundingClientRect: () => ({ left: 100, top: 250, width: 100, height: 60 }) };
+  s.nodes.push(card, active, nearby, lower);
+  s.window.YTGamepad.registerSite({ getSection: el => el.region, defaultSection: 'content',
+    sections: { content: { layout: 'grid', exits: { up: ['categories'] } }, categories: { axis: 'horizontal' } } });
+  s.window.YTGamepad.focus(lower);
+  s.window.YTGamepad.act('up');
+  assert.equal(s.window.YTGamepad.current, card);
+  s.window.YTGamepad.act('up');
+  assert.equal(s.window.YTGamepad.current, active);
+});
+
+test('down from categories keeps a fully visible first row at its current scroll position', () => {
+  const s = setup();
+  let scrolls = 0;
+  const grid = { getBoundingClientRect: () => ({ left: 0, top: 80, bottom: 800, width: 1000, height: 720 }),
+    scrollTop: 40, scrollTo() { scrolls++; } };
+  const chip = { ...s.make('music'), region: 'categories',
+    getBoundingClientRect: () => ({ left: 100, top: 20, width: 100, height: 30 }) };
+  const card = { ...s.make('first'), region: 'content', closest: selector => selector === '[data-ytg-browse-grid]' ? grid : null,
+    getBoundingClientRect: () => ({ left: 100, top: 96, width: 300, height: 240 }) };
+  s.context.getComputedStyle = () => ({ visibility: 'visible', display: 'block', opacity: '1', scrollPaddingTop: '24px', scrollPaddingBottom: '24px' });
+  s.nodes.push(chip, card);
+  s.window.YTGamepad.registerSite({ getSection: el => el.region, defaultSection: 'categories',
+    sections: { categories: { axis: 'horizontal', exits: { down: ['content'] } }, content: { layout: 'grid' } } });
+  s.window.YTGamepad.focus(chip);
+  s.window.YTGamepad.act('down');
+  assert.equal(s.window.YTGamepad.current, card);
+  assert.equal(scrolls, 0);
+  assert.equal(grid.scrollTop, 40);
+  s.window.YTGamepad.focus(chip);
+  card.getBoundingClientRect = () => ({ left: 100, top: 60, width: 300, height: 240 });
+  s.window.YTGamepad.refresh();
+  s.window.YTGamepad.act('down');
+  assert.equal(s.window.YTGamepad.current, card);
+  assert.equal(scrolls, 1, 'a clipped row still scrolls into view');
+});
 
 test('refresh keeps a replacement card and repairs a removed selection to its previous neighbour', () => {
   const s = setup();
@@ -336,19 +381,23 @@ test('manual navigation cancels a delayed card restoration', () => {
   s.window.YTGamepad.focus(original); s.events['yt-navigate-start']();
   s.location.pathname = '/watch'; s.nodes.length = 0; s.events['yt-navigate-finish']();
   s.location.pathname = '/'; s.events['yt-navigate-finish']();
-  const other = s.make('other'); s.nodes.push(other); s.window.YTGamepad.navigate('right');
+  const other = s.make('other'); s.nodes.push(other); s.refresh(); s.window.YTGamepad.navigate('right');
   s.nodes.push(s.make('original')); s.refresh();
   assert.equal(s.window.YTGamepad.current, other); assert.equal(s.window.YTGamepad.restoring, false);
 });
 
-test('YouTube adapter deduplicates targets inside one video card', () => {
-  let adapter;
-  const adapterWindow = {};
-  runInNewContext(moduleSource('src/sites/youtube.ts'), { window: adapterWindow, document: { documentElement: { classList: { contains: () => false } } }, location: { pathname: '/' } });
-  adapter = adapterWindow.YTGamepadSite.createNavigationConfig({ mode: 'browse' });
-  const card = {}, thumbnail = { closest: () => card }, title = { closest: () => card }, other = { closest: () => ({}) };
-  const result = adapter.filterCandidates([thumbnail, title, other]);
-  assert.equal(result.length, 2); assert.equal(result[0], thumbnail); assert.equal(result[1], other);
+test('YouTube navigation targets custom browse controls and keeps native controls inside layers', () => {
+  const window = {};
+  runInNewContext(moduleSource('src/sites/youtube.ts'), { window });
+  const adapter = window.YTGamepadSite.createNavigationConfig({ mode: 'browse' });
+  assert.ok(adapter.selectors.includes('a[data-browse-id]'));
+  assert.ok(adapter.selectors.includes('.ytp-button'));
+  assert.ok(adapter.overlays.includes('ytd-menu-popup-renderer'));
+  assert.ok(adapter.overlayItems.includes('[role="menuitem"]'));
+  assert.doesNotMatch(adapter.selectors, /a#thumbnail|video-title|yt-lockup|ytd-guide|ytd-masthead|yt-chip-cloud/);
+  const original = { closest: () => ({}) };
+  assert.equal(adapter.getContainer(original), original);
+  assert.equal(adapter.getSelectionTarget(original), original);
 });
 
 test('sidebar confirmation and route change retain focus for the next direction', () => {

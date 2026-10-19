@@ -5,6 +5,24 @@ export let YTGamepadBindings!: BindingsSchema;
 (() => {
   const defaults = Object.freeze({ confirm: 0, back: 1, playPause: 2, search: 3, seekBack: 4, seekForward: 5, volumeDown: 6, volumeUp: 7, help: 9, keyboardSymbols: 10, keyboardCandidates: 11 });
   const keys = Object.freeze({ 0: 'A', 1: 'B', 2: 'X', 3: 'Y', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT', 8: 'Select', 9: 'Start', 10: 'L3', 11: 'R3' });
+  const keyboardActions: Record<string, string> = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    Enter: 'confirm', Escape: 'back', ' ': 'playPause', '/': 'search', F1: 'help',
+    PageUp: 'seekBack', PageDown: 'seekForward', '-': 'volumeDown', '=': 'volumeUp',
+    k: 'playPause', j: 'seekBack', l: 'seekForward', m: 'mute', c: 'captions'
+  };
+  function normalizeShortcuts(raw: unknown): Record<string, Record<string, string>> {
+    const result: Record<string, Record<string, string>> = { watch: {}, browse: {} };
+    for (const layout of ['watch', 'browse']) {
+      const source = (raw as Record<string, unknown> | null)?.[layout];
+      if (!source || typeof source !== 'object') continue;
+      for (const key of Object.values(keys)) {
+        const shortcut = (source as Record<string, unknown>)[key];
+        if (typeof shortcut === 'string' && Object.hasOwn(keyboardActions, shortcut)) result[layout][key] = shortcut;
+      }
+    }
+    return result;
+  }
   const labels = Object.freeze(Object.fromEntries(Object.keys(defaults).map(id => [id, YTGamepadActions.get(id)!.label])));
   function normalize(raw: unknown) {
     const values = raw && typeof raw === 'object' ? raw as Record<string,unknown> : {};
@@ -35,5 +53,6 @@ export let YTGamepadBindings!: BindingsSchema;
   }
   // A separate preset leaves both saved custom layouts intact.
   const rightHand = Object.freeze({ ...defaults, help: 5, seekForward: 9 });
-  YTGamepadBindings = { defaults, rightHand, keys, labels, normalize, layouts, normalizeLayouts, contextLabel };
+  YTGamepadBindings = { defaults, rightHand, keys, labels, normalize, layouts, normalizeLayouts, contextLabel, keyboardActions, normalizeShortcuts,
+    shortcutLabel: key => key === ' ' ? 'Space' : key === 'Escape' ? 'Esc' : key };
 })();

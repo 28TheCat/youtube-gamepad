@@ -59,7 +59,23 @@ test('watch surface exposes data and restores recommendation identity after reor
   await page.evaluate(() => { setPage(['b', 'a', 'b']); surface.focus(surface.snapshot().recommendations[2], false, 'controls'); });
   assert.equal(await page.locator('#ytg-watch .card.selected').count(), 1, 'duplicate videos have separate focus identities');
   assert.equal(await page.locator('#ytg-watch .card.selected').getAttribute('data-focus-id'), 'recommendation:b:1');
+  await page.evaluate(() => {
+    setPage(Array.from({ length: 24 }, (_, index) => 'video-' + index));
+    surface.focus(surface.snapshot().recommendations[20], false, 'controls');
+  });
+  const grid = await page.locator('#ytg-watch .recommendations').evaluate(node => {
+    const cards = [...node.querySelectorAll('.card')];
+    return { visible: cards.filter(card => !card.hidden).length,
+      firstRow: cards[0].offsetTop, secondRow: cards[4].offsetTop,
+      scrollTop: node.scrollTop, horizontalOverflow: node.scrollWidth > node.clientWidth };
+  });
+  assert.equal(grid.visible, 24, 'recommendations keep all rows rendered');
+  assert.ok(grid.secondRow > grid.firstRow, 'recommendations form rows below one another');
+  assert.ok(grid.scrollTop > 0, 'focusing a lower row scrolls the recommendation grid vertically');
+  assert.equal(grid.horizontalOverflow, false);
+  assert.equal(await page.locator('#ytg-watch .card.selected').getAttribute('data-video-id'), 'video-20');
   await page.evaluate(() => surface.panel.open('comments'));
+  assert.equal(await page.evaluate(() => WatchSurfaceFixture.ui.state.openPanels.includes('comments')), true);
   const targets = await page.evaluate(() => surface.snapshot().panel);
   const comment = targets.find(target => target.id === 'comment:comment-a');
   assert.ok(comment, 'comment focus uses a stable identity');
@@ -68,4 +84,5 @@ test('watch surface exposes data and restores recommendation identity after reor
   assert.equal(await page.locator('#ytg-watch .comment-body').textContent(), '<b>text</b>');
   await page.evaluate(() => { disposeSurface(); surface.page({ isWatch: true, recommendations: [] }, {}); surface.feedback({ label: 'late completion' }); });
   assert.equal(await page.locator('#ytg-watch').count(), 0);
+  assert.equal(await page.evaluate(() => WatchSurfaceFixture.ui.openPanel('comments')), false);
 });

@@ -2,8 +2,8 @@ import type { Action, Disposition, NavigationPolicy, NavigationSection, Scope } 
 
 export type InteractiveElement = HTMLElement & { disabled?: boolean };
 export type NavigationRoot = Document | HTMLElement;
-export interface BrowseState { category?: string; categoryScroll?: number; sidebarScroll?: number; gridScroll?: number }
-export interface BrowseRestore { clicked?: boolean; category?: string; activated?: boolean; previousFeed?: string }
+export interface BrowseState { category?: string; gridScroll?: number }
+export interface BrowseRestore { activated?: boolean; previousFeed?: string }
 export interface NavigationConfig extends Partial<NavigationPolicy> {
   overlays?: string;
   beforeActivate?(el: HTMLElement): boolean | void;
@@ -40,8 +40,9 @@ export interface NavigationReads {
 export interface RowMemory { column: number | null }
 export interface YouTubeVideoDetails { videoId?: string; isLive?: boolean; title?: string; author?: string; shortDescription?: string; channelId?: string; viewCount?: string }
 export interface YouTubePlayer extends HTMLElement {
+  getVideoData?(): { video_id?: unknown };
+  getPlayerResponse?(): { videoDetails?: { videoId?: unknown } };
   showControls?(): void; hideControls?(): void;
-  getPlayerResponse?(): { videoDetails?: YouTubeVideoDetails };
   getOption?(module: string, option: string): unknown;
   setOption?(module: string, option: string, value: unknown): void;
   loadModule?(module: string): void;

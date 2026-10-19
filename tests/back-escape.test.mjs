@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 
 function setup() {
   const listeners = {}, windowListeners = {}, actions = [], exits = [], pad = { index: 0, connected: true, mapping: 'standard', axes: [0, 0], buttons: Array.from({ length: 16 }, () => ({ pressed: false })) };
-  const node = () => ({ style: {}, attributes: {}, replaceChildren(...children) { this.children = children; }, setAttribute(name, value) { this.attributes[name] = value; }, getAttribute(name) { return this.attributes[name] ?? null; }, contains: () => false, attachShadow: () => ({ append() {} }) });
+  const node = () => ({ style: {}, attributes: {}, replaceChildren(...children) { this.children = children; }, setAttribute(name, value) { this.attributes[name] = value; }, getAttribute(name) { return this.attributes[name] ?? null; }, contains: () => false, attachShadow: () => ({ append() {}, querySelectorAll: () => [] }) });
   const document = {
     body: {}, hidden: false, hasFocus: () => true, documentElement: { append() {}, dataset: {}, classList: { toggle() {} } }, createElement: node,
     querySelectorAll: () => [], addEventListener(name, fn) { listeners[name] = fn; }
@@ -36,11 +36,11 @@ function setup() {
   return { window, actions, exits, send, pad, tick(time) { frame(time); } };
 }
 
-test('Escape stays native without a connected standard controller', () => {
+test('Escape returns without requiring a connected standard controller', () => {
   for (const values of [{ connected: false }, { mapping: '' }]) {
     const s = setup(); Object.assign(s.pad, values);
-    assert.deepEqual(s.send(), { prevented: 0, stopped: 0 });
-    assert.deepEqual(s.actions, []);
+    assert.deepEqual(s.send(), { prevented: 1, stopped: 1 });
+    assert.deepEqual(s.actions, ['back']);
   }
 });
 
@@ -70,12 +70,12 @@ test('synthetic native Escape cannot recursively dispatch back', () => {
   assert.deepEqual(s.send(), { prevented: 0, stopped: 0 });
 });
 
-test('held Escape does not return through multiple layers or change input mode', () => {
+test('held Escape returns once and selects keyboard input mode', () => {
   const s = setup();
   s.send(); s.send({ repeat: true }); s.send({ repeat: true });
   assert.deepEqual(s.actions, ['back']);
   assert.deepEqual(s.exits, []);
-  assert.equal(s.window.YTGamepadInput.mode, 'mouse');
+  assert.equal(s.window.YTGamepadInput.mode, 'keyboard');
   s.send(); assert.deepEqual(s.actions, ['back', 'back']);
 });
 

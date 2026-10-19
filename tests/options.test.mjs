@@ -22,6 +22,9 @@ test('settings normalize corrupt storage and preserve independent fullscreen pre
   assert.deepEqual(normalizeSettings({ enabled: 'false', theater: false, deadzone: Infinity, repeatDelay: 0, repeatInterval: 999 }),
     { ...settingDefaults, enabled: true, theater: false, autoFullscreen: false, deadzone: .35, repeatDelay: 150, repeatInterval: 500 });
   assert.equal(normalizeSettings({ theater: false, autoFullscreen: true }).autoFullscreen, true);
+  assert.equal(normalizeSettings({ playbackLayout: 'wide' }).playbackLayout, 'wide');
+  assert.equal(normalizeSettings({ playbackLayout: 'normal' }).playbackLayout, 'normal');
+  assert.equal(normalizeSettings({ playbackLayout: 'invalid' }).playbackLayout, 'page');
 });
 test('legacy combined setting migrates once, then independent switches persist', async t => {
   const { model, writes, stored } = setup(t, { theater: false });

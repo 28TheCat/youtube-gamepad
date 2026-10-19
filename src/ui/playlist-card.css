@@ -1,0 +1,12 @@
+/* The playlist template shares video loading and focus behavior, with one
+   pseudo-element for both stack edges and no extra thumbnail requests. */
+#ytg-browse-grid a[data-browse-id].playlist-card{position:relative;isolation:isolate;--ytg-playlist-stack-color:var(--ytg-playlist-stack-light,var(--ytg-playlist-stack-dark,var(--ytg-muted)))}
+html[dark] #ytg-browse-grid a[data-browse-id].playlist-card{--ytg-playlist-stack-color:var(--ytg-playlist-stack-dark,var(--ytg-playlist-stack-light,var(--ytg-muted)))}
+#ytg-browse-grid a[data-browse-id].playlist-card::before{content:"";position:absolute;top:8px;left:16px;right:16px;aspect-ratio:16/9;z-index:-1;border:1px solid var(--ytg-client-background);border-radius:var(--ytg-card-radius);background:var(--ytg-playlist-stack-color);box-shadow:0 -12px 0 -8px var(--ytg-playlist-stack-color);pointer-events:none}
+/* Keep the entire stack inside the stable focus frame, preserving the image ratio. */
+#ytg-browse-grid .playlist-card .card-cover{position:relative;aspect-ratio:auto;padding:16px 8px 8px;background:transparent}
+#ytg-browse-grid a[data-browse-id].playlist-card.ytg-selected img{scale:1}
+#ytg-browse-grid .playlist-badge{position:absolute;right:16px;bottom:16px;display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:4px;background:#000b;color:#fff;font-size:12px;font-weight:500;line-height:16px;pointer-events:none}
+#ytg-browse-grid .playlist-badge svg{width:14px;height:14px;flex:none}
+#ytg-browse-grid .cards[data-horizontal=true] .playlist-card .card-cover{flex:none;width:calc((100% - 20px) * var(--ytg-cover-flex,40) / 100)}
+#ytg-browse-grid .cards[data-horizontal=true] a[data-browse-id].playlist-card::before{right:auto;width:calc((100% - 20px) * var(--ytg-cover-flex,40) / 100 - 32px)}

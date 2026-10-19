@@ -1,10 +1,9 @@
 import { moduleSource } from '../scripts/test-source.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
-test('browse return restores a category by identity and waits for its native list', () => {
+test('browse return restores an API category by identity and waits for its list', () => {
   const window = {}; let selected = 'Music', clicks = 0, feed = ['/watch?v=original'];
   const chips = ['All', 'Music'].map(label => ({
     isConnected: true, textContent: label, closest: () => null,
@@ -15,17 +14,17 @@ test('browse return restores a category by identity and waits for its native lis
     } : null
   }));
   const document = { documentElement: { classList: { contains: () => false } }, getElementById: () => null, querySelector: () => null,
-    querySelectorAll: selector => selector === 'yt-chip-cloud-chip-renderer,[data-ytg-category]' ? chips :
+    querySelectorAll: selector => selector === '[data-ytg-category]' ? chips :
     feed.map(href => ({ closest: () => null, getAttribute: () => href })) };
   runInNewContext(moduleSource('src/sites/youtube.ts'), { window, document, location: { pathname: '/' }, getComputedStyle: () => ({ visibility: 'visible' }) });
   const config = window.YTGamepadSite.createNavigationConfig({}), saved = config.captureBrowseState();
   assert.equal(saved.category, 'Music');
-  assert.equal(config.restoreBrowseState(saved, {}), true, 'retained native category/list is reused');
+  assert.equal(config.restoreBrowseState(saved, {}), true, 'retained API category/list is reused');
   selected = 'All'; feed = ['/watch?v=other']; chips.reverse();
   const attempt = {};
   assert.equal(config.restoreBrowseState(saved, attempt), false); assert.equal(clicks, 1);
   assert.equal(config.restoreBrowseState(saved, attempt), false, 'selected chip can precede asynchronous feed data');
-  assert.equal(clicks, 1, 'native activation happens once');
+  assert.equal(clicks, 1, 'category activation happens once');
   feed = ['/watch?v=original'];
   assert.equal(config.restoreBrowseState(saved, attempt), true);
   chips.length = 0;
@@ -34,8 +33,6 @@ test('browse return restores a category by identity and waits for its native lis
 
 test('Vue category restoration ignores hidden native chips and waits for API loading', () => {
   const window = {}; let selected = 'Music', loading = false, feed = ['old'];
-  const native = { isConnected: true, textContent: 'All', closest: () => null,
-    getBoundingClientRect: () => ({ width: 80 }), getAttribute: () => '', native: true };
   const chips = ['All', 'Music'].map(label => ({ isConnected: true, textContent: label, closest: () => null,
     getBoundingClientRect: () => ({ width: 80 }),
     getAttribute: name => name === 'selected' && selected === label ? '' : null,
@@ -43,10 +40,12 @@ test('Vue category restoration ignores hidden native chips and waits for API loa
       click() { selected = label; loading = true; } } : null }));
   const document = { documentElement: { classList: { contains: () => true } }, querySelector: () => null,
     getElementById: () => ({ dataset: { feedLoading: String(loading) } }),
-    querySelectorAll: selector => selector.includes('yt-chip') ? [native, ...chips] :
-      feed.map(href => ({ closest: () => null, getAttribute: () => href })) };
+    querySelectorAll: selector => {
+      assert.ok(!selector.includes('yt-chip-cloud-chip-renderer'), 'restoration must not scan native category nodes');
+      return selector === '[data-ytg-category]' ? chips : feed.map(href => ({ closest: () => null, getAttribute: () => href }));
+    } };
   runInNewContext(moduleSource('src/sites/youtube.ts'), { window, document, location: { pathname: '/' },
-    getComputedStyle: node => ({ visibility: node.native ? 'hidden' : 'visible' }) });
+    getComputedStyle: () => ({ visibility: 'visible' }) });
   const config = window.YTGamepadSite.createNavigationConfig({});
   const saved = config.captureBrowseState(); assert.equal(saved.category, 'Music');
   selected = 'All'; const attempt = {};
@@ -136,7 +135,7 @@ test('shoulders activate modern chip buttons outside the page manager', () => {
     click() { assert.fail('host clicks do not reach the inner button handler'); }
   }));
   const document = {
-    querySelectorAll: selector => selector === 'yt-chip-cloud-chip-renderer,[data-ytg-category]' ? chips : []
+    querySelectorAll: selector => selector === '[data-ytg-category]' ? chips : []
   };
   runInNewContext(moduleSource('src/sites/youtube.ts'), {
     window, document, location: { pathname: '/' },
@@ -155,7 +154,7 @@ test('shoulders activate modern chip buttons outside the page manager', () => {
   assert.deepEqual(clicks, [1, 2, 1], 'disabled category is not activated');
 });
 
-test('category focus ring follows the visible chip face and its smaller corners', () => {
+test('category selection target resolves the visible chip face and falls back to its wrapper', () => {
   const window = {};
   runInNewContext(moduleSource('src/sites/youtube.ts'), { window });
   const config = window.YTGamepadSite.createNavigationConfig({});
@@ -165,21 +164,4 @@ test('category focus ring follows the visible chip face and its smaller corners'
   assert.equal(config.getSelectionRadius(chip), 'var(--ytg-chip-radius, 8px)');
   chip.querySelector = () => null;
   assert.equal(config.getSelectionTarget(chip), chip);
-});
-
-test('TV account entry forwards to the native account target and rejects unavailable targets', () => {
-  const window = {};
-  let native = null, clicks = 0;
-  const document = { querySelector: () => native };
-  runInNewContext(moduleSource('src/sites/youtube.ts'), { window, document });
-  const site = window.YTGamepadSite;
-  assert.equal(site.readBrowseAccount(), null);
-  assert.equal(site.openBrowseAccount(), false);
-  native = { id: 'avatar-btn', isConnected: true, getAttribute: () => null, click() { clicks++; } };
-  assert.equal(site.readBrowseAccount().label, 'Account');
-  assert.equal(site.openBrowseAccount(), true); assert.equal(clicks, 1);
-  native.disabled = true;
-  assert.equal(site.openBrowseAccount(), false); assert.equal(clicks, 1);
-  native.disabled = false; native.id = '';
-  assert.equal(site.readBrowseAccount().label, 'Sign in');
 });

@@ -83,7 +83,7 @@ onMounted(async () => {
     ready.value = true;
   } catch { if (!disposed) message.value = '无法加载分类设置，请重新打开设置。'; }
 });
-onBeforeUnmount(() => { disposed = true; chrome.storage.onChanged.removeListener(changed); });
+onBeforeUnmount(() => { disposed = true; chrome.storage?.onChanged?.removeListener?.(changed); });
 </script>
 <template>
   <div ref="panel" class="category-settings">

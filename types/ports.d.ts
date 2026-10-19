@@ -7,6 +7,7 @@ export type Action = Direction | 'confirm' | 'back' | 'help' | 'search' | 'playP
   | 'goLive' | 'pause' | 'mute' | 'captions' | 'volumeDown' | 'volumeUp' | 'seekBack' | 'seekForward'
   | 'keyboardSymbols' | 'keyboardCandidates';
 export type WatchAction = 'subscribe' | 'like' | 'dislike' | 'save';
+export interface SavedPlaylistSnapshot { readonly key: string; readonly title: string; readonly selected: boolean }
 export type Capability = 'available' | 'missing' | 'failed';
 export interface RouteSnapshot { readonly key: string; readonly isWatch: boolean }
 export interface TimelineSnapshot {
@@ -25,11 +26,14 @@ export interface PlaybackSnapshot {
   readonly captionsEnabled: boolean; readonly settingsOpen: boolean;
 }
 export interface RecommendationSnapshot {
+  readonly href?: string; readonly queue?: boolean; readonly selected?: boolean;
   readonly metadata?: string; readonly duration?: string;
   readonly key: string; readonly label: string; readonly channel: string;
   readonly thumbnail: string; readonly thumbnailFallback: string;
+  readonly isPlaylist?: boolean;
 }
 export interface WatchPageSnapshot extends RouteSnapshot {
+  readonly queue?: readonly RecommendationSnapshot[];
   readonly title: string; readonly channel: string; readonly description: string;
   readonly recommendations: readonly RecommendationSnapshot[];
   // Optional because the existing degraded read returns a minimal page snapshot.
@@ -40,16 +44,16 @@ export interface CommentSnapshot {
   readonly key: string; readonly author: string; readonly text: string;
   readonly hasReplies: boolean; readonly repliesLabel: string; readonly expanded: readonly string[];
 }
-export interface BrowseAccountSnapshot { readonly label: string }
 export type WatchFeatures = Readonly<Partial<Record<'metadata' | 'recommendations' | 'comments'
   | 'channel' | 'captions' | 'settings' | 'subscribe' | 'like' | 'dislike' | 'save' | 'nativeLayers', Capability>>>;
 export interface AdaptationSnapshot { readonly status: 'inactive' | 'waiting' | 'ready' | 'fallback'; readonly reason: string; readonly route?: string }
 export interface CoordinatorSnapshot { readonly mode: Mode; readonly enabled: boolean; readonly surfaceReady: boolean; readonly navigating: boolean }
-export interface Settings { rightHandMode?: boolean; enabled: boolean; theater: boolean; deadzone: number; repeatDelay: number; repeatInterval: number; bindings?: Record<string, number>; bindingLayouts?: Record<string, Record<string, number>> }
+export interface Settings { playbackLayout?: 'normal' | 'wide' | 'page'; rightHandMode?: boolean; enabled: boolean; theater: boolean; deadzone: number; repeatDelay: number; repeatInterval: number; bindings?: Record<string, number>; bindingLayouts?: Record<string, Record<string, number>>; shortcutLayouts?: Record<string, Record<string, string>> }
 export type SearchTarget = HTMLInputElement | null;
 export type OperationResult = boolean | void;
 export type RecommendationResult = 'opened' | 'blocked' | 'missing';
 export interface WatchDataPort {
+  readCommentsStatus?(): { loading: boolean; failed: boolean; hasMore: boolean } | undefined;
   readRoute(): RouteSnapshot;
   readWatchPage(): WatchPageSnapshot;
   readPlayback(): PlaybackSnapshot;
@@ -61,6 +65,8 @@ export interface WatchRequest {
   (type: 'mode', value: Mode): OperationResult;
   (type: 'media', value: Action): OperationResult | Promise<OperationResult>;
   (type: 'watchAction', value: WatchAction): OperationResult | Promise<OperationResult>;
+  (type: 'playlists'): false | Promise<readonly SavedPlaylistSnapshot[] | undefined>;
+  (type: 'savePlaylist', value: string): OperationResult | Promise<OperationResult>;
   (type: 'seek', value: number): OperationResult;
   (type: 'recommendation', value: string): RecommendationResult | false;
   (type: 'replies', value: string): OperationResult;
@@ -73,6 +79,7 @@ export interface WatchPort extends WatchDataPort {
   observePlayback(playback: PlaybackSnapshot): void;
   hasTemporaryLayer(): boolean; hasNativeLayer(): boolean;
   requestAutoHide(idle: number): void;
+  requestRefresh?(page?: boolean): void;
   dispatchAction(action: Action): Disposition;
 }
 export interface SearchDataPort {
@@ -100,7 +107,7 @@ export interface AppSnapshot {
 export interface WatchSnapshot {
   readonly row: 'controls' | 'progress' | 'recommendations'; readonly index: number;
   readonly controlIndex: number; readonly recommendationIndex: number; readonly adjusting: boolean;
-  readonly panel: '' | 'description' | 'comments'; readonly panelIndex: number; readonly playIndex: number;
+  readonly panel: '' | 'description' | 'comments' | 'playlists'; readonly panelIndex: number; readonly playIndex: number;
 }
 export interface MenuSnapshot {
   readonly opened: boolean; readonly view: 'main' | 'search'; readonly openedFrom: 'quickMenu' | 'pageSearch' | null;
@@ -199,11 +206,15 @@ export interface DiagnosticState { route?: string; mode?: Mode; adaptation?: str
 export interface Diagnostics { record(module: string, operation: string, error: unknown, state?: DiagnosticState): void }
 export interface ApplicationMessage { source: string; values?: Settings; entry?: unknown }
 export interface ApplicationChannel { publish(message: ApplicationMessage): void; subscribe(listener: (message: ApplicationMessage) => void): Dispose }
-export interface InputDependencies { localChannel?: ApplicationChannel; runtime: Runtime; controllerStyle: ControllerStyle; isSearchOpen(): boolean; temporarySpeed?(held: boolean): boolean; canRepeatMedia?(): boolean }
+export interface InputDependencies { localChannel?: ApplicationChannel; runtime: Runtime; controllerStyle: ControllerStyle; isSearchOpen(): boolean; temporarySpeed?(held: boolean): boolean; canRepeatMedia?(): boolean; canHandleInput?(): boolean }
 export interface SiteDependencies { pageAccess?: import("../src/bridge/page-protocol").PageAccess; runtime: Runtime; diagnostics?: Diagnostics; focusManager?: FocusManager }
-export interface InputModule { readonly connected: boolean; readonly mode: 'mouse' | 'gamepad' | 'keyboard'; isHeld?(action: Action): boolean; cancelSeeking?(): void; configure(values: Partial<Settings>): void; destroy(): void }
+  export interface InputSourceTrace { source: string; decision: 'switch' | 'preserve' | 'ignored'; previousMode: 'mouse' | 'gamepad' | 'keyboard'; mode: 'mouse' | 'gamepad' | 'keyboard'; time: number }
+  export interface InputModule { readonly connected: boolean; readonly mode: 'mouse' | 'gamepad' | 'keyboard'; readonly recentSources?: readonly InputSourceTrace[]; isHeld?(action: Action): boolean; cancelSeeking?(): void; configure(values: Partial<Settings>): void; destroy(): void }
 export interface MenuModule { readonly opened: boolean; readonly settingsOpened?: boolean; readonly state: MenuSnapshot; connect(port: MenuPort): void; close(): void; openSearch(target?: SearchTarget): void; handle(action: Action): Disposition; destroy(): void }
 export interface WatchModule {
+  checkIdle?(): void;
+  refreshPage?(): void;
+  refreshPlayback?(): void;
   readonly ownsFocus: boolean;
   readonly state: Pick<WatchSnapshot, 'row' | 'index' | 'adjusting' | 'panel'> & { readonly mode: Mode; readonly recommendations: number };
   connect(port: WatchPort): void; sync(mode?: Mode, preferences?: Partial<Settings>): void;
@@ -228,21 +239,24 @@ export interface NavigationPolicy {
   onSettingsClosed(): void; pageBack(): void; readonly navigating: boolean; readonly mode: Mode;
 }
 export interface SitePort extends WatchDataPort, SearchDataPort {
+  syncPlaybackLayout?(layout: 'normal' | 'wide' | 'page' | null): void;
   temporarySpeed(held: boolean): number | false;
   hasNativeLayer(): boolean; perform(action: Action): OperationResult | Promise<OperationResult>;
   performWatchAction(action: WatchAction): OperationResult | Promise<OperationResult>;
+  listPlaylists(): Promise<readonly SavedPlaylistSnapshot[] | undefined>;
+  togglePlaylist(key: string): Promise<boolean>;
   showNativeControls(): HTMLElement | null; isProgress(el: Element | null): boolean;
   createNavigationConfig(policy: NavigationPolicy): import('./core').NavigationConfig;
   inspectWatchCapabilities(requireDestinationReady?: boolean): { ready: boolean; failed?: boolean; missing: readonly string[] };
   inspectOptionalCapabilities(): WatchFeatures;
-  restoreNativeInterface(): void; syncCommentPreload(active: boolean): void;
+  restoreNativeInterface(): void;
   openRecommendation(key: string, prepareVideo: (href: string) => boolean): RecommendationResult;
   openChannel(beforeNavigate: () => void): boolean;
   expandReplies(key: string): boolean; loadComments(start?: boolean): OperationResult;
   loadRecommendations(): OperationResult;
   settingsOpen(): boolean; openSettings(): boolean; backSettings(menu?: HTMLElement | null): boolean;
   seekTo(time: number): boolean; observePage(onChange: () => void): Dispose;
-  readBrowseAccount(): BrowseAccountSnapshot | null; openBrowseAccount(): boolean; destroy(): void;
+  destroy(): void;
 }
 export interface RoutePort {
   remoteHistory?: boolean; runtime: Runtime; interaction: InteractionStore; location: Location; history: History; window: Window; document: Document;
@@ -303,6 +317,7 @@ export interface CoreModule {
 }
 export interface BrowseDependencies {
   runtime: Runtime; core: CoreModule; isMenuOpen(): boolean;
+  prepareVideo?: (href: string) => boolean;
   mountGrid?: (dependencies: BrowseDependencies) => Dispose;
 }
 export interface SearchInstance {
@@ -310,7 +325,7 @@ export interface SearchInstance {
   render(section: HTMLElement): void;
   navigate(action: Action): Disposition;
   keydown(event: KeyboardEvent): boolean; renderKeys(): void; refreshCandidates(): void;
-  focusFirstKey(): void; focusCandidate(): void; keyboardAction(key: Pick<KeyboardKey, 'action'> & Partial<KeyboardKey>): void;
+  focusFirstKey(): void; keyboardAction(key: Pick<KeyboardKey, 'action'> & Partial<KeyboardKey>): void;
   space(): void; backspace(): void; pageCandidates(delta: number): void; toggleCandidates(): void;
   moveCursor(delta: number): void; submit(): void; setTarget(target: SearchTarget): void;
   readonly target: SearchTarget; initializeQuery(): void; destroy(): void;
@@ -324,7 +339,7 @@ export interface MenuDependencies extends SharedDependencies {
   createSearch(port: Omit<SearchPort, 'controllerStyle' | 'pinyin' | 'keyboard'>): SearchInstance;
 }
 export interface WatchPanels {
-  open(action: 'description' | 'comments'): void; hide(): void; close(): void;
+  open(action: 'description' | 'comments' | 'playlists'): void; hide(): void; close(): void;
   refresh(): void; load(): void; readonly buttons: HTMLElement[]; destroy(): void;
 }
 export type WatchView = Record<'host' | 'surface' | 'recommendations' | 'dialog' | 'sheet' | 'panelTitle'
@@ -354,6 +369,9 @@ export interface RouteStateModule {
   transition(app: AppSnapshot, event: RouteEvent): { app: AppSnapshot; effects: readonly Effect[]; disposition: Disposition };
 }
 export interface BindingsSchema {
+    keyboardActions: Record<string, string>;
+    normalizeShortcuts(raw?: unknown): Record<string, Record<string, string>>;
+    shortcutLabel(key: string): string;
   defaults: Record<string,number>; rightHand: Record<string,number>; keys: Record<number,string>; labels: Record<string,string>; layouts: Record<string,string>;
   normalize(raw?: unknown): Record<string,number>;
   normalizeLayouts(raw?: unknown, legacy?: unknown): Record<string,Record<string,number>>;

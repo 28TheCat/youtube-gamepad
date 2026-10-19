@@ -37,7 +37,7 @@ const fixture = `<!doctype html><html><head><style>
   <ytd-masthead><input id="search"><button id="search-icon-legacy">Search</button></ytd-masthead>
   </body></html>`;
 
-async function setup(t, pathname = '/', connected = true) {
+async function setup(t, pathname = '/', connected = true, recommendationCount = 3) {
   const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -45,9 +45,23 @@ async function setup(t, pathname = '/', connected = true) {
   page.on('pageerror', error => errors.push(error.message));
   t.after(() => assert.deepEqual(errors, [], 'no uncaught errors across module boundaries'));
   await page.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: fixture }));
+  await page.route('https://www.youtube.com/youtubei/v1/next**', async route => {
+    const append = !!route.request().postDataJSON().continuation;
+    if (append) await page.evaluate(() => { window.recommendationLoads = (window.recommendationLoads || 0) + 1; });
+    const start = append ? recommendationCount + 1 : 1;
+    const end = append ? recommendationCount + 4 : recommendationCount;
+    const results = Array.from({ length: end - start + 1 }, (_, i) => ({ compactVideoRenderer: {
+      videoId: `r${start + i}`, title: { simpleText: `推荐 ${start + i}` },
+      shortBylineText: { simpleText: '示例频道' }, viewCountText: { simpleText: '1万次观看 · 1年前' }, lengthText: { simpleText: '11:53' }
+    } }));
+    if (recommendationCount > 3 && !append) results.push({ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'more' } } } });
+    return route.fulfill({ json: append ? { onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: results } }] }
+      : { contents: { twoColumnWatchNextResults: { secondaryResults: { secondaryResults: { results } } } } } });
+  });
   await page.goto('https://www.youtube.com' + pathname);
   await page.evaluate(() => { window.originalHistory = { pushState: history.pushState, replaceState: history.replaceState }; });
   if (pathname.startsWith('/watch')) await page.evaluate(() => {
+    window.ytcfg = { get: () => ({ client: { clientVersion: 'test' } }) };
     const player = document.createElement('div'); player.id = 'movie_player';
     player.getPlayerResponse = () => ({ videoDetails: { videoId: 'current', title: 'Current video' } });
     const video = document.createElement('video');
@@ -75,6 +89,7 @@ async function setup(t, pathname = '/', connected = true) {
   // Only the extension-side storage/connection bridge is absent. All MAIN modules
   // including gamepad, core, views, site adapter and coordinator are real.
   if (connected) await page.waitForFunction(() => window.YTGamepadCoordinator.state.enabled);
+  if (pathname.startsWith('/watch')) await page.locator('#ytg-watch').locator('.card').first().waitFor({ state: 'attached' });
   await page.evaluate(() => {
     window.focusLog = [];
     document.addEventListener('focusin', event => window.focusLog.push(event.target.id || event.target.getAttribute('href')));
@@ -85,6 +100,7 @@ async function setup(t, pathname = '/', connected = true) {
 
 test('home return restores native category, rebuilt grid, scroll and original card focus', { skip: !chromium }, async t => {
   const page = await setup(t);
+  await page.locator('[data-ytg-page-mode]').click();
   await page.evaluate(() => {
     const manager = document.createElement('ytd-page-manager');
     manager.style.cssText = 'display:block;padding-top:850px;min-height:3000px';
@@ -108,13 +124,13 @@ test('home return restores native category, rebuilt grid, scroll and original ca
     document.body.append(bar);
     window.returnCards = Array.from(grid.children);
   });
-  await page.locator('#ytg-browse-grid [data-browse-id="video:b"]').waitFor();
+  await page.locator('#return-grid a[href="/watch?v=b"]').waitFor();
   await page.evaluate(() => {
     const manager = document.querySelector('ytd-page-manager');
     const bar = document.querySelector('ytd-feed-filter-chip-bar-renderer');
     const grid = document.querySelector('#return-grid');
     scrollTo(0, 700);
-    window.YTGamepad.focus(document.querySelector('#ytg-browse-grid [data-browse-id="video:b"]'));
+    window.YTGamepad.focus(document.querySelector('#return-grid a[href="/watch?v=b"]'));
     document.dispatchEvent(new Event('yt-navigate-start'));
     history.pushState({}, '', '/watch?v=b'); manager.hidden = true; bar.hidden = true;
     scrollTo(0, 0); document.dispatchEvent(new Event('yt-navigate-finish'));
@@ -126,7 +142,7 @@ test('home return restores native category, rebuilt grid, scroll and original ca
     scrollTo(0, 0); document.dispatchEvent(new Event('yt-navigate-finish'));
   });
   await page.waitForFunction(() => !window.YTGamepad.restoring && window.YTGamepad.current?.getAttribute('href') === '/watch?v=b');
-  assert.equal(await page.evaluate(() => window.YTGamepad.current?.dataset.browseId), 'video:b', 'restoration targets the visible Vue card');
+  assert.equal(await page.evaluate(() => window.YTGamepad.current?.closest('#return-grid')?.id), 'return-grid', 'restoration targets the visible native card');
   assert.deepEqual(await page.evaluate(() => ({
     category: document.querySelector('yt-chip-cloud-chip-renderer[selected="true"]').textContent,
     links: Array.from(document.querySelectorAll('#return-grid a')).map(link => link.getAttribute('href')),
@@ -137,15 +153,17 @@ test('home return restores native category, rebuilt grid, scroll and original ca
   assert.equal(await page.evaluate(() => scrollY), 700, 'category watcher cannot reset the restored grid focus');
 });
 
-test('without a controller the native page keeps focus, Escape and layout through SPA navigation', { skip: !chromium }, async t => {
+test('disabled controls keep native focus, Escape and layout through SPA navigation', { skip: !chromium }, async t => {
   const page = await setup(t, '/watch?v=current', false);
+  await page.evaluate(() => window.postMessage({ source: 'yt-gamepad-settings', values: { enabled: false } }, location.origin));
+  await page.waitForFunction(() => !window.YTGamepadCoordinator.state.enabled);
   await page.locator('input#search').focus();
   await page.evaluate(() => {
     window.nativeEscape = false;
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') window.nativeEscape = !event.defaultPrevented;
     });
-    window.postMessage({ source: 'yt-gamepad-settings', values: { enabled: true } }, location.origin);
+    window.postMessage({ source: 'yt-gamepad-settings', values: { enabled: false } }, location.origin);
     history.pushState({}, '', '/watch?v=next');
     document.dispatchEvent(new Event('yt-navigate-finish'));
   });
@@ -362,8 +380,8 @@ test('media feedback respects reduced motion and failed media commands do not sh
   assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').hasAttribute('data-feedback')), false);
 });
 
-test('watch recommendations page four cards at a time and append native continuation without losing focus', options, async t => {
-  const page = await setup(t, '/watch?v=current');
+test('watch recommendations page four cards at a time and append API continuation without losing focus', options, async t => {
+  const page = await setup(t, '/watch?v=current', true, 16);
   await page.evaluate(() => {
     document.documentElement.dataset.ytgInputMode = 'gamepad';
     const secondary = document.createElement('div'); secondary.id = 'secondary';
@@ -485,7 +503,7 @@ test('controller hints switch in open search and watch UI without disturbing inp
         title: root.querySelector('[data-action="BACKSPACE"]').title,
         count: root.querySelectorAll('.shortcut-item').length,
         query: input.value, cursor: [input.selectionStart, input.selectionEnd], focus: root.activeElement === window.controllerFocus,
-        icon: getComputedStyle(root.querySelector('#shortcuts [data-ytg-key="A"]')).backgroundImage,
+        icon: (getComputedStyle(root.querySelector('#shortcuts [data-ytg-key="A"]'), '::before').maskImage !== 'none' ? getComputedStyle(root.querySelector('#shortcuts [data-ytg-key="A"]'), '::before').maskImage : getComputedStyle(root.querySelector('#shortcuts [data-ytg-key="A"]')).backgroundImage),
         aria: root.querySelector('#shortcuts [data-ytg-key="A"]').getAttribute('aria-label'),
         fontSize: getComputedStyle(root.querySelector('#shortcuts [data-ytg-key="A"]')).fontSize };
     });
@@ -517,7 +535,7 @@ test('controller hints switch in open search and watch UI without disturbing inp
   await page.evaluate(() => window.YTGamepadWatch.handle('up'));
   const combined = await page.locator('#ytg-watch').evaluate(host => {
     const node = host.shadowRoot.querySelector('[data-ytg-key="↓ / B"]');
-    return { text: node.textContent, images: getComputedStyle(node).backgroundImage, icon: node.getAttribute('data-ytg-icon'),
+    return { text: node.textContent, images: (getComputedStyle(node, '::before').maskImage !== 'none' ? getComputedStyle(node, '::before').maskImage : getComputedStyle(node).backgroundImage), icon: node.getAttribute('data-ytg-icon'),
       adjustLabel: host.shadowRoot.querySelector('.hint-item [data-ytg-hint]').textContent,
       language: host.getAttribute('lang') };
   });
@@ -548,7 +566,7 @@ test('extension popup and settings reuse controller artwork in their instruction
     await page.addScriptTag({ content: readFileSync(new URL(bundle, releaseRoot ? root : new URL('dist/', repository)), 'utf8') });
     await page.waitForFunction(() => document.documentElement.dataset.ytgController === 'playstation');
     const hints = await page.locator('[data-ytg-hint]').evaluateAll(nodes => nodes.map(node => ({
-      text: node.textContent, icons: [...node.querySelectorAll('[data-ytg-icon="true"]')].map(icon => ({ key: icon.textContent, image: getComputedStyle(icon).backgroundImage }))
+      text: node.textContent, icons: [...node.querySelectorAll('[data-ytg-icon="true"]')].map(icon => ({ key: icon.textContent, image: (getComputedStyle(icon, '::before').maskImage !== 'none' ? getComputedStyle(icon, '::before').maskImage : getComputedStyle(icon).backgroundImage) }))
     })));
     assert.ok(hints.every(hint => hint.icons.length > 0));
     assert.ok(hints.some(hint => hint.icons.some(icon => icon.key === '×')));
@@ -604,7 +622,7 @@ test('quick menu settings save inline, recover failures and return one level at 
     return [bindings.confirm, bindings.back];
   }), [1, 0]);
   assert.equal(await menu.locator('[data-setting="1"] [data-inline-key]').getAttribute('data-ytg-first-key'), 'B');
-  assert.match(await menu.locator('[data-setting="1"] [data-inline-key]').evaluate(node => getComputedStyle(node).backgroundImage), /data:image\/svg\+xml;base64/);
+  assert.match(await menu.locator('[data-setting="1"] [data-inline-key]').evaluate(node => (getComputedStyle(node, '::before').maskImage !== 'none' ? getComputedStyle(node, '::before').maskImage : getComputedStyle(node).backgroundImage)), /data:image\/svg\+xml;base64/);
   await page.evaluate(() => {
     const pad = navigator.getGamepads()[0];
     Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [{ ...pad, id: 'DualSense' }] });
@@ -723,6 +741,7 @@ test('settings shortcuts persist swaps, recover failed writes and fit mobile scr
 
 test('mouse takeover releases controller card focus without losing selection or keyboard focus', options, async t => {
   const page = await setup(t);
+  await page.locator('[data-ytg-page-mode]').click();
   await page.evaluate(() => {
     const card = document.querySelector('ytd-rich-item-renderer');
     const title = document.createElement('a');
@@ -732,8 +751,10 @@ test('mouse takeover releases controller card focus without losing selection or 
       buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 })) };
     Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [window.testPad] });
   });
-  await page.keyboard.press('Tab');
+  await page.bringToFront();
+  await page.locator('#video-title-link').focus();
   await page.waitForFunction(() => window.YTGamepadInput.connected);
+  await page.waitForTimeout(100);
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await page.evaluate(() => { window.testPad.axes[0] = .8; });
   await page.waitForFunction(() => window.YTGamepadInput.mode === 'gamepad');
@@ -760,8 +781,9 @@ test('mouse takeover releases controller card focus without losing selection or 
     'mouse movement must not discard a keyboard-owned focus');
 });
 
-test('native header preserves sidebar and feed geometry across widths and guide states', options, async t => {
+test('shared header preserves native sidebar and feed geometry across widths and guide states', options, async t => {
   const page = await setup(t);
+  await page.locator('[data-ytg-page-mode]').click();
   await page.addStyleTag({ content: `
     body{padding:0} ytd-app,ytd-page-manager,ytd-rich-grid-renderer{display:block}
     ytd-app{--native-guide:72px}ytd-app[expanded]{--native-guide:240px}
@@ -812,40 +834,22 @@ test('native header preserves sidebar and feed geometry across widths and guide 
         document.querySelector('ytd-app').toggleAttribute('expanded',expanded);
         document.querySelector('ytd-feed-filter-chip-bar-renderer').toggleAttribute('not-sticky',!sticky);
       },{expanded,sticky});
-      await page.waitForFunction(() => !document.documentElement.classList.contains('ytg-browse'));
+      await page.waitForFunction(() => !document.documentElement.classList.contains('ytg-browse-header'));
       const native = await measure();
       await page.evaluate(() => document.documentElement.classList.add('ytg-theater'));
-      await page.waitForFunction(() => document.documentElement.classList.contains('ytg-browse'));
-      const adapted = { ...native, title: '18px' };
-      assert.deepEqual(await measure(),adapted,'shared title typography preserves native widths, columns and metadata');
+      await page.waitForFunction(() => document.documentElement.classList.contains('ytg-browse-header'));
+      const adapted = native;
+      assert.deepEqual(await measure(),adapted,'shared header preserves native widths, columns and metadata');
       const sidebar = expanded ? 'ytd-guide-renderer a' : 'ytd-mini-guide-renderer a';
       await page.evaluate(selector => window.YTGamepad.focus(document.querySelector(selector)),sidebar);
       assert.equal(await page.evaluate(selector => window.YTGamepad.current === document.querySelector(selector),sidebar),true,'native sidebar is a focus candidate');
       assert.deepEqual(await measure(),adapted,'focusing the sidebar does not resize the feed');
     }
   }
-  assert.equal(await page.locator('#ytg-browse-sidebar').count(),0);
-  assert.equal(await page.locator('#ytg-browse-top').count(),0);
-  await page.locator('ytd-masthead input#search').fill('existing query');
-  await page.evaluate(() => window.YTGamepad.focus(document.querySelector('input#search')));
-  assert.equal((await snapshot(page)).current, 'search', 'native search remains a focus candidate in browse mode');
-  await press(page, 'confirm');
-  assert.equal((await snapshot(page)).menu, true, 'A opens the existing gamepad keyboard');
-  assert.equal(await page.locator('#yt-gamepad-menu').evaluate(host => host.shadowRoot.querySelector('#query').value), 'existing query');
-  await press(page, 'back');
-  assert.equal((await snapshot(page)).menu, false);
-  assert.equal((await snapshot(page)).current, 'search', 'closing search restores its native entry');
-  const expanded = await page.locator('ytd-app').getAttribute('expanded');
-  await page.evaluate(() => window.YTGamepad.focus(document.querySelector('ytd-masthead #guide-button')));
-  await press(page, 'confirm');
-  assert.notEqual(await page.locator('ytd-app').getAttribute('expanded'),expanded,'native guide remains usable with gamepad');
-  await page.locator('#ytg-browse-grid [data-browse-id="video:a"]').waitFor();
-  await page.evaluate(() => {
-    const card=document.querySelector('#ytg-browse-grid [data-browse-id="video:a"]');window.YTGamepad.focus(card);window.YTGamepad.act('left');
-  });
-  assert.equal(await page.evaluate(() => window.YTGamepad.current.closest('ytd-mini-guide-renderer') !== null),true);
-  await press(page,'right');
-  assert.equal(await page.evaluate(() => window.YTGamepad.current === document.querySelector('#ytg-browse-grid [data-browse-id="video:a"]')),true,'right returns to the original Vue card');
+  assert.equal(await page.locator('#ytg-browse-sidebar').isVisible(),false);
+  assert.equal(await page.locator('#ytg-browse-top').isVisible(),true);
+  assert.equal(await page.locator('ytd-masthead').isVisible(),false);
+  assert.equal(await page.locator('[data-ytg-page-mode]').getAttribute('aria-checked'),'false');
 });
 
 test('native video rows keep the current column through short rows and DOM replacement', options, async t => {
@@ -1068,7 +1072,7 @@ test('all MAIN modules: removed native target restores its surviving neighbor', 
   assert.equal((await snapshot(page)).active, 'native-close');
 });
 
-test('all MAIN modules: deleted recommendation restores neighboring video in watch shadow UI', options, async t => {
+test('all MAIN modules: deleting a native recommendation preserves the API selection in watch shadow UI', options, async t => {
   const page = await setup(t, '/watch?v=current');
   await press(page, 'down'); await press(page, 'right');
   assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement.dataset.videoId), 'r2');
@@ -1076,7 +1080,7 @@ test('all MAIN modules: deleted recommendation restores neighboring video in wat
   await page.evaluate(() => { document.querySelector('ytd-compact-video-renderer[data-key=r2]').remove(); window.YTGamepadWatch.refresh(); });
   assert.equal((await snapshot(page)).active, 'yt-gamepad-menu');
   await press(page, 'back');
-  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement.dataset.videoId), 'r3');
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement.dataset.videoId), 'r2');
   assert.equal((await snapshot(page)).suspended, false);
 });
 
@@ -1314,6 +1318,7 @@ test('menu motion permits immediate reopen and repeated input, and respects redu
 
 test('current-page fill survives controller focus and enabled controls keep their checkmark', options, async t => {
   const page = await setup(t);
+  await page.locator('[data-ytg-page-mode]').click();
   const nav = await page.evaluate(() => {
     document.documentElement.classList.add('ytg-browse', 'ytg-gamepad-input');
     const guide=document.createElement('ytd-mini-guide-renderer'),entry=document.createElement('ytd-mini-guide-entry-renderer'),link=document.createElement('a');
@@ -1344,4 +1349,30 @@ test('current-page fill survives controller focus and enabled controls keep thei
   assert.equal(control.focused, true); assert.equal(control.pressed, 'true');
   assert.equal(control.mark, '"✓"'); assert.equal(control.unfocusedMark, control.mark);
   assert.equal(control.background, control.unfocusedBackground);
+});
+
+test('keyboard and mouse share controller navigation without a connected pad', { skip: !chromium }, async t => {
+  const page = await setup(t, '/', false);
+  await page.evaluate(() => {
+    window.keyboardActions = [];
+    window.addEventListener('yt-gamepad-action', e => window.keyboardActions.push(e.detail.action));
+  });
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.evaluate(() => window.YTGamepad.current.getAttribute('href')), '/watch?v=c');
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.ytgInputMode), 'keyboard');
+  await page.keyboard.press('F1');
+  await page.locator('#yt-gamepad-menu').waitFor({ state: 'visible' });
+  await page.keyboard.press('Escape');
+  await page.locator('#yt-gamepad-menu').waitFor({ state: 'hidden' });
+  assert.deepEqual(await page.evaluate(() => window.keyboardActions), ['right', 'help', 'back']);
+  await page.keyboard.press('/');
+  const query = page.locator('#yt-gamepad-menu #query');
+  await query.fill('hello');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.type('!');
+  assert.equal(await query.inputValue(), 'hell!o');
+  assert.equal(await page.evaluate(() => window.keyboardActions.length), 4);
+  await page.mouse.move(200, 200);
+  await page.mouse.move(260, 260);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.ytgInputMode), 'mouse');
 });

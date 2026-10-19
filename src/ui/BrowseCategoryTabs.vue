@@ -10,9 +10,9 @@ const { t } = useI18n();
 <template>
   <nav v-if="categories.length" id="ytg-browse-categories" :aria-label="t('视频分类')">
     <div data-ytg-category v-for="item in categories" :key="item.id"
-      :selected="selected === item.id ? '' : undefined" :aria-label="item.label"
+      :selected="selected === item.id ? '' : undefined" :aria-label="item.localize ? t(item.label) : item.label"
       @focusin="selected !== item.id && emit('change', item.id)">
-      <button type="button" :aria-pressed="selected === item.id" @click="emit('change', item.id)">{{ item.label }}</button>
+      <button type="button" :aria-pressed="selected === item.id" @click="emit('change', item.id)">{{ item.localize ? t(item.label) : item.label }}</button>
     </div>
   </nav>
 </template>

@@ -1,8 +1,9 @@
+import { browseShadow } from '../shared/page-dom';
 import type { Runtime } from '../../types/ports';
 import { categorySettingsKey, categoryCatalogKey, categoryIdentity, normalizeCategoryPreferences,
   normalizeCategoryCatalog, type CategoryItem } from '../shared/browse-categories';
 
-// Keep YouTube's real chip handlers and feed tokens. Only presentation is changed.
+// Apply preferences only to the category nodes owned by this extension.
 export function mountBrowseCategorySettings(runtime: Runtime) {
   const lifecycle = runtime.scope('browse-category-settings');
   let preferences = normalizeCategoryPreferences(undefined), catalog: CategoryItem[] = [];
@@ -36,18 +37,17 @@ export function mountBrowseCategorySettings(runtime: Runtime) {
   function sync() {
     if (!loaded || lifecycle.destroyed) return;
     if (!document.documentElement.classList.contains('ytg-browse')) { reset(); return; }
-    const native = Array.from(document.querySelectorAll<HTMLElement>('yt-chip-cloud-chip-renderer,[data-ytg-category]'))
+    const categories = Array.from(browseShadow()?.querySelectorAll<HTMLElement>('[data-ytg-category]') || [])
       .filter(chip => !chip.closest('[hidden],[aria-hidden="true"],[inert]'));
-    const present = new Set(native), currentParents = new Set<HTMLElement>();
+    const present = new Set(categories), currentParents = new Set<HTMLElement>();
     const rank = new Map(preferences.order.map((id, index) => [id, index]));
     for (const chip of chips) if (!present.has(chip)) { restore(chip); chips.delete(chip); }
-    for (const [index, chip] of native.entries()) {
+    for (const [index, chip] of categories.entries()) {
       const label = (chip.getAttribute('aria-label') || chip.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
       if (!label) continue;
       const id = categoryIdentity(label);
       if (!catalog.some(item => item.id === id && item.label === label)) pendingCatalog.set(id, { id, label });
-      const active = chip.getAttribute('selected') === '' || chip.getAttribute('selected') === 'true' ||
-        chip.getAttribute('aria-selected') === 'true' || !!chip.querySelector('[aria-selected="true"],[aria-pressed="true"],.ytChipShapeActive');
+      const active = !!chip.querySelector('[aria-pressed="true"]');
       const hidden = preferences.hidden.includes(id) && !active;
       if (chip.hasAttribute('data-ytg-category-hidden') !== hidden)
         chip.toggleAttribute('data-ytg-category-hidden', hidden);
@@ -72,20 +72,23 @@ export function mountBrowseCategorySettings(runtime: Runtime) {
     if (changes[categorySettingsKey]) { ++revision; preferences = normalizeCategoryPreferences(changes[categorySettingsKey].newValue); sync(); }
     if (changes[categoryCatalogKey]) catalog = normalizeCategoryCatalog(changes[categoryCatalogKey].newValue);
   }
-  const observer = lifecycle.observer(records => {
-    if (records.some(record => record.target === document.documentElement ||
-      (record.target instanceof Element ? record.target : record.target.parentElement)?.closest('yt-chip-cloud-chip-renderer,[data-ytg-category],ytd-feed-filter-chip-bar-renderer,#chips-wrapper') ||
-      [...record.addedNodes, ...record.removedNodes].some(node => node instanceof Element &&
-        (node.matches('yt-chip-cloud-chip-renderer,[data-ytg-category]') || node.querySelector('yt-chip-cloud-chip-renderer,[data-ytg-category]'))))) schedule();
-  });
-  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true,
-    attributes: true, attributeFilter: ['class', 'selected', 'aria-selected', 'aria-pressed', 'hidden', 'aria-hidden'] });
-  lifecycle.listen(document, 'yt-navigate-finish', schedule);
-  lifecycle.listen(document, 'yt-page-data-updated', schedule);
+  const observer = lifecycle.observer(schedule);
+  const observeBrowse = () => {
+    observer.disconnect();
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    const root = browseShadow();
+    if (root) observer.observe(root, { childList: true, subtree: true, characterData: true,
+      attributes: true, attributeFilter: ['aria-pressed', 'hidden', 'aria-hidden'] });
+    schedule();
+  };
+  lifecycle.listen(document, 'ytg-browse-mounted', observeBrowse);
+  observeBrowse();
+  lifecycle.listen(document, 'yt-navigate-finish', observeBrowse);
+  lifecycle.listen(window, 'popstate', observeBrowse);
   lifecycle.cleanup(reset);
   try {
     chrome.storage.onChanged.addListener(changed);
-    lifecycle.cleanup(() => chrome.storage.onChanged.removeListener(changed));
+    lifecycle.cleanup(() => chrome.storage?.onChanged?.removeListener?.(changed));
     const version = revision;
     void chrome.storage.local.get([categorySettingsKey, categoryCatalogKey]).then(saved => {
       if (lifecycle.destroyed) return;

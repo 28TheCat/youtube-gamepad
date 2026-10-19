@@ -17,9 +17,9 @@ function setup(pathname = '/watch', connected = true) {
   return { history, window, document, adapter, video, location, events, classes, jumps, get backs() { return backs; }, get captions() { return captions; }, get menus() { return menus; } };
 }
 
-test('theater layout follows controller connection and respects manual settings', () => {
+test('theater layout works without a controller and respects manual settings', () => {
   const s = setup('/', false);
-  assert.equal(s.classes.get('ytg-theater'), false);
+  assert.equal(s.classes.get('ytg-theater'), true);
   s.window.YTGamepadInput.connected = true; s.events['yt-gamepad-connection']();
   assert.equal(s.classes.get('ytg-theater'), true);
   s.events['yt-gamepad-local-settings']({ detail: { theater: false } });
@@ -29,7 +29,7 @@ test('theater layout follows controller connection and respects manual settings'
   s.events['yt-gamepad-local-settings']({ detail: { enabled: true } });
   assert.equal(s.classes.get('ytg-theater'), true);
   s.window.YTGamepadInput.connected = false; s.events['yt-gamepad-connection']();
-  assert.equal(s.classes.get('ytg-theater'), false);
+  assert.equal(s.classes.get('ytg-theater'), true);
 });
 
 test('playback left and right seek with boundary clamping and keep controls hidden', () => {
@@ -40,8 +40,21 @@ test('playback left and right seek with boundary clamping and keep controls hidd
     assert.equal(s.window.YTGamepadCoordinator.mode, 'playback');
   }
 });
-test('playback confirm pauses and up enters controls without opening the quick menu', () => {
-  const s = setup(); s.adapter.interceptAction('confirm'); assert.equal(s.video.paused, true);
+test('directional seeks can leave a partially loaded VOD range', () => {
+  const s = setup();
+  s.video.currentTime = 30;
+  s.video.seekable = { length: 1, start: () => 20, end: () => 35 };
+  for (const time of [40, 50, 60]) {
+    assert.equal(s.adapter.interceptAction('right'), true);
+    assert.equal(s.video.currentTime, time);
+  }
+  s.video.currentTime = 25;
+  assert.equal(s.adapter.interceptAction('left'), true);
+  assert.equal(s.video.currentTime, 15);
+  assert.equal(s.video.paused, false);
+});
+test('playback shortcut pauses and up enters controls without opening the quick menu', () => {
+  const s = setup(); s.adapter.onAction('playPause', { scope: s.document }); assert.equal(s.video.paused, true);
   assert.equal(s.adapter.interceptAction('up'), true); assert.equal(s.menus, 0);
   assert.equal(s.window.YTGamepadCoordinator.mode, 'controls');
   assert.equal(s.classes.get('ytg-playback'), true);

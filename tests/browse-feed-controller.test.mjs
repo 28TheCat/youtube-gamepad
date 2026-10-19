@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { importSettingsModel } from './helpers/settings-model.mjs';
 const { createBrowseFeedController } = await importSettingsModel('src/app/browse-feed-controller.ts');
-const { createNativeBrowsePager } = await importSettingsModel('src/app/browse-native-pager.ts');
 const item = id => ({ id, title: id, channel: '', thumbnail: '', href: '/watch?v=' + id });
 function deferred() {
   let resolve, reject;
@@ -11,13 +10,14 @@ function deferred() {
 }
 function fixture() {
   const store = { categories: [{ id: 'all', selected: true }, { id: 'music' }], category: '', loading: false, error: '' };
-  const state = { route: '/', visible: true, restoring: false, focus: 0, loading: false, requests: [], cancellations: 0 };
+  const state = { route: '/', visible: true, restoring: false, focus: 0, loading: false, requests: [], cancellations: 0, unavailable: 0 };
   let render = () => Promise.resolve();
   const controller = createBrowseFeedController({ store,
     feed: { categories: () => [{ id: 'all', selected: true }, { id: 'music' }], cancel: () => state.cancellations++,
       request: (id, page) => { const pending = deferred(); state.requests.push({ id, page, ...pending }); return pending.promise; } },
+    unavailable: () => state.unavailable++,
     getRoute: () => state.route, isVisible: () => state.visible, isRestoring: () => state.restoring,
-    stopBatch() {}, changed() {}, loadingChanged: value => { state.loading = value; },
+    changed() {}, loadingChanged: value => { state.loading = value; },
     afterRender: () => render(), canResetFocus: () => true, resetFocus: () => state.focus++
   });
   async function load(id, ids, nextPage) {
@@ -27,6 +27,23 @@ function fixture() {
   }
   return { store, state, controller, load, render: fn => { render = fn; } };
 }
+
+test('navigation reset cancels requests while retaining the visible categories until route completion', async () => {
+  const f = fixture();
+  await f.load('all', ['home']);
+  const categories = f.store.categories;
+  const pending = f.controller.changeCategory('music');
+  f.controller.reset(true);
+  assert.equal(f.store.categories, categories);
+  assert.equal(f.store.category, 'music');
+  assert.equal(f.controller.active, false);
+  f.state.requests.at(-1).resolve({ items: [item('stale')] });
+  await pending;
+  assert.equal(f.controller.snapshot, undefined);
+  f.controller.reset();
+  assert.deepEqual(f.store.categories, []);
+  assert.equal(f.store.loading, false);
+});
 
 test('category switching ignores old successes and failures', async () => {
   const { store, state, controller } = fixture();
@@ -60,6 +77,17 @@ test('category switches reuse recent pages and continuations without a new reque
   await f.controller.changeCategory('all');
   assert.equal(f.state.requests.length, 3);
   assert.deepEqual(f.controller.snapshot.items.map(x => x.id), ['a', 'b']);
+});
+
+test('channel tab switches refresh controls rather than reuse another tab sort context', async () => {
+  const f = fixture();
+  f.state.route = '/@creator/videos';
+  await f.load('all', ['a'], 'all-next');
+  await f.load('music', ['m'], 'music-next');
+  await f.load('all', ['fresh'], 'fresh-next');
+  assert.equal(f.state.requests.length, 3);
+  assert.equal(f.controller.snapshot.items[0].id, 'fresh');
+  assert.equal(f.controller.captureReturnState(42).scrollTop, 42);
 });
 
 test('repeated activation keeps pending requests and loaded categories intact', async () => {
@@ -111,6 +139,28 @@ test('pagination deduplicates videos, blocks duplicate loads and restores route-
   f.state.requests.at(-1).resolve({ items: [] }); await resumed;
 });
 
+for (const route of ['/feed/subscriptions', '/@creator/videos', '/playlist?list=PLordinary'])
+test(`${route} restores its own cached list and continuation through the shared controller`, async () => {
+  const f = fixture();
+  f.state.route = route;
+  await f.load('all', ['first'], 'next');
+  const append = f.controller.changeCategory('all', true);
+  f.state.requests.at(-1).resolve({ items: [item('second')], nextPage: 'third' }); await append;
+  f.controller.reset(); f.state.route = '/';
+  f.controller.initialize(); await Promise.resolve();
+  f.state.requests.at(-1).resolve({ items: [item('home')] }); await Promise.resolve(); await Promise.resolve();
+  f.controller.reset(); f.state.route = route; f.state.restoring = true;
+  const requestsBefore = f.state.requests.length, focusBefore = f.state.focus;
+  f.controller.initialize(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(f.state.requests.length, requestsBefore);
+  assert.equal(f.state.focus, focusBefore);
+  assert.deepEqual(f.controller.snapshot.items.map(x => x.id), ['first', 'second']);
+  const resumed = f.controller.changeCategory('all', true);
+  assert.equal(f.state.requests.at(-1).page, 'third');
+  f.state.requests.at(-1).resolve({ items: [item('third')] }); await resumed;
+  assert.deepEqual(f.controller.snapshot.items.map(x => x.id), ['first', 'second', 'third']);
+});
+
 test('changed routes and hidden surfaces reject late errors and post-render focus', async () => {
   for (const invalidate of [f => { f.state.route = '/other'; }, f => { f.state.visible = false; }]) {
     const f = fixture();
@@ -148,21 +198,25 @@ test('current request errors allow retry without losing existing continuation it
   assert.equal(f.store.error, ''); assert.deepEqual(f.controller.snapshot.items.map(x => x.id), ['a', 'b']);
 });
 
-test('native pager loads at most three pages and stops on route change, replacement or timeout', () => {
-  function native() {
-    let time = 10000, callback, calls = 0;
-    let snapshot = { route: '/', items: [item('a')], canLoadMore: true };
-    const pager = createNativeBrowsePager({ read: () => snapshot, loadMore: () => { calls++; return true; },
-      canLoad: () => true, now: () => time, timeout: fn => { callback = fn; return 1; }, clearTimeout: () => { callback = undefined; } });
-    return { pager, get calls() { return calls; }, get snapshot() { return snapshot; },
-      poll: (next, advance = 1500) => { snapshot = next; time += advance; const fn = callback; callback = undefined; fn?.(); } };
-  }
-  const f = native(); f.pager.more(f.snapshot); f.pager.more(f.snapshot); assert.equal(f.calls, 1);
-  for (const id of ['b', 'c', 'd']) f.poll({ ...f.snapshot, items: [...f.snapshot.items, item(id)] });
-  assert.equal(f.calls, 3);
-  for (const next of [{ route: '/other', items: [item('a'), item('b')] }, { route: '/', items: [item('b')] }]) {
-    const g = native(); g.pager.more(g.snapshot); g.poll({ ...next, canLoadMore: true });
-    g.poll({ ...next, items: [...next.items, item('c')], canLoadMore: true }); assert.equal(g.calls, 1);
-  }
-  const h = native(); h.pager.more(h.snapshot); h.poll(h.snapshot, 15001); h.poll(h.snapshot); assert.equal(h.calls, 1);
+
+
+test('initial feed failure restores native access; pagination failure keeps loaded videos', async () => {
+  const f = fixture();
+  const initial = f.controller.changeCategory('all');
+  f.state.requests[0].reject(new Error('unsupported response')); await initial;
+  assert.equal(f.state.unavailable, 1);
+  assert.equal(f.store.loading, false);
+  await f.load('all', ['existing'], 'next');
+  const append = f.controller.changeCategory('all', true);
+  f.state.requests.at(-1).reject(new Error('network')); await append;
+  assert.equal(f.state.unavailable, 1);
+  assert.equal(f.controller.snapshot.items[0].id, 'existing');
+});
+
+test('stale feed failure cannot restore native mode over a newer route', async () => {
+  const f = fixture();
+  const pending = f.controller.changeCategory('all');
+  f.state.route = '/feed/subscriptions';
+  f.state.requests[0].reject(new Error('old')); await pending;
+  assert.equal(f.state.unavailable, 0);
 });

@@ -1,13 +1,15 @@
-import type { PlaybackSnapshot, WatchPageSnapshot, WatchFeatures, WatchSnapshot } from '../../types/ports';
+import type { PlaybackSnapshot, WatchPageSnapshot, WatchFeatures, WatchSnapshot, RecommendationSnapshot } from '../../types/ports';
+import type { PlaybackViewState } from '../playback/playback-model';
 
-export interface PlaybackPresentation {
-  page: WatchPageSnapshot;
-  features: WatchFeatures;
-  selected: string;
-  adjusting: boolean;
-  row: WatchSnapshot['row'];
-  start: number;
+export type PlaybackMetadata = Pick<WatchPageSnapshot, 'title' | 'channel' | 'viewCount' | 'avatar' | 'subscribed' | 'liked' | 'disliked'>;
+export type PlaybackControlState = Pick<PlaybackViewState, 'paused' | 'captionsEnabled' | 'isLive' | 'canSeek' | 'atLiveEdge'>;
+
+const recommendationFields = ['key', 'label', 'channel', 'thumbnail', 'thumbnailFallback', 'metadata', 'duration', 'href', 'queue', 'selected', 'isPlaylist'] as const;
+export function sameRecommendations(left: readonly RecommendationSnapshot[], right: readonly RecommendationSnapshot[]) {
+  return left === right || left.length === right.length && left.every((item, index) => item === right[index] ||
+    recommendationFields.every(field => item[field] === right[index][field]));
 }
+
 export interface SeekPreview { target: number; delta: number; start: number; end: number }
 export interface PlaybackFeedback {
   label: string;
@@ -20,12 +22,19 @@ export function recommendationFocusId(items: readonly { key: string }[], index: 
   const key = items[index]?.key || '';
   return 'recommendation:' + key + ':' + items.slice(0, index).filter(item => item.key === key).length;
 }
+export function recommendationFocusIds(items: readonly { key: string }[]) {
+  const counts = new Map<string, number>();
+  return items.map(item => {
+    const occurrence = counts.get(item.key) || 0;
+    counts.set(item.key, occurrence + 1);
+    return `recommendation:${item.key}:${occurrence}`;
+  });
+}
 export interface PlaybackPresenter {
   playback(value: PlaybackSnapshot): void;
   visible(value: boolean): void;
   page(value: WatchPageSnapshot, features: WatchFeatures): void;
   selection(row: WatchSnapshot['row'], selected: string, adjusting: boolean): void;
-  recommendationPage(start: number): void;
   feedback(value: PlaybackFeedback | null): void;
   reset(): void;
   cards(): HTMLButtonElement[];

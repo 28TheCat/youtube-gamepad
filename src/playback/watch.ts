@@ -1,6 +1,7 @@
 import type { Action, InteractionEvent, Mode, ModuleFactory, WatchDependencies, WatchModule, WatchPort } from '../../types/ports';
 
 import { YTGamepadActions } from '../shared/actions.ts';
+import { sameRecommendations } from '../ui/playback-presentation';
 export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, YTGamepadWatch: WatchModule | undefined;
 // A gamepad-first watch surface. YouTube retains ownership of media and navigation.
 (() => {
@@ -19,7 +20,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   const watchState = () => interaction.state.watch;
   const send = (event: InteractionEvent) => interaction.dispatch(event);
   send({ type: 'WATCH_RESET', playIndex });
-  let route = '', recommendationKey = '', lastActivity = Date.now();
+  let route = '', lastRecommendations: readonly import('../../types/ports').RecommendationSnapshot[] = [], lastActivity = Date.now();
   const view = dependencies.createSurface({
     activate, state: watchState, controller: () => controller, send, focus,
     activity: () => { lastActivity = Date.now(); },
@@ -33,7 +34,6 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     }
   }, lifecycle);
   const snapshot = () => view.snapshot();
-  let recommendationStart = 0;
   let playbackEnded = false;
   function clearFeedback() { lifecycle.clearTimeout(timer); view.feedback(null); }
   function seekPreview(value: import('../ui/playback-presentation').SeekPreview | null) {
@@ -59,7 +59,6 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     }, action === 'playPause' ? 300 : 600);
   }
   function focus() {
-    updateRecommendationPage();
     const state = watchState(), data = snapshot();
     const targets = state.panel ? data.panel : state.row === 'recommendations' ? data.recommendations : data.controls;
     const target = !state.panel && state.row === 'progress'
@@ -76,24 +75,31 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   function activate(action?: string) {
     if (!enabled() || controller.state.navigating) return;
     if (action?.startsWith('recommendation:')) { openVideo(action.slice('recommendation:'.length)); return; }
+    if (mode() === 'playback') show();
     const data = snapshot(), target = data.controls.find(target => target.id === action);
     if ((target && !target.available) || (action === 'adjustProgress' && !data.canSeek)) return;
     if (target) view.press(target.id);
     lastActivity = Date.now();
     if (action === 'adjustProgress') {
       send({ type: 'WATCH_FOCUS', region: 'progress' }); handle('confirm');
+    } else if (action === 'recommendations') {
+      closePanel(); show('recommendations');
     } else if (action === 'description' || action === 'comments') {
       view.panel.open(action);
+    } else if (action === 'save') {
+      view.panel.open('playlists');
     } else if (action === 'channel') {
       if (!controller.request('channel')) feedback('Channel information is still loading');
     } else if (action === 'settings') {
       if (!controller.request('settings')) feedback('Player settings are currently unavailable');
     } else if (['subscribe', 'like', 'dislike', 'save'].includes(action || '')) {
+      const route = controller.readRoute().key;
       Promise.resolve(controller.request('watchAction', action as import('../../types/ports').WatchAction)).then(ok => {
-        if (lifecycle.destroyed) return;
+        if (lifecycle.destroyed || controller.readRoute().key !== route) return;
         if (!ok) feedback('This action is unavailable. Wait for the video information to load.');
-        readPage();
+        if (controller.requestRefresh) controller.requestRefresh(); else readPage();
       });
+      return;
     } else {
       const route = controller.readRoute().key;
       Promise.resolve(controller.request('media', action as Action)).then(ok => {
@@ -101,6 +107,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
         if (!ok) feedback(action === 'captions' ? 'No captions available for this video' : 'This action is currently unavailable');
         updateProgress();
       });
+      return;
     }
     updateProgress();
   }
@@ -112,7 +119,9 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     const justEnded = ended && !playbackEnded;
     playbackEnded = ended;
     if (justEnded && enabled() && controller.state.surfaceReady !== false && mode() !== 'browse' &&
-        !controller.navigating && !hasTemporaryLayer()) {
+        !controller.navigating && !hasTemporaryLayer() &&
+        !new URL(controller.readRoute().key, 'https://www.youtube.com').searchParams.has('list')) {
+      // Playlist completion belongs to YouTube's queue, including Mix autoplay.
       lastActivity = Date.now();
       send({ type: 'WATCH_SHOW', target: 'recommendations', count: snapshot().recommendations.length });
       controller.request('mode', 'controls');
@@ -129,21 +138,18 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     if (!enabled() || !controller || document.hidden) return;
     const page = controller.readWatchPage();
     if (!page.isWatch) return;
-    const savedPresentationFocus = focusManager?.capture('watch');
+    const changed = !sameRecommendations(lastRecommendations, page.recommendations);
+    const savedPresentationFocus = changed && watchState().row === 'recommendations' ? focusManager?.capture('watch') : undefined;
     view.page(page, controller.readWatchFeatures?.() || {});
     const next = page.recommendations;
-    const key = JSON.stringify(next.map((item) => [item.key, item.label, item.thumbnail, item.thumbnailFallback, item.channel, item.metadata, item.duration]));
-    if (key !== recommendationKey) {
-      const saved = savedPresentationFocus || focusManager?.capture('watch');
-      recommendationKey = key;
-      updateRecommendationPage();
+    if (changed) {
+      lastRecommendations = next;
       if (watchState().row === 'recommendations') {
-        if (!focusManager?.suspended && !hasTemporaryLayer()) focusManager?.restore(saved ?? null);
+        if (!focusManager?.suspended && !hasTemporaryLayer()) focusManager?.restore(savedPresentationFocus || null);
         else if (!snapshot().recommendations.length) { send({ type: 'WATCH_EMPTY' }); }
       }
     }
     view.panel.refresh();
-    updateProgress();
   }
   function openVideo(key?: string) {
     if (controller.request('recommendation', key || '') === 'missing') { feedback('Recommendations have changed. Please select again.'); readPage(); }
@@ -154,8 +160,8 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   function show(target: 'controls' | 'recommendations' = 'controls') {
     if (!enabled() || controller.state.navigating) return;
     lastActivity = Date.now();
-    readPage(); send({ type: 'WATCH_SHOW', target, count: snapshot().recommendations.length });
-    controller.request('mode', 'controls'); focus();
+    controller.request('mode', 'controls');
+    send({ type: 'WATCH_SHOW', target, count: snapshot().recommendations.length }); focus();
   }
   function sync() {
     if (mode() !== renderedMode) lastActivity = Date.now();
@@ -166,23 +172,33 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     if (active) {
       const nextRoute = controller.readRoute().key;
       if (nextRoute !== route) {
-        route = nextRoute; recommendationKey = ''; send({ type: 'WATCH_RESET', playIndex });
+        route = nextRoute; lastRecommendations = []; send({ type: 'WATCH_RESET', playIndex });
         playbackEnded = false;
-        clearFeedback(); recommendationStart = 0;
+        clearFeedback();
         view.reset();
       }
-      readPage();
+      readPage(); updateProgress();
     }
   }
   function handle(action: Action) {
-    if (!enabled() || !controller.readRoute().isWatch || mode() !== 'controls') return false;
+    if (!enabled() || !controller.readRoute().isWatch || mode() === 'browse') return false;
+    if (action === 'seekBack' || action === 'seekForward') {
+      if (controller.hasTemporaryLayer?.()) return false;
+      if (mode() !== 'controls') show();
+      if (watchState().panel === 'comments') { closePanel(); show('recommendations'); }
+      else view.panel.open('comments');
+      return true;
+    }
+    if (mode() !== 'controls') return false;
     if (controller.navigating) return true;
     lastActivity = Date.now();
     if (action === 'back' && controller.request('backSettings')) return true;
     // Geometry remains in the view; the reducer receives only a scroll observation.
     const scrollDelta = watchState().panel === 'comments' && watchState().panelIndex > 0 && ['up', 'down'].includes(action)
       ? view.panel.scrollDelta(watchState().panelIndex, action) : 0;
-    updateProgress();
+    // Directional focus uses the current presentation; progress has its own
+    // media/seek/poll updates and must not repaint on every held direction.
+    if (!['up', 'down', 'left', 'right', 'back'].includes(action)) updateProgress();
     const data = snapshot();
     const result = send({ type: 'WATCH_INPUT', action, canSeek: data.canSeek,
       availableControls: data.controls.filter(target => target.available).map(target => target.index), scrollDelta, commentCount: Math.max(0, data.panel.length - 1),
@@ -207,13 +223,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   }
 
   function recommendationColumns() {
-    return 4;
-  }
-  function updateRecommendationPage() {
-    const index = watchState().row === 'recommendations' ? watchState().index : watchState().recommendationIndex;
-    const start = Math.floor(Math.min(index, Math.max(0, snapshot().recommendations.length - 1)) / 4) * 4;
-    view.recommendationPage(start, recommendationStart, watchState().row === 'recommendations' && view.visible);
-    recommendationStart = start;
+    return 1;
   }
 
   const unregisterFocus = focusManager?.register('watch', {
@@ -233,26 +243,31 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   if (unregisterFocus) lifecycle.cleanup(unregisterFocus);
   function handleInput(action: Action) {
     if (!enabled() || !controller.readRoute().isWatch || mode() !== 'controls') return 'pass';
-    if (watchState().panel && !['back', 'confirm', 'up', 'down'].includes(action)) return 'blocked';
+    if (watchState().panel && !['back', 'confirm', 'up', 'down', 'seekBack', 'seekForward'].includes(action)) return 'blocked';
     return handle(action) ? 'handled' : watchState().panel ? 'blocked' : 'pass';
   }
   YTGamepadWatch = { destroy: lifecycle.destroy,
     /** @param {import('../../types/ports.js').WatchPort} port */
-    connect(port: import('../../types/ports.js').WatchPort) { controller = port; }, sync, show, handle, handleInput, mediaFeedback, seekPreview, refresh: readPage,
+    connect(port: import('../../types/ports.js').WatchPort) { controller = port; }, sync, show, handle, handleInput, mediaFeedback, seekPreview,
+    refresh() { readPage(); updateProgress(); }, refreshPage: readPage, refreshPlayback: updateProgress, checkIdle,
     get ownsFocus() { return enabled() && view.visible && mode() === 'controls'; },
     get state() { return { mode: mode(), row: watchState().row, index: watchState().index, adjusting: watchState().adjusting, panel: watchState().panel, recommendations: snapshot().recommendations.length }; } };
   lifecycle.listen(document, 'visibilitychange', () => {
-    if (!document.hidden) { lastActivity = Date.now(); readPage(); }
+    if (!document.hidden) {
+      lastActivity = Date.now();
+      if (controller.requestRefresh) { controller.requestRefresh(); controller.requestRefresh(false); }
+      else { readPage(); updateProgress(); }
+    }
   });
-  lifecycle.interval(() => {
+  // The coordinator owns the sole playback/health clock. This hook only
+  // evaluates idle state after its scheduled playback refresh.
+  function checkIdle() {
     if (!view.visible || document.hidden) return;
-    updateProgress();
     if (hasTemporaryLayer() || controller.navigating) { lastActivity = Date.now(); return; }
     const idle = Date.now() - lastActivity;
     controller.requestAutoHide?.(idle);
-  }, 500);
+  }
   const published = YTGamepadWatch;
-  published.destroy = lifecycle.destroy;
   lifecycle.cleanup(() => { if (YTGamepadWatch === published) YTGamepadWatch = undefined; });
   lifecycle.cleanup(view.destroy);
   return published;

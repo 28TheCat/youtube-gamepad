@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { readonly, shallowRef } from 'vue';
-import type { BrowseSnapshot } from '../sites/youtube-browse';
+import type { BrowseSnapshot } from '../shared/browse-data';
 import type { FeedCategory } from '../sites/youtube-feed';
 
 export const useBrowseStore = defineStore('browse', () => {
@@ -10,9 +10,11 @@ export const useBrowseStore = defineStore('browse', () => {
   const category = shallowRef('');
   const loading = shallowRef(false);
   const error = shallowRef('');
+  let itemIds = new Set<string>();
   function apply(next: BrowseSnapshot) {
     const previous = snapshot.value;
     const ids = new Set(next.items.map(item => item.id));
+    itemIds = ids;
     const selected = activeItemId.value;
     if (next.route !== previous.route) activeItemId.value = next.items[0]?.id || null;
     else if (!selected || !ids.has(selected)) {
@@ -24,7 +26,7 @@ export const useBrowseStore = defineStore('browse', () => {
     snapshot.value = next;
   }
   function select(id: string) {
-    if (snapshot.value.items.some(item => item.id === id)) activeItemId.value = id;
+    if (itemIds.has(id)) activeItemId.value = id;
   }
   return { snapshot: readonly(snapshot), activeItemId: readonly(activeItemId), apply, select,
     categories, category, loading, error };
