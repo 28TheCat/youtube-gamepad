@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from '../shared/use-i18n';
+import LoadStatus from '../ui/LoadStatus.vue';
 const { t } = useI18n();
 import { computed, onBeforeUnmount, watch } from 'vue';
 import type { Directive } from 'vue';
@@ -49,5 +50,5 @@ function label(node: HTMLElement, adjusting: boolean) {
     @click="$event.detail === 0 && model.request('adjustProgress')">
     <span class="track"><span class="fill" :style="{ width: percent + '%' }"></span></span>
   </button>
-  <p v-if="model.error.value" role="status">{{ t(model.error.value) }}</p>
+  <LoadStatus :failed="!!model.error.value" error-role="status" :error-message="t(model.error.value)" />
 </template>

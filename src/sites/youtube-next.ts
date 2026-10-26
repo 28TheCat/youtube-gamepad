@@ -41,8 +41,10 @@ export function parseWatchNext(raw: Node, currentVideo: string, continuationKind
       if (seen.has(key)) continue;
       seen.add(key);
       items.push({ key, href: target.href, label: item.title, channel: item.channel, thumbnail: item.thumbnail,
+        ...(item.channelBadge ? { channelBadge: item.channelBadge } : {}),
         thumbnailFallback: item.thumbnailFallback!, duration: item.duration || label(card.duration?.text),
         ...(item.watchedPercent !== undefined ? { watchedPercent: item.watchedPercent } : {}),
+        viewCount: item.viewCount || label(card.view_count),
         metadata: [item.viewCount, item.publishedTime].filter(Boolean).join(' · ') || label(card.view_count),
         ...(item.isPlaylist ? { isPlaylist: true } : {}), ...(queue ? { queue: true, selected: card.selected === true } : {}) });
       if (items.length >= 120) break;

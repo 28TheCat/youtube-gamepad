@@ -24,6 +24,23 @@ test('legacy and modern cards retain bounded watch progress and omit absent or i
   assert.equal(parseYouTubeJsBrowse({ contents: [video('new')] }).items[0].watchedPercent, undefined);
 });
 
+test('channel badges retain YouTube verification and artist identity without guessing from text', () => {
+  for (const [style, expected] of [['BADGE_STYLE_TYPE_VERIFIED', 'verified'], ['BADGE_STYLE_TYPE_VERIFIED_ARTIST', 'artist'], ['BADGE_STYLE_TYPE_PREMIUM', undefined]]) {
+    const raw = video('badged');
+    raw.videoRenderer.ownerBadges = [{ metadataBadgeRenderer: { style, label: 'Verified' } }];
+    assert.equal(parseYouTubeJsBrowse({ contents: [raw] }).items[0].channelBadge, expected);
+  }
+  for (const [icon, expected] of [['CHECK_CIRCLE_FILLED', 'verified'], ['OFFICIAL_ARTIST_BADGE', 'artist'], ['SUBSCRIPTIONS', undefined]]) {
+    const raw = modernVideo();
+    const text = raw.lockupViewModel.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[0].metadataParts[0].text;
+    text.attachmentRuns = [{ startIndex: text.content.length, length: 0, element: { type: { imageType: {
+      image: { sources: [{ clientResource: { imageName: icon } }] }
+    } } } }];
+    assert.equal(parseYouTubeJsBrowse({ contents: [raw] }).items[0].channelBadge, expected);
+  }
+  assert.equal(parseYouTubeJsBrowse({ contents: [modernVideo()] }).items[0].channelBadge, undefined);
+});
+
 test('modern video cards retain creator avatars, views, publication time and duration', () => {
   const card = parseYouTubeJsBrowse({ contents: [modernVideo()] }).items[0];
   assert.equal(card.channel, 'JaidenAnimations');
@@ -34,6 +51,16 @@ test('modern video cards retain creator avatars, views, publication time and dur
   const raw = modernVideo();
   raw.lockupViewModel.metadata.lockupMetadataViewModel.image.decoratedAvatarViewModel.avatar.avatarViewModel.image.sources[0].url = 'javascript:alert(1)';
   assert.equal(parseYouTubeJsBrowse({ contents: [raw] }).items[0].channelAvatar, undefined);
+});
+
+test('modern home cards separate inline creator, views and publication time', () => {
+  const raw = modernVideo();
+  const metadata = raw.lockupViewModel.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel;
+  metadata.metadataRows = [{ metadataParts: metadata.metadataRows.flatMap(row => row.metadataParts) }];
+  const card = parseYouTubeJsBrowse({ contents: [raw] }).items[0];
+  assert.equal(card.channel, 'JaidenAnimations');
+  assert.equal(card.viewCount, '1694万次观看');
+  assert.equal(card.publishedTime, '9年前');
 });
 
 test('modern channel cards retain publication time when the byline row is omitted', () => {

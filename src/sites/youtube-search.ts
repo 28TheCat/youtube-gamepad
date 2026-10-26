@@ -2,6 +2,7 @@ import { contentRoots, continuationToken, parseYouTubePage, parsedChips, walkPar
 import type { BrowseItem } from '../shared/browse-data';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import { playlistColor } from '../shared/playlist-colors';
+import { channelBadge } from './youtube-channel-badge';
 
 type Node = Record<string, any>;
 export function browsePage(page: ParsedPage) {
@@ -73,11 +74,13 @@ export function browseItem(value: any, queuePlaylistId?: string): BrowseItem | u
       const candidate = [...thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0))[0]?.url;
       try { const url = new URL(candidate); if (url.protocol === 'https:') thumbnail = url.href; } catch { /* Use fallback. */ }
       const rows = value.metadata?.metadata?.metadata_rows || [];
-      // Channel feeds omit the byline row. Statistics remain in the final
-      // text row, whether or not a channel name precedes them.
+      const badge = channelBadge(value.author, rows[0]?.metadata_parts?.[0]?.text);
+      // Home cards may put the byline and statistics in one row;
+      // channel feeds omit the byline entirely.
       const textRows = rows.map((row: any) => (row.metadata_parts || []).map((part: any) => label(part.text)).filter(Boolean))
         .filter((parts: string[]) => parts.length);
-      const details = playlist ? [] : textRows.at(-1) || [];
+      const inlineByline = !playlist && textRows.length === 1 && textRows[0].length >= 3;
+      const details = playlist ? [] : inlineByline ? textRows[0].slice(1) : textRows.at(-1) || [];
       const viewCount = textRows.length > 1 || details.length > 1 ? details[0] : undefined;
       const publishedTime = details.slice(1).join(' · ');
       const duration = label(
@@ -98,8 +101,9 @@ export function browseItem(value: any, queuePlaylistId?: string): BrowseItem | u
       }
       return { id: target.id, href: target.href, title, thumbnail, thumbnailFallback: fallback,
         channel: label(value.author?.name) || label(value.short_byline_text) || label(value.author) ||
-          (playlist || textRows.length > 1 || details.length === 1 ? textRows[0]?.[0] || '' : ''),
+          (playlist || inlineByline || textRows.length > 1 || details.length === 1 ? textRows[0]?.[0] || '' : ''),
         ...(channelAvatar ? { channelAvatar } : {}), ...(viewCount ? { viewCount } : {}),
+        ...(badge ? { channelBadge: badge } : {}),
         ...(publishedTime ? { publishedTime } : {}), ...(duration ? { duration } : {}),
         ...(watchedPercent > 0 ? { watchedPercent } : {}),
         ...(playlist ? { isPlaylist: true, stackColorLight: playlistColor(image?.stack_color?.light_theme),

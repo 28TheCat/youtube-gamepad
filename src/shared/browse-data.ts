@@ -4,6 +4,7 @@ export interface BrowseItem {
   readonly title: string;
   readonly channel: string;
   readonly channelAvatar?: string;
+  readonly channelBadge?: 'verified' | 'artist';
   readonly viewCount?: string;
   readonly publishedTime?: string;
   readonly duration?: string;

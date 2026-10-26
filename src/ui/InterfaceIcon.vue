@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { mingcuteIcons } from './mingcute-icons';
+import type { Directive } from 'vue';
+import { renderInterfaceIcon } from './icon-shapes';
 defineProps<{ name: string; filled?: boolean }>();
+const vIcon: Directive<SVGSVGElement, [string, boolean]> = {
+  mounted(svg, binding) { renderInterfaceIcon(svg, ...binding.value); },
+  updated(svg, binding) {
+    if (binding.value[0] !== binding.oldValue?.[0] || binding.value[1] !== binding.oldValue?.[1]) renderInterfaceIcon(svg, ...binding.value);
+  }
+};
 </script>
 <template>
-  <svg viewBox="0 0 24 24" aria-hidden="true" :data-icon="`${name === 'subscriptions' ? 'material' : 'mingcute'}:${name}-${filled ? 'fill' : 'line'}`" style="fill:none;stroke:none">
-    <component v-for="(shape, index) in mingcuteIcons[`${name}-${filled ? 'fill' : 'line'}`] || []" :is="shape.tag" :key="index" v-bind="shape.attrs" />
-  </svg>
+  <svg v-icon="[name, filled ?? false]" />
 </template>

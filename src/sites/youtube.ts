@@ -178,8 +178,8 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       !target.closest?.<HTMLElement>('[hidden],[aria-hidden="true"]');
   }
   function performWatchAction(action: WatchAction): boolean | Promise<boolean> {
-    if (!readRoute().isWatch || !['subscribe', 'like', 'dislike'].includes(action)) return false;
-    return pageAccess?.watchAction?.(action as 'subscribe' | 'like' | 'dislike') || false;
+    if (!readRoute().isWatch || !['subscribe', 'like', 'dislike', 'unsubscribe', 'notificationsAll', 'notificationsPersonalized', 'notificationsNone'].includes(action)) return false;
+    return pageAccess?.watchAction?.(action as 'like' | 'dislike' | 'subscribe' | 'unsubscribe' | 'notificationsAll' | 'notificationsPersonalized' | 'notificationsNone') || false;
   }
   /** @returns {import('../../types/ports.js').RouteSnapshot} */
   const readRoute = () => ({ key: location.pathname + location.search, isWatch: location.pathname === '/watch' });
@@ -320,7 +320,9 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
     page.description = details?.shortDescription || '';
     page.viewCount = details?.viewCount ?? null;
     page.avatar = info?.avatar || '';
+    page.channelBadge = info?.channelBadge;
     page.subscribed = info?.subscribed || false;
+    page.notificationPreference = info?.notificationPreference;
     page.liked = info?.liked || false;
     page.disliked = info?.disliked || false;
     page.waiting = info?.loading === true && !details;
@@ -370,6 +372,11 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
   }
   function expandReplies(key: string) {
     return pageAccess?.commentReplies?.(key) || false;
+  }
+  function translateComment(key: string) {
+    const comments = pageAccess?.readComments?.()?.items || [];
+    const item = comments.find(item => item.key === key) || comments.flatMap(item => item.replies).find(item => item.key === key);
+    return item?.translationTarget ? pageAccess?.commentTranslate?.(key, item.translationTarget) || false : false;
   }
   function loadComments(start = false) {
     return pageAccess?.moreComments?.(start) || false;
@@ -553,6 +560,9 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       },
       filterCandidates(list) {
         return list.filter((el) => {
+          // Watch navigation stays with playback and recommendations; the
+          // masthead belongs to the browse page and must not capture Up.
+          if (location.pathname === '/watch' && el.closest<HTMLElement>('ytd-masthead')) return false;
           // Shelf arrows serve pointer/Tab input; directional input moves cards directly.
           if (el.hasAttribute?.('data-shorts-scroll')) return false;
           // Navigate each category once via its wrapper; the inner button performs the action.
@@ -631,7 +641,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
     inspectWatchCapabilities, inspectOptionalCapabilities, readWatchFeatures: () => ({ ...watchFeatures }), restoreNativeInterface,
     readRoute, readPlayback, readWatchPage, readComments,
     readCommentsStatus: () => pageAccess?.readComments?.(),
-    openRecommendation, loadRecommendations, openChannel, performWatchAction, expandReplies, loadComments,
+    openRecommendation, loadRecommendations, openChannel, performWatchAction, expandReplies, translateComment, loadComments,
     listPlaylists: () => pageAccess?.watchPlaylists?.() || Promise.resolve(undefined),
     togglePlaylist: (key: string) => pageAccess?.watchPlaylistToggle?.(key) || Promise.resolve(false),
     settingsOpen, openSettings, backSettings, seekTo, getSearchTarget, readSearch, syncSearch, submitSearch, moveSearchCursor, readTheme, observePage };
@@ -641,7 +651,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
   for (const [method, feature, fallback] of [
     ['readWatchPage', 'metadata', () => ({ ...readRoute(), title: '', channel: '', description: '', recommendations: [] })],
     ['readComments', 'comments', () => []],
-    ['loadComments', 'comments', () => false], ['expandReplies', 'comments', () => false],
+    ['loadComments', 'comments', () => false], ['expandReplies', 'comments', () => false], ['translateComment', 'comments', () => false],
     ['openRecommendation', 'recommendations', () => 'missing'], ['openChannel', 'channel', () => false],
     ['loadRecommendations', 'recommendations', () => false],
     ['hasNativeLayer', 'nativeLayers', () => false],

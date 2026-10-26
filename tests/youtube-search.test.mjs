@@ -42,7 +42,7 @@ function fixture({ handler, authenticated = false, pathname = '/results', search
       const raw = await (handler ? handler(body, calls.length, options) : response([video(body.continuation ? 'second' : 'first')], body.continuation ? undefined : 'next', !!body.continuation));
       return { ok: true, json: async () => raw };
     } };
-  vm.runInNewContext(code, sandbox);
+  vm.runInNewContext(code, Object.assign(sandbox, { Headers, Request, Response }));
   return { ...sandbox.SearchFixture, sandbox, context, location, calls, states };
 }
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -97,7 +97,7 @@ for (const [pathname, search, browseId] of [
   assert.equal(s.calls[0].body.browseId, browseId);
   assert.equal(s.calls[1].body.continuation, 'browse-next');
   assert.ok(s.calls.every(call => call.url === '/youtubei/v1/browse'));
-  assert.equal(s.calls[0].options.headers['X-Goog-AuthUser'], '2');
+  assert.equal(s.calls[0].options.headers['x-goog-authuser'], '2');
   if (browseId === 'VLWL') {
     assert.match(first.items[0].href, /list=WL&index=1/);
     assert.match(second.items[0].href, /list=WL&index=2/);
@@ -137,7 +137,7 @@ test('actual YouTube.js search and next page match existing cards; preserve filt
   assert.equal(next.nextPage, undefined);
   assert.ok(s.calls.every(call => call.url === '/youtubei/v1/search'));
   assert.ok(first.nextPage !== 'next', 'UI receives opaque page IDs');
-  assert.equal(s.calls[0].options.headers.Authorization, undefined);
+  assert.equal(s.calls[0].options.headers.authorization, undefined);
 });
 
 test('signed-in request preserves selected account and SAPISID authentication without passing cookies to the library', async () => {
@@ -146,9 +146,9 @@ test('signed-in request preserves selected account and SAPISID authentication wi
   const first = await service.request('all');
   await service.request('all', first.nextPage);
   for (const { options, body } of s.calls) {
-    assert.match(options.headers.Authorization, /^SAPISIDHASH \d+_[a-f0-9]{40}$/);
-    assert.equal(options.headers['X-Goog-AuthUser'], '2');
-    assert.equal(options.headers['X-Goog-PageId'], 'brand-account');
+    assert.match(options.headers.authorization, /^SAPISIDHASH \d+_[a-f0-9]{40}$/);
+    assert.equal(options.headers['x-goog-authuser'], '2');
+    assert.equal(options.headers['x-goog-pageid'], 'brand-account');
     assert.equal(options.headers.Cookie, undefined);
     assert.deepEqual(body.context, s.context);
   }

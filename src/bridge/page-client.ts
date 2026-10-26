@@ -67,6 +67,7 @@ export function createPageClient(): PageAccess {
     readComments: () => commentsSnapshot(request('readComments')),
     moreComments: start => request('moreComments', { start: start === true }) === true,
     commentReplies: key => request('commentReplies', { key }) === true,
+    commentTranslate: (key, language) => request('commentTranslate', { key, language }) === true,
     openWatchVideo: href => request('openBrowseVideo', { href }) === true,
     openBrowseRoute: href => request('openBrowseRoute', { href }) === true,
     showControls: () => { request('showControls'); },

@@ -12,7 +12,7 @@ function load(context = {}) {
     if (cache.has(url.href)) return cache.get(url.href);
     const exports = {}; cache.set(url.href, exports);
     const source = ts.transpileModule(readFileSync(url, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-    vm.runInNewContext(source, { exports, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, TextEncoder, ...context,
+    vm.runInNewContext(source, { exports, Headers, Request, Response, structuredClone, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, TextEncoder, ...context,
       require: name => name === 'youtubei.js/web' ? YouTubeJs : module(new URL(name + '.ts', url)) });
     return exports;
   }
@@ -35,6 +35,15 @@ test('modern recommendations retain views, publication time and thumbnail durati
   assert.equal(card.metadata, '1694万次观看 · 9年前');
   assert.equal(card.duration, '8:47');
   assert.equal(card.watchedPercent, 42);
+});
+
+test('recommendation snapshots retain explicit owner verification badges', () => {
+  const { parseWatchNext } = load();
+  const verified = compact('verified');
+  verified.compactVideoRenderer.ownerBadges = [{ metadataBadgeRenderer: { style: 'BADGE_STYLE_TYPE_VERIFIED' } }];
+  const cards = parseWatchNext(response([verified, compact('ordinary')], []), 'current').recommendations;
+  assert.equal(cards[0].channelBadge, 'verified');
+  assert.equal(cards[1].channelBadge, undefined);
 });
 
 test('next parses only related results and queue; preserves repeated queue positions and ignores ads', () => {
@@ -152,8 +161,8 @@ test('next requests carry playlist context; pagination locks and return restores
     assert.equal(first.credentials, 'same-origin');
     assert.equal(first.body.playlistId, 'PLtest');
     assert.equal(first.body.index, 0);
-    assert.equal(first.headers['X-Goog-AuthUser'], '2');
-    assert.equal(first.headers['X-Goog-PageId'], 'brand-channel');
+    assert.equal(first.headers['x-goog-authuser'], '2');
+    assert.equal(first.headers['x-goog-pageid'], 'brand-channel');
     first.resolve(response()); await settle();
     assert.equal(f.updates, 1, 'API completion notifies the view without native DOM activity');
     f.service.more(); f.service.more();

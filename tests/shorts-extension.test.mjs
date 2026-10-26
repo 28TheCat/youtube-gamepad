@@ -61,10 +61,10 @@ test('actual gamepad input controls the active Short, switches reels, respects d
     document.querySelector('#previous').setAttribute('is-active', '');
     document.querySelector('#previous').style.display = 'none';
   });
-  await press(15);
+  await press(5);
   assert.equal(await page.locator('#active').getAttribute('data-position'), '15');
   assert.equal(await page.locator('#inactive').getAttribute('data-position'), '10', 'hidden cached reels never own playback, even with a stale active marker');
-  await press(14);
+  await press(4);
   assert.equal(await page.locator('#active').getAttribute('data-position'), '10');
   await page.locator('#active').evaluate(video => { video.volume = .5; });
   await press(7);
@@ -92,11 +92,15 @@ test('actual gamepad input controls the active Short, switches reels, respects d
   await page.locator('#ytg-shorts-controls').waitFor({ state: 'hidden' });
 });
 
-test('Shorts keep blocked-play errors visible and missing video restores native access', { timeout: 45000 }, async t => {
+test('Shorts playback errors stay in our player and offer an in-place retry', { timeout: 45000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false }));
-  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body:
-    route.request().url().includes('/shorts/missing') ? '<html><body><ytd-app><button id="native-retry">Retry YouTube</button></ytd-app></body></html>' : shortsFixture }));
+  let missingLoads = 0;
+  await context.route('https://www.youtube.com/**', route => {
+    const missing = route.request().url().includes('/shorts/missing');
+    if (missing && route.request().isNavigationRequest()) missingLoads++;
+    return route.fulfill({ contentType: 'text/html', body: missing ? '<html><body><ytd-app></ytd-app></body></html>' : shortsFixture });
+  });
   const page = await context.newPage();
   await page.goto('https://www.youtube.com/shorts/first');
   const player = page.locator('#ytg-shorts-controls'); await player.waitFor();
@@ -106,10 +110,24 @@ test('Shorts keep blocked-play errors visible and missing video restores native 
   await player.getByRole('status').filter({ hasText: 'Playback was blocked' }).waitFor();
   await page.waitForTimeout(700);
   assert.match(await player.getByRole('status').textContent(), /Playback was blocked/);
+  const retry = player.getByRole('button', { name: 'Retry playback', exact: true });
+  await retry.waitFor();
+  await installMedia(context, page);
+  await retry.click();
+  await page.waitForFunction(() => document.querySelector('#active').dataset.paused === 'false');
+  await retry.waitFor({ state: 'hidden' });
+  await page.locator('#active').evaluate(video => { video.src = '/invalid-media'; video.load(); });
+  await player.getByRole('status').filter({ hasText: 'Video could not play' }).waitFor();
+  await retry.waitFor();
+  assert.equal(await page.locator('html').evaluate(node => node.classList.contains('ytg-shorts-player')), true, 'media errors never reveal the native interface');
   await page.goto('https://www.youtube.com/shorts/missing');
-  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls')?.hasAttribute('data-native'), undefined, { timeout: 14000 });
-  assert.equal(await page.locator('html').evaluate(node => node.classList.contains('ytg-shorts-player')), false);
-  assert.equal(await page.locator('#native-retry').isVisible(), true);
+  await retry.waitFor({ state: 'visible', timeout: 14000 });
+  assert.equal(await page.locator('html').evaluate(node => node.classList.contains('ytg-shorts-player')), true);
+  assert.equal(await player.getByRole('button', { name: 'Use YouTube controls', exact: true }).count(), 0);
+  await Promise.all([page.waitForEvent('load'), retry.click()]);
+  await player.waitFor();
+  assert.equal(missingLoads, 2, 'retry reloads this native Short without leaving our player');
+  assert.equal(await page.locator('html').evaluate(node => node.classList.contains('ytg-shorts-player')), true);
 });
 
 test('Shorts use saved watch bindings and hide their toolbar when disabled or leaving Shorts', { timeout: 45000 }, async t => {
@@ -137,6 +155,55 @@ const shortsFixture = `<!doctype html><html><head><meta charset="utf-8"></head><
 <ytd-app><ytd-page-manager><ytd-shorts><ytd-reel-video-renderer is-active style="display:block;width:360px;height:700px;position:relative;z-index:1"><div id="player" style="position:relative;z-index:1"><div id="shorts-player" class="html5-video-player"><div class="html5-video-container"><video id="active" muted></video></div><div class="ytp-chrome-bottom"><button>Native play</button></div></div></div>
 <h1><yt-formatted-string>City lights · Shorts</yt-formatted-string></h1><div id="channel-name">Travel channel</div></ytd-reel-video-renderer></ytd-shorts></ytd-page-manager></ytd-app>
 <script>for(const video of document.querySelectorAll('video')){video.dataset.paused='false';video.dataset.position='10';Object.defineProperties(video,{paused:{get:()=>video.dataset.paused==='true'},duration:{get:()=>30},currentTime:{get:()=>Number(video.dataset.position),set:v=>video.dataset.position=String(v)}});video.pause=()=>video.dataset.paused='true';video.play=async()=>{video.dataset.paused='false'}};</script></body></html>`;
+
+test('Shorts use a gamepad action rail and consume one wheel gesture per video', { timeout: 45000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, uiLanguage: 'en' }));
+  await context.addCookies([{ name: 'SAPISID', value: 'shorts-fixture', domain: 'www.youtube.com', path: '/', secure: true }]);
+  await context.addInitScript(() => {
+    window.ytcfg = { get: key => ({ INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: 'shorts-fixture' }, user: {} }, LOGGED_IN: true })[key] };
+  });
+  await context.route('https://www.youtube.com/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.startsWith('/youtubei/v1/')) return route.fulfill({ json: path.endsWith('/player') ? watchPlayer(route.request().postDataJSON().videoId) : path.endsWith('/next') ? watchNext() : {} });
+    return route.fulfill({ contentType: 'text/html', body: fixture.replace(/window\.ytcfg=\{get:key=>key==='INNERTUBE_CONTEXT'\?\{client:\{clientVersion:'test'\}\}:undefined\};/, '') });
+  });
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/feed/subscriptions');
+  await page.goto('https://www.youtube.com/shorts/JnICtQ9VHJ8');
+  const controls = page.locator('#ytg-shorts-controls'); await controls.waitFor(); await installMedia(context, page);
+  await controls.locator('[data-shorts-action=like]:enabled').waitFor();
+  assert.equal(await controls.locator('.rail .media-action').count(), 4);
+  const mute = controls.locator('.rail [data-shorts-action=mute]');
+  await mute.click();
+  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('[data-shorts-action=mute]').getAttribute('aria-pressed') === 'true');
+  assert.equal(await page.locator('#active').evaluate(video => video.muted), true);
+  await mute.click();
+  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('[data-shorts-action=mute]').getAttribute('aria-pressed') === 'false');
+  await controls.locator('[data-shorts-action=playPause]').focus();
+  const pad = await virtualPad(context, page); await page.bringToFront(); await pad({ connected: true }); await page.waitForTimeout(150);
+  const press = async button => { await pad({ connected: true, button }); await page.waitForTimeout(100); await pad({ connected: true }); await page.waitForTimeout(100); };
+  const focusedAction = () => page.evaluate(() => document.querySelector('#ytg-shorts-controls').shadowRoot.activeElement?.dataset.shortsAction);
+  await press(15); assert.equal(await focusedAction(), 'like', 'right enters the action rail');
+  await press(13); assert.equal(await focusedAction(), 'comments', 'vertical input selects an action in the rail');
+  assert.match(page.url(), /\/shorts\/JnICtQ9VHJ8$/);
+  await press(0); await controls.locator('.drawer').waitFor();
+  assert.equal(await controls.getByRole('button', { name: 'Use YouTube controls', exact: true }).count(), 0);
+  await page.evaluate(() => window.dispatchEvent(new WheelEvent('wheel', { deltaY: 400, cancelable: true })));
+  assert.deepEqual(await page.evaluate(() => window.switches), [], 'an open drawer owns scrolling');
+  await press(1); assert.equal(await controls.locator('.drawer').isVisible(), false); assert.equal(await focusedAction(), 'comments');
+  await press(1); assert.equal(await focusedAction(), 'playPause', 'B leaves the rail before returning to the feed');
+  await press(5); assert.equal(await page.locator('#active').getAttribute('data-position'), '15', 'the shoulder button seeks without entering the rail');
+  await page.evaluate(() => { for (let i = 0; i < 5; i++) window.dispatchEvent(new WheelEvent('wheel', { deltaY: 400, cancelable: true })); });
+  await page.waitForURL('**/shorts/following');
+  assert.deepEqual(await page.evaluate(() => window.switches), ['down'], 'a wheel burst only changes one video');
+  await page.waitForTimeout(220);
+  await page.evaluate(() => window.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, cancelable: true })));
+  await page.waitForURL('**/shorts/current');
+  await press(9); await controls.locator('.drawer').waitFor();
+  assert.equal(await controls.getByRole('button', { name: 'Use YouTube controls', exact: true }).count(), 0, 'More has no native-player escape');
+  await press(1); await press(1); await page.waitForURL('**/feed/subscriptions');
+});
 
 test('opening a list card loads and controls native Shorts media without visiting watch', { timeout: 45000 }, async t => {
   const { context, worker } = await launchExtension(t);
@@ -202,7 +269,7 @@ test('native list Shorts retain their queue across refresh, gamepad switching an
   const refreshedPress = async button => { await refreshedPad({ connected: true, button }); await page.waitForTimeout(120); await refreshedPad({ connected: true }); await page.waitForTimeout(120); };
   await refreshedPress(0); assert.equal(await page.locator('#active').getAttribute('data-paused'), 'true');
   await refreshedPress(2); assert.equal(await page.locator('#active').getAttribute('data-paused'), 'false');
-  await refreshedPress(15); assert.equal(await page.locator('#active').getAttribute('data-position'), '15');
+  await refreshedPress(5); assert.equal(await page.locator('#active').getAttribute('data-position'), '15');
   await refreshedPad({ connected: true, button: 13 }); await page.waitForURL('**/shorts/second');
   await player.waitFor(); await installMedia(context, page);
   assert.equal(await player.locator('.count').textContent(), '2 / 2');
@@ -212,7 +279,7 @@ test('native list Shorts retain their queue across refresh, gamepad switching an
   await page.waitForURL('**/feed/subscriptions');
 });
 
-test('dedicated Shorts shows real media frames and restores native controls, loop and layout on request or disable', { timeout: 45000 }, async t => {
+test('dedicated Shorts shows real media frames and restores media layout only when disabled', { timeout: 45000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false }));
   await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: shortsFixture.replace(/<script>[\s\S]*?<\/script>/, '') }));
@@ -237,13 +304,15 @@ test('dedicated Shorts shows real media frames and restores native controls, loo
   assert.equal(await page.locator('#active').evaluate(node => { const r=node.getBoundingClientRect(); return r.height > 500 && r.width > 250 && getComputedStyle(node).visibility !== 'hidden'; }), true, 'video retains a visible portrait surface below the transparent play target');
   mkdirSync('output/playwright', { recursive: true });
   await page.screenshot({ path: 'output/playwright/shorts-dedicated-desktop.png' });
+  await page.setViewportSize({ width: 867, height: 507 });
+  for (const button of await player.locator('.rail button').all()) {
+    const bounds = await button.boundingBox();
+    assert.ok(bounds && bounds.y >= 0 && bounds.y + bounds.height <= 507, 'every side action remains on screen in a short window');
+  }
+  await page.screenshot({ path: 'output/playwright/shorts-gamepad-small-window.png' });
   await page.setViewportSize({ width: 600, height: 900 });
   await page.screenshot({ path: 'output/playwright/shorts-dedicated-compact.png' });
-  await player.getByRole('button', { name: 'Use YouTube controls', exact: true }).click();
-  assert.equal(await page.locator('html').evaluate(node => node.classList.contains('ytg-shorts-player')), false);
-  assert.equal(await page.locator('#active').evaluate(node => node.loop), false);
-  await player.getByRole('button', { name: 'Retry Shorts view', exact: true }).click();
-  await page.waitForFunction(() => document.documentElement.classList.contains('ytg-shorts-player'));
+  assert.equal(await player.getByRole('button', { name: 'Use YouTube controls', exact: true }).count(), 0);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: false })); await player.waitFor({ state: 'hidden' });
   assert.equal(await page.locator('#active').evaluate(node => node.loop), false);
 });
@@ -260,13 +329,19 @@ test('Shorts drawers use real comments, reactions and playlists and isolate dire
     const request = route.request(), path = new URL(request.url()).pathname;
     if (path.startsWith('/youtubei/v1/')) {
       const body = request.postDataJSON(); calls.push({ path, body });
+      const isReply = body.continuation === 'short-replies';
+      const commentId = isReply ? 'short-reply' : 'short-comment', entityKey = 'key:' + commentId;
       const comment = { onResponseReceivedEndpoints: [
-        { reloadContinuationItemsCommand: { continuationItems: [] } },
+        ...(!isReply ? [{ reloadContinuationItemsCommand: { continuationItems: [] } }] : []),
         { appendContinuationItemsAction: { continuationItems: [{ commentThreadRenderer: {
-          commentViewModel: { commentViewModel: { commentId: 'short-comment', commentKey: 'comment-key' } }
+          commentViewModel: { commentViewModel: { commentId, commentKey: entityKey } },
+          ...(!isReply ? { replies: { commentRepliesRenderer: { subThreads: [{ continuationItemRenderer: {
+            continuationEndpoint: { continuationCommand: { token: 'short-replies', request: 'CONTINUATION_REQUEST_TYPE_WATCH_NEXT' } }
+          } }] } } } : {})
         } }] } }
       ], frameworkUpdates: { entityBatchUpdate: { mutations: [{ payload: { commentEntityPayload: {
-        key: 'comment-key', properties: { content: { content: 'A comment on this Short.' } }, author: { displayName: 'Shorts viewer', channelId: 'UCviewer' }, toolbar: { replyCount: '0' }
+        key: entityKey, properties: { content: { content: isReply ? 'A reply on this Short.' : 'A comment on this Short.' } },
+        author: { displayName: 'Shorts viewer', channelId: 'UCviewer' }, toolbar: { replyCount: isReply ? '0' : '1' }
       } } }] } } };
       await route.fulfill({ json: path.endsWith('/player') ? watchPlayer(body.videoId) : path.endsWith('/next') ? body.continuation ? comment : watchNext()
         : path.endsWith('/get_add_to_playlist') ? { contents: { addToPlaylistRenderer: { playlists: [option('PLshorts')] } } } : { success: true } });
@@ -281,6 +356,14 @@ test('Shorts drawers use real comments, reactions and playlists and isolate dire
   await player.locator('[data-shorts-action=comments]').click();
   try { await player.locator('.comment-text').filter({ hasText: 'A comment on this Short.' }).waitFor({ timeout: 10000 }); }
   catch (error) { t.diagnostic(JSON.stringify({ calls, panel: await player.locator('.drawer').textContent(), errors })); throw error; }
+  assert.equal(await player.locator('[data-vue-comments] .comment-thread').count(), 1, 'Shorts use the shared comment component');
+  for (const selector of ['.comment-author', '.comment-text']) {
+    const typography = await player.locator(`[data-vue-comments] ${selector}`).evaluate(node => {
+      const style = getComputedStyle(node);
+      return { fontSize: style.fontSize, lineHeight: style.lineHeight, fontWeight: style.fontWeight, color: style.color };
+    });
+    assert.deepEqual(typography, { fontSize: '14px', lineHeight: '20px', fontWeight: '400', color: 'rgb(246, 246, 246)' });
+  }
   await page.waitForTimeout(250);
   const after = await page.locator('#shorts-player').boundingBox();
   const drawer = await player.locator('.drawer').boundingBox();
@@ -290,6 +373,14 @@ test('Shorts drawers use real comments, reactions and playlists and isolate dire
   assert.ok(after.x + after.width <= drawer.x, 'the drawer does not cover the video');
   const pad = await virtualPad(context, page); await page.bringToFront(); await pad({ connected: true }); await page.waitForTimeout(100);
   const press = async button => { await pad({ connected: true, button }); await page.waitForTimeout(90); await pad({ connected: true }); await page.waitForTimeout(90); };
+  await player.locator('[data-focus-id="replies:short-comment"]').click();
+  await player.locator('[data-comment-detail] .detail-replies .comment-text').filter({ hasText: 'A reply on this Short.' }).waitFor();
+  assert.equal(await player.locator('.reply-connection').last().evaluate(node => getComputedStyle(node).borderBottomLeftRadius), '16px');
+  assert.equal(await player.locator('.detail-replies .reply-continuation').last().isVisible(), false);
+  await press(1);
+  assert.equal(await player.locator('.drawer').isVisible(), true, 'B returns from replies to comments before closing');
+  assert.equal(await player.locator('[data-comment-detail]').count(), 0);
+  assert.equal(await player.evaluate(host => host.shadowRoot.activeElement?.dataset.focusId), 'replies:short-comment', 'returning from replies restores the original comment action');
   await press(13);
   assert.match(page.url(), /\/shorts\/first$/, 'comments own down instead of changing the video');
   await press(1); assert.equal(await player.locator('.drawer').isVisible(), false);
@@ -297,8 +388,8 @@ test('Shorts drawers use real comments, reactions and playlists and isolate dire
   await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('[data-shorts-action=like]').getAttribute('aria-pressed') === 'true');
   assert.equal(calls.filter(call => call.path.endsWith('/like/like')).length, 1);
   await player.locator('[data-shorts-action=save]').click();
-  const playlist = player.getByRole('button', { name: 'List PLshorts', exact: true }); await playlist.waitFor(); await playlist.click();
-  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('.playlist')?.getAttribute('aria-pressed') === 'true');
+  const playlist = player.locator('[data-focus-id="playlist:0"]'); await playlist.waitFor(); await playlist.click();
+  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('[data-focus-id="playlist:0"]')?.getAttribute('aria-pressed') === 'true');
   assert.equal(calls.filter(call => call.path.endsWith('/browse/edit_playlist')).length, 1);
   await press(1); await press(9);
   assert.equal(await player.getAttribute('data-panel'), 'actions', 'Start opens the Shorts action menu');
@@ -327,6 +418,18 @@ test('rapid list directions select the latest native Short and Back returns to i
   await page.goto('https://www.youtube.com/shorts/first');
   const player = page.locator('#ytg-shorts-controls'); await player.waitFor(); await installMedia(context, page);
   await page.evaluate(() => {
+    window.originalShortsControls = document.querySelector('#ytg-shorts-controls');
+    window.shortEndpoints = [];
+    document.querySelector('ytd-app').navigate_ = endpoint => {
+      window.shortEndpoints.push(endpoint);
+      document.dispatchEvent(new Event('yt-navigate-start'));
+      setTimeout(() => {
+        history.pushState({}, '', endpoint.commandMetadata.webCommandMetadata.url);
+        document.dispatchEvent(new Event('yt-navigate-finish'));
+      }, 150);
+    };
+  });
+  await page.evaluate(() => {
     const controls = document.querySelector('#ytg-shorts-controls').shadowRoot;
     for (const action of ['down', 'up']) controls.querySelector('[data-shorts-action=' + action + ']').click();
   });
@@ -339,25 +442,28 @@ test('rapid list directions select the latest native Short and Back returns to i
   await page.waitForURL('**/shorts/third');
   await player.waitFor(); await installMedia(context, page);
   await player.locator('.preview').waitFor({ state: 'hidden' });
-  assert.deepEqual(loads, ['/shorts/first', '/shorts/third'], 'only the latest queued target starts native playback');
+  assert.deepEqual(loads, ['/shorts/first'], 'switching preserves the document instead of reloading the native interface');
+  assert.equal(await page.evaluate(() => window.originalShortsControls === document.querySelector('#ytg-shorts-controls')), true);
+  assert.deepEqual(await page.evaluate(() => window.shortEndpoints.map(endpoint => endpoint.reelWatchEndpoint.videoId)), ['third']);
   assert.equal(await player.locator('.count').textContent(), '3 / 4');
   await player.getByRole('button', { name: 'Back to feed', exact: true }).click();
   await page.waitForURL('**/feed/subscriptions');
 });
 
-for (const hiddenWrapper of [false, true]) {
-  const mode = hiddenWrapper ? 'hidden-wrapper' : 'native';
+for (const mode of ['native', 'hidden-wrapper', 'display-none', 'fixed-wrapper']) {
+  const hiddenWrapper = mode === 'hidden-wrapper';
   test(`Shorts ${mode} frames escape native stacking and clipping and restore their ancestors`, { timeout: 45000 }, async t => {
     const { context, worker } = await launchExtension(t);
     await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, uiLanguage: 'en' }));
     const playerId = 'shorts-player';
     const wrapperVisibility = hiddenWrapper ? 'visibility:hidden;' : '';
+    const wrapperLayout = mode === 'display-none' ? 'display:none!important;' : mode === 'fixed-wrapper' ? 'position:fixed!important;' : '';
     const content = `<!doctype html><html><head><meta charset="utf-8"><style>
       body{margin:0;background:#111;color:#fff}ytd-app,ytd-page-manager,ytd-shorts,ytd-reel-video-renderer{display:block}
     </style></head><body><ytd-app style="position:relative;z-index:1;isolation:isolate;transform:translateX(23px)">
       <ytd-page-manager style="width:960px;height:820px;contain:size layout;overflow:hidden">
       <ytd-shorts><ytd-reel-video-renderer is-active style="width:360px;height:700px">
-        <div id="unlisted-player-wrapper" style="position:relative;z-index:1;isolation:isolate;transform:translateY(13px);contain:size layout;overflow:hidden;width:140px;height:90px;${wrapperVisibility}">
+        <div id="unlisted-player-wrapper" style="position:relative;z-index:1;isolation:isolate;transform:translateY(13px);contain:size layout;overflow:hidden;width:140px;height:90px;${wrapperVisibility}${wrapperLayout}">
           <div id="${playerId}" class="html5-video-player" style="position:relative;width:120px;height:80px">
             <div class="html5-video-container" style="width:120px;height:80px"><video id="actual-frame" class="html5-main-video" muted playsinline style="width:120px;height:80px"></video></div>
             <div class="ytp-chrome-bottom"><button>Native play</button></div>
@@ -428,13 +534,11 @@ for (const hiddenWrapper of [false, true]) {
       assert.equal(await page.locator('[data-ytg-shorts-media],[data-ytg-shorts-ancestor]').count(), 0, 'all media and ancestor overrides are released');
       assert.equal(await page.locator('video').evaluate(video => video.loop), false);
       assert.equal(await page.locator('#unlisted-player-wrapper').evaluate(node => getComputedStyle(node).overflow), 'hidden');
+      if (mode === 'display-none') assert.equal(await page.locator('#unlisted-player-wrapper').evaluate(node => getComputedStyle(node).display), 'none', 'native hiding is restored after releasing the media');
+      if (mode === 'fixed-wrapper') assert.equal(await page.locator('#unlisted-player-wrapper').evaluate(node => getComputedStyle(node).position), 'fixed', 'native positioning is restored after releasing the media');
       if (hiddenWrapper) assert.equal(await page.locator('#relocated-player-wrapper').evaluate(node => getComputedStyle(node).visibility), 'hidden');
     };
-    await controls.getByRole('button', { name: 'Use YouTube controls', exact: true }).click();
-    await assertReleased();
-    await controls.getByRole('button', { name: 'Retry Shorts view', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('video').loop);
-    await assertFrame();
+    assert.equal(await controls.getByRole('button', { name: 'Use YouTube controls', exact: true }).count(), 0);
     await worker.evaluate(() => chrome.storage.local.set({ enabled: false }));
     await controls.waitFor({ state: 'hidden' }); await assertReleased();
     await worker.evaluate(() => chrome.storage.local.set({ enabled: true }));

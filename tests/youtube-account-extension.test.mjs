@@ -44,9 +44,9 @@ test('manifest account bridge loads API avatars and identities under CSP without
   await page.locator('[data-account-close]').click();
   await page.locator('#ytg-sidebar-settings').click();
   await page.locator('[data-setting="display"]').click();
-  await page.locator('[data-setting="playback-wide"]').click();
-  await page.waitForFunction(() => document.querySelector('#yt-gamepad-menu')?.shadowRoot?.querySelector('[data-setting="playback-wide"]')?.getAttribute('aria-pressed') === 'true');
-  assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('playbackLayout')).playbackLayout), 'wide');
+  await page.locator('[data-setting="playback-windowed"]').click();
+  await page.waitForFunction(() => document.querySelector('#yt-gamepad-menu')?.shadowRoot?.querySelector('[data-setting="playback-windowed"]')?.getAttribute('aria-pressed') === 'true');
+  assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('playbackLayout')).playbackLayout), 'windowed');
   assert.equal(await page.evaluate(() => 'ui' in window), false);
   assert.deepEqual(errors, []);
 });

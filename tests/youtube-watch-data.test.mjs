@@ -19,7 +19,7 @@ function fixture() {
     window: { ytcfg: { get: key => ({ INNERTUBE_CONTEXT: { client: { clientVersion: 'test' }, user: {} } })[key] } },
     fetch: (url, init) => new Promise(resolve => calls.push({ url, init, body: JSON.parse(init.body),
       resolve: raw => resolve({ ok: true, json: async () => { jsonReads++; return raw; } }) })) };
-  vm.runInNewContext(code, sandbox);
+  vm.runInNewContext(code, Object.assign(sandbox, { Headers, Request, Response }));
   const shared = sandbox.Fixture.createWatchDataService();
   const info = sandbox.Fixture.createWatchInfoService(shared), recommendations = sandbox.Fixture.createWatchNextService(shared);
   return { calls, location, shared, info, recommendations, get jsonReads() { return jsonReads; },

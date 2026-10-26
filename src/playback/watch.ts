@@ -86,13 +86,15 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
       closePanel(); show('recommendations');
     } else if (action === 'description' || action === 'comments') {
       view.panel.open(action);
+    } else if (action === 'subscribe' && controller.readWatchPage().subscribed) {
+      view.panel.open('subscription');
     } else if (action === 'save') {
       view.panel.open('playlists');
     } else if (action === 'channel') {
       if (!controller.request('channel')) feedback('Channel information is still loading');
     } else if (action === 'settings') {
       if (!controller.request('settings')) feedback('Player settings are currently unavailable');
-    } else if (['subscribe', 'like', 'dislike', 'save'].includes(action || '')) {
+    } else if (['subscribe', 'like', 'dislike'].includes(action || '')) {
       const route = controller.readRoute().key;
       Promise.resolve(controller.request('watchAction', action as import('../../types/ports').WatchAction)).then(ok => {
         if (lifecycle.destroyed || controller.readRoute().key !== route) return;
@@ -182,9 +184,8 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   }
   function handle(action: Action) {
     if (!enabled() || !controller.readRoute().isWatch || mode() === 'browse') return false;
-    if (action === 'seekBack' || action === 'seekForward') {
+    if (mode() === 'controls' && (action === 'seekBack' || action === 'seekForward')) {
       if (controller.hasTemporaryLayer?.()) return false;
-      if (mode() !== 'controls') show();
       if (watchState().panel === 'comments') { closePanel(); show('recommendations'); }
       else view.panel.open('comments');
       return true;

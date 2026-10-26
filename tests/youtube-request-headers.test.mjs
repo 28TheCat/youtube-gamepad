@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash, webcrypto } from 'node:crypto';
 import vm from 'node:vm';
+import * as YouTubeJs from 'youtubei.js/web';
 import ts from 'typescript-vue';
 
 const source = ts.transpileModule(readFileSync(new URL('../src/sites/youtube-request.ts', import.meta.url), 'utf8'), {
@@ -11,7 +12,7 @@ const source = ts.transpileModule(readFileSync(new URL('../src/sites/youtube-req
 function fixture(cookie = '') {
   const exports = {}, document = { cookie };
   const config = { INNERTUBE_CONTEXT_CLIENT_NAME: 1, SESSION_INDEX: 2, DELEGATED_SESSION_ID: 'brand' };
-  vm.runInNewContext(source, { exports, document, window: { ytcfg: { get: key => config[key] } },
+  vm.runInNewContext(source, { exports, Headers, Request, Response, require: () => YouTubeJs, document, window: { ytcfg: { get: key => config[key] } },
     location: { origin: 'https://www.youtube.com' }, crypto: webcrypto, TextEncoder });
   return { document, headers: sid => exports.createYouTubeHeaders({ client: { clientVersion: 'page-version' } }, sid) };
 }

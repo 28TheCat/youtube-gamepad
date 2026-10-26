@@ -1,12 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { launchExtension } from './helpers/extension.mjs';
+import { ProtoUtils } from 'youtubei.js/web';
 
-function response(id, { initial = false, next, replies = false } = {}) {
+function response(id, { initial = false, next, replies = false, translateTo } = {}) {
   const token = value => ({ continuationItemRenderer: { continuationEndpoint: {
     continuationCommand: { token: value, request: 'CONTINUATION_REQUEST_TYPE_WATCH_NEXT' }
   } } });
-  const items = [{ commentThreadRenderer: { commentViewModel: { commentViewModel: { commentId: id, commentKey: `key:${id}` } },
+  const items = [{ commentThreadRenderer: { commentViewModel: { commentViewModel: { commentId: id, commentKey: `key:${id}`,
+    ...(translateTo ? { translateButton: { buttonRenderer: { serviceEndpoint: { performCommentActionEndpoint: {
+      action: ProtoUtils.encodeCommentActionParams(22, { text: `Body ${id}`, target_language: translateTo })
+    } } } } } : {}) } },
     ...(replies ? { replies: { commentRepliesRenderer: { subThreads: [token('reply-parent')] } } } : {})
   } }, ...(next ? [token(next)] : [])];
   return { onResponseReceivedEndpoints: [
@@ -36,7 +40,16 @@ test('manifest comments service loads comments, replies and next page without na
       calls.push({ body, headers: await route.request().allHeaders() });
       await route.fulfill({ json: body.continuation === 'reply-parent' ? response('reply')
         : body.continuation === 'comments-next' ? response('second')
-          : response('parent', { initial: true, next: 'comments-next', replies: true }) });
+          : response('parent', { initial: true, next: 'comments-next', replies: true, translateTo: 'ja' }) });
+    } else if (new URL(route.request().url()).pathname === '/youtubei/v1/comment/perform_comment_action') {
+      const body = route.request().postDataJSON();
+      calls.push({ body, headers: await route.request().allHeaders() });
+      if (!Array.isArray(body.actions) || body.actions.length !== 1 || typeof body.actions[0] !== 'string' || 'action' in body) {
+        await route.fulfill({ status: 400, json: { error: { code: 400, message: 'Expected actions array' } } }); return;
+      }
+      await route.fulfill({ json: { frameworkUpdates: { entityBatchUpdate: { mutations: [
+        { payload: { commentEntityPayload: { translatedContent: { content: '原版接口返回的译文' } } } }
+      ] } } } });
     } else await route.fulfill({ contentType: 'text/html',
       headers: { 'Content-Security-Policy': "default-src 'self'; script-src 'self'; connect-src 'self'" },
       body: '<!doctype html><html><body><ytd-app></ytd-app></body></html>' });
@@ -68,6 +81,7 @@ test('manifest comments service loads comments, replies and next page without na
   let snapshot = await settled();
   assert.equal(snapshot.failed, false);
   assert.equal(snapshot.items[0].text, 'Body parent');
+  assert.equal(snapshot.items[0].translationTarget, 'ja');
   await request('commentReplies', { key: 'parent' });
   snapshot = await settled();
   assert.deepEqual(snapshot.items[0].replies, [{ key: 'reply', author: 'Author reply', text: 'Body reply' }]);
@@ -75,6 +89,22 @@ test('manifest comments service loads comments, replies and next page without na
   assert.deepEqual(snapshot.items.map(item => item.key), ['parent', 'second']);
   assert.equal(snapshot.hasMore, false);
   assert.equal(calls.length, 3);
+  assert.equal((await request('commentTranslate', { key: 'reply', language: 'ja' })).value, false, 'a reply without an entry cannot be translated');
+  assert.equal((await request('commentTranslate', { key: 'parent', language: 'en' })).value, false, 'the native target cannot be replaced by the UI language');
+  assert.equal(calls.length, 3);
+  assert.equal((await request('commentTranslate', { key: 'parent', language: 'ja' })).value, true);
+  for (let index = 0; index < 100; index++) {
+    snapshot = (await request('readComments')).value;
+    if (!snapshot.items[0].translation?.loading) break;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.equal(snapshot.items[0].translation.text, '原版接口返回的译文');
+  assert.equal(snapshot.items[0].translation.language, 'ja');
+  assert.equal(snapshot.items[0].text, 'Body parent');
+  assert.equal(snapshot.items[0].replies[0].translation, undefined);
+  assert.equal(calls.length, 4);
+  assert.equal(typeof calls[3].body.actions[0], 'string');
+  assert.equal(calls[3].body.action, undefined);
   for (const call of calls) {
     assert.match(call.headers.cookie, /SAPISID=comments-session/);
     assert.match(call.headers.authorization, /^SAPISIDHASH /);

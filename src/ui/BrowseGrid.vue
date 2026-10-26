@@ -9,11 +9,17 @@ import PlaylistCard from './PlaylistCard.vue';
 import ShortsShelf from './ShortsShelf.vue';
 import { feedRows, rowGeometry, windowIndexes, indexFeedRows, type FeedRow } from '../shared/virtual-feed';
 import type { BrowseItem } from '../shared/browse-data';
-import FeedStatus from './FeedStatus.vue';
+import LoadStatus from './LoadStatus.vue';
 import { pageActiveElement } from '../shared/page-dom';
 const props = defineProps<{ open: (id: string) => void; more: () => void; ownsFocus: () => boolean; gridSettings: VideoGridSettings;
   changeCategory?: (id: string) => void; pageTitle?: string }>();
 const store = useBrowseStore();
+const feedStatus = computed(() => ({
+  loading: store.loading || (!store.snapshot.items.length && !store.category && !store.error),
+  failed: !!store.error, empty: !store.snapshot.items.length,
+  loadingMessage: t('Loading videos…'), errorMessage: t(store.error), emptyMessage: t('此分类暂无视频'),
+  retryable: true, retryLabel: t('重试')
+}));
 // Share row ordering with the virtual feed so Shorts never interrupt a partial row.
 const feedEntries = computed(() => {
   const entries: ({ id: string; item: BrowseItem } | { id: string; shorts: readonly BrowseItem[] })[] = [];
@@ -218,8 +224,7 @@ onBeforeUnmount(() => {
 <template>
   <div ref="viewport" data-ytg-browse-grid data-ytg-indexed-feed :data-ytg-virtual-feed="virtual ? '' : undefined" :style="{ scrollSnapType: virtual ? 'none' : undefined }" @ytg-browse-direction="direction" @ytg-browse-restore="restoreScroll" @scroll.passive="scrolled" :aria-label="pageTitle || t('Videos')" :aria-busy="store.loading">
     <slot name="heading" />
-    <FeedStatus v-if="!store.snapshot.items.length" :error="store.error" :loading="store.loading" :empty="true"
-      :category="store.category" @retry="retry" />
+    <LoadStatus v-if="!store.snapshot.items.length" v-bind="feedStatus" @retry="retry" />
     <div v-if="store.loading && !store.snapshot.items.length && !store.error" class="feed-skeletons" aria-hidden="true"
       :style="{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))` }">
       <div v-for="n in layout.columns * 2" :key="n" class="feed-skeleton"><div></div><span></span><span></span></div>
@@ -246,9 +251,7 @@ onBeforeUnmount(() => {
       </template>
     </div>
     <div ref="sentinel" data-browse-sentinel aria-hidden="true" style="height:1px"></div>
-    <FeedStatus v-if="store.snapshot.items.length && store.error" :error="store.error" :loading="store.loading" :empty="false"
-      :category="store.category" @retry="retry" />
-    <p v-if="store.loading && store.snapshot.items.length" role="status">{{ t('Loading videos…') }}</p>
+    <LoadStatus v-if="store.snapshot.items.length && (store.error || store.loading)" v-bind="feedStatus" @retry="retry" />
     <button v-if="store.snapshot.canLoadMore" data-browse-more :disabled="store.loading" @click="emptyPages = 0; more()">{{ t("Load more videos") }}</button>
   </div>
 </template>

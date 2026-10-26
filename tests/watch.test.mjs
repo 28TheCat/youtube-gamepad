@@ -76,10 +76,11 @@ function setup(integrated = false, inputMode = 'gamepad') {
   function node(tag) {
     const listeners = {}, attributes = {}, names = new Set();
     return {
-      tagName: tag, children: [], dataset: {}, style: {}, textContent: '', isConnected: true,
+      tagName: tag, children: [], dataset: {}, style: { removeProperty(name) { delete this[name]; } }, textContent: '', isConnected: true,
       classList: { add: name => names.add(name), remove: name => names.delete(name), toggle(name, on) { on ? names.add(name) : names.delete(name); }, contains: name => names.has(name) },
       append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
       setAttribute(name, value) { attributes[name] = value; }, getAttribute: name => attributes[name] ?? null,
+      hasAttribute: name => name in attributes, closest: () => null,
       addEventListener(name, fn) { listeners[name] = fn; },
       dispatchEvent(event) { listeners[event.type]?.(event); },
       click() { listeners.click?.({ detail: 0 }); },
@@ -107,6 +108,7 @@ function setup(integrated = false, inputMode = 'gamepad') {
       if (selector === '#movie_player') return { getPlayerResponse: () => ({ videoDetails: { videoId: 'current', channelId: 'UCcreator', title: '当前视频', author: '测试频道', shortDescription: '视频说明', viewCount: '123' } }) };
       if (selector.startsWith('video')) return video;
       if (selector === '.ytp-settings-menu') return null;
+      if (selector === '.ytp-play-button') return { click() { video.paused ? video.play() : video.pause(); } };
       if (selector.startsWith('.ytp-')) return native;
       return null;
     }, querySelectorAll: () => []
@@ -623,6 +625,16 @@ test('B hides controls before exiting page fullscreen and does not navigate in t
   s.adapter.interceptAction('back');
   await Promise.resolve();
   assert.equal(exits, 1); assert.equal(s.video.paused, false);
+});
+
+test('playback shoulders leave seeking to the media controller without opening a panel', () => {
+  const s = setup();
+  for (const action of ['seekBack', 'seekForward']) {
+    assert.equal(s.watch.handle(action), false);
+    assert.equal(s.watch.handleInput(action), 'pass');
+    assert.equal(s.watch.state.mode, 'playback');
+    assert.equal(s.watch.state.panel, '');
+  }
 });
 
 test('shoulders switch recommendations and comments without seeking, starting on recommendations', () => {

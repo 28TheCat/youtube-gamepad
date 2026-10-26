@@ -12,9 +12,14 @@ test('production MAIN runtime graph contains only page adapters and their data h
   allowed.add('shared/sidebar-data');
   allowed.add('sites/youtube-watch-data');
   allowed.add('sites/youtube-comments');
+  allowed.add('sites/native-comment-translation');
   allowed.add('sites/youtube-channel');
   allowed.add('sites/youtube-watch-info');
   allowed.add('sites/youtube-request');
+  // Pure YouTube badge parsing shared by search and watch metadata adapters.
+  // SVG rendering stays in ISOLATED; this helper returns only a badge kind.
+  allowed.add('sites/youtube-channel-badge');
+  allowed.add('shared/comment-language');
 function visit(file) {
     if (visited.has(file)) return;
     assert.ok(allowed.has(file), `Application dependency leaked into MAIN: ${file}`);
@@ -32,6 +37,7 @@ function visit(file) {
       if (file === 'sites/youtube-sidebar' && name === 'youtubei.js/web') continue;
       if (file === 'sites/youtube-channel' && name === 'youtubei.js/web') continue;
       if (file === 'sites/youtube-comments' && name === 'youtubei.js/web') continue;
+      if (file === 'sites/youtube-request' && name === 'youtubei.js/web') continue;
       if (file === 'sites/youtube-parser' && name === 'youtubei.js/web') continue;
       assert.ok(name.startsWith('.'), `External runtime imported by MAIN: ${name}`);
       const url = new URL(name.replace(/\.ts$/, '') + '.ts', new URL(`../src/${file}.ts`, import.meta.url));
@@ -62,9 +68,10 @@ function fixture() {
   document.querySelector = () => player;
   const context = { document, window, CustomEvent, URL, setTimeout, clearTimeout, crypto: { randomUUID: () => 'test' },
     history: { pushState() {}, replaceState() {} }, location: { pathname: '/', search: '' } };
-  const protocol = load('bridge/page-protocol', context, { '../shared/watch-link': load('shared/watch-link', context) });
+  const languages = load('shared/comment-language', context);
+  const protocol = load('bridge/page-protocol', context, { '../shared/watch-link': load('shared/watch-link', context), '../shared/comment-language': languages });
   const sidebarData = load('shared/sidebar-data', context, { './explore-pages': load('shared/explore-pages', context) });
-  const modules = { './page-protocol': protocol, '../shared/watch-link': load('shared/watch-link', context), '../shared/sidebar-data': sidebarData };
+  const modules = { './page-protocol': protocol, '../shared/watch-link': load('shared/watch-link', context), '../shared/sidebar-data': sidebarData, '../shared/comment-language': languages };
   const server = load('bridge/page-server', context, { ...modules,
     '../sites/youtube-sidebar': { createSidebarService: () => ({ read: async () => sidebarData.defaultSidebar(), destroy() {} }) },
     '../sites/youtube-account': { createAccountService: () => ({ read: async () => ({ signedIn: false, accounts: [] }), destroy() {} }) },
@@ -201,6 +208,18 @@ test('comment snapshots strip private fields and bound text and replies at the b
   const unsafeAvatars = f.protocol.commentsSnapshot(raw).items[0];
   assert.equal(unsafeAvatars.avatar, undefined);
   assert.equal(unsafeAvatars.replies[0].avatar, undefined);
+    raw.items[0].translationTarget = 'ja';
+    raw.items[0].replies[0].translationTarget = 'de';
+  raw.items[0].translation = { language: 'ja', text: 't'.repeat(9000), loading: false, failed: false, token: 'private' };
+  const translated = f.protocol.commentsSnapshot(raw);
+    assert.equal(translated.items[0].translationTarget, 'ja');
+    assert.equal(translated.items[0].replies[0].translationTarget, 'de');
+  assert.equal(translated.items[0].translation.text.length, 8000);
+  assert.equal(JSON.stringify(translated).includes('private'), false);
+  raw.items[0].translation.language = 'en/unsafe';
+    raw.items[0].translationTarget = 'en/unsafe';
+  assert.equal(f.protocol.commentsSnapshot(raw).items[0].translation, undefined);
+    assert.equal(f.protocol.commentsSnapshot(raw).items[0].translationTarget, undefined);
   raw.items[0].replies[0].text = { token: 'private' };
   assert.equal(f.protocol.commentsSnapshot(raw).items[0].replies.length, 0);
 });

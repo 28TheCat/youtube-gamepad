@@ -11,7 +11,7 @@ function load(file, context = {}) {
   const source = ts.transpileModule(readFileSync(new URL(`../src/${file}.ts`, import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
   }).outputText;
-  vm.runInNewContext(source, { exports, URL, URLSearchParams, structuredClone, require: name => name === 'youtubei.js/web' ? YouTubeJs : name === './youtube-request' ? load('sites/youtube-request', context) : modules[name], ...context });
+  vm.runInNewContext(source, { exports, Headers, Request, Response, URL, URLSearchParams, structuredClone, require: name => name === 'youtubei.js/web' ? YouTubeJs : name === './youtube-request' ? load('sites/youtube-request', context) : modules[name], ...context });
   return exports;
 }
 modules['../shared/browse-categories'] = load('shared/browse-categories');
@@ -19,6 +19,7 @@ modules['../shared/watch-link'] = load('shared/watch-link');
 modules['../shared/playlist-colors'] = load('shared/playlist-colors');
 modules['../shared/explore-pages'] = load('shared/explore-pages');
 modules['./youtube-parser'] = load('sites/youtube-parser');
+modules['./youtube-channel-badge'] = load('sites/youtube-channel-badge');
 modules['./youtube-search'] = load('sites/youtube-search');
 modules['./youtube-channel'] = load('sites/youtube-channel');
 const { parseYouTubeJsBrowse } = modules['./youtube-search'];

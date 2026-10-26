@@ -1,10 +1,10 @@
 import type { PlaybackSnapshot, WatchPageSnapshot, WatchFeatures, WatchSnapshot, RecommendationSnapshot } from '../../types/ports';
 import type { PlaybackViewState } from '../playback/playback-model';
 
-export type PlaybackMetadata = Pick<WatchPageSnapshot, 'title' | 'channel' | 'viewCount' | 'avatar' | 'subscribed' | 'liked' | 'disliked'>;
-export type PlaybackControlState = Pick<PlaybackViewState, 'paused' | 'captionsEnabled' | 'isLive' | 'canSeek' | 'atLiveEdge'>;
+export type PlaybackMetadata = Pick<WatchPageSnapshot, 'title' | 'channel' | 'channelBadge' | 'viewCount' | 'avatar' | 'notificationPreference' | 'subscribed' | 'liked' | 'disliked'>;
+export type PlaybackControlState = Pick<PlaybackViewState, 'paused' | 'muted' | 'captionsEnabled' | 'isLive' | 'canSeek' | 'atLiveEdge'>;
 
-const recommendationFields = ['key', 'label', 'channel', 'thumbnail', 'thumbnailFallback', 'metadata', 'duration', 'watchedPercent', 'href', 'queue', 'selected', 'isPlaylist'] as const;
+const recommendationFields = ['key', 'label', 'channel', 'channelBadge', 'thumbnail', 'thumbnailFallback', 'metadata', 'viewCount', 'duration', 'watchedPercent', 'href', 'queue', 'selected', 'isPlaylist'] as const;
 export function sameRecommendations(left: readonly RecommendationSnapshot[], right: readonly RecommendationSnapshot[]) {
   return left === right || left.length === right.length && left.every((item, index) => item === right[index] ||
     recommendationFields.every(field => item[field] === right[index][field]));

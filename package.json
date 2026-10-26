@@ -1,6 +1,6 @@
 {
   "name": "youtube-gamepad",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Gamepad navigation and playback controls for YouTube",
   "engines": {

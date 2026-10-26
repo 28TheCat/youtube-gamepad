@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { importSettingsModel } from './helpers/settings-model.mjs';
-const { isShortsPlaybackRoute, readShortsQueue, shortsPlayerHref } = await importSettingsModel('src/shared/shorts-route.ts');
+const { isShortsPlaybackRoute, readShortsQueue } = await importSettingsModel('src/shared/shorts-route.ts');
 
 test('Shorts use their native route and never take over ordinary watch pages', t => {
   const saved = globalThis.location;
@@ -10,7 +10,6 @@ test('Shorts use their native route and never take over ordinary watch pages', t
     ['/watch', '?v=one', false], ['/shorts/one', '', true], ['/watch', '?v=one&ytg_shorts=1', false],
     ['/shorts/', '', false], ['/shorts/one/more', '', false], ['/', '?ytg_shorts=1', false]
   ]) { globalThis.location = { pathname, search }; assert.equal(isShortsPlaybackRoute(), expected); }
-  assert.equal(shortsPlayerHref('one'), '/shorts/one');
 });
 
 test('Shorts queues are bounded, deduplicated and cannot redirect outside YouTube', t => {

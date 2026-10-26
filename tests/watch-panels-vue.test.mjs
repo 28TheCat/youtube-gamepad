@@ -23,6 +23,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
   await page.evaluate(code);
   await page.evaluate(({ layout, styles }) => {
     document.documentElement.dataset.ytgPlaybackLayout = layout;
+    document.documentElement.dataset.ytgInputMode = 'mouse';
     const host = document.createElement('div'); host.id = 'panels'; document.body.append(host);
     const root = host.attachShadow({ mode: 'open' });
     const make = (tag, className = '') => { const node = document.createElement(tag); node.className = className; return node; };
@@ -32,8 +33,11 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
     window.sheet = sheet; window.video = document.querySelector('video'); window.requests = []; window.routeKey = 'first';
     window.commentStatus = { loading: false, failed: false, hasMore: true };
     window.records = Array.from({ length: 20 }, (_, index) => ({ key: `parent-${index}`, author: `Author ${index}`,
-      text: `Parent comment ${index} with some text for reading.`, hasReplies: true, replyCount: 20, repliesLabel: 'Load replies',
-      replies: Array.from({ length: 12 }, (_, reply) => ({ key: `reply-${reply}`, author: `Reply author ${reply}`, text: `Reply ${reply} to parent ${index}` })) }));
+      text: `Parent comment ${index} with some text for reading.`, translationTarget: 'ja', hasReplies: true, replyCount: 20, repliesLabel: 'Load replies',
+      replies: Array.from({ length: 12 }, (_, reply) => ({ key: `reply-${index}-${reply}`, author: `Reply author ${reply}`, text: `Reply ${reply} to parent ${index}`, translationTarget: 'ja' })) }));
+    delete window.records[0].translationTarget; window.records[0].text = '这是一条中文评论';
+    delete window.records[1].translationTarget; window.records[1].text = 'This is an English comment.';
+    window.records[2].text = '原生提供翻译入口的中文评论'; window.records[2].translationTarget = 'en';
     const state = { panel: '', panelIndex: 0 }, close = make('button', 'control');
     window.panels = WatchPanelsFixture.YTGamepadWatchPanels.create({ make, dialog, sheet, surface,
       description: make('div', 'description'), panelTitle: make('h2'), close,
@@ -43,10 +47,15 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
         if (event.type === 'WATCH_PANEL_COUNT') state.panelIndex = Math.min(state.panelIndex, event.count);
       },
       focus() { [close, ...window.panels.buttons][state.panelIndex]?.focus({ preventScroll: true }); },
-      controllerStyle: { bind(node, text, attribute) { if (attribute) node.setAttribute(attribute, text); else node.textContent = text; }, hint() {} },
+      controllerStyle: { bind(node, text, attribute) { if (attribute) node.setAttribute(attribute, text); else node.textContent = text; }, hint() {},
+        badge(node, key) { node.dataset.ytgKey = key; node.textContent = key; return node; } },
       controller: { readRoute: () => ({ key: window.routeKey }), readComments: () => structuredClone(window.records), readCommentsStatus: () => window.commentStatus,
         request(type, key) {
           window.requests.push([type, key]);
+          if (type === 'translateComment') {
+            const item = window.records.find(item => item.key === key) || window.records.flatMap(item => item.replies).find(item => item.key === key);
+            item.translation = { language: item.translationTarget, text: `Translated ${key} to ${item.translationTarget}`, loading: false, failed: false };
+          }
           if (type === 'replies') {
             if (window.deferReplies) { window.commentStatus = { loading: true, failed: false, hasMore: true }; return true; }
             const parent = window.records.find(item => item.key === key);
@@ -60,22 +69,59 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
     window.panels.open('comments');
   }, { layout, styles: readFileSync(new URL('../src/ui/watch.css', import.meta.url), 'utf8') });
   const host = page.locator('#panels'), detail = host.locator('[data-comment-detail]');
+  assert.equal(await host.locator('button.comment-header, .comment-header[tabindex], .comment-author[data-focus-id]').count(), 0,
+    'commenter names do not create navigation stops');
+  assert.equal(await page.evaluate(() => window.panels.buttons.filter(node => node.dataset.focusId?.startsWith('comment:'))
+    .every(node => node.classList.contains('comment-text'))), true, 'comment navigation targets the body text');
+  assert.equal(await host.locator('[data-focus-id="translate:parent-0"]').count(), 0, 'Chinese without a native entry has no button');
+  assert.equal(await host.locator('[data-focus-id="translate:parent-1"]').count(), 0, 'English without a native entry also has no button');
+  assert.match(await host.locator('[data-focus-id="translate:parent-2"]').textContent(), /English/, 'a native target is authoritative regardless of source script');
   assert.equal(await host.locator('.comment-reply').count(), 0, 'even cached replies are not expanded in the parent list');
   const original = host.locator('[data-focus-id="replies:parent-10"]');
-  assert.equal(await original.textContent().then(text => text.trim()), 'View 20 replies');
+  assert.equal(await original.locator('.comment-expand-hint [data-ytg-key]').getAttribute('data-ytg-key'), 'A');
+  assert.equal(await original.locator('.comment-expand-hint').isVisible(), false, 'mouse mode hides the controller prompt');
+  await page.evaluate(() => { document.documentElement.dataset.ytgInputMode = 'gamepad'; });
+  assert.equal(await original.locator('.comment-expand-hint').isVisible(), true, 'gamepad mode identifies the expand action');
+  await page.evaluate(() => { document.documentElement.dataset.ytgInputMode = 'mouse'; });
+  assert.equal(await original.locator('.comment-replies-label').textContent(), 'View 20 replies');
   await original.scrollIntoViewIfNeeded(); await original.focus();
   const scrollBefore = await page.evaluate(() => window.sheet.scrollTop);
   await original.click();
   assert.equal(await detail.locator('.detail-parent .comment-text').textContent(), 'Parent comment 10 with some text for reading.');
   assert.equal(await host.locator('.comment-reply').count(), 5);
+  const branches = detail.locator('.detail-replies > .detail-branch');
+  assert.equal(await branches.first().locator('.reply-connection').evaluate(node => getComputedStyle(node).borderBottomLeftRadius), '16px');
+  assert.equal(await branches.first().locator('.reply-connection').evaluate(node => getComputedStyle(node).borderLeftWidth), '1px');
+  assert.equal(await branches.first().locator('.reply-continuation').isVisible(), true);
+  assert.equal(await branches.last().locator('.reply-continuation').isVisible(), false, 'the last reply terminates at its curved connection');
   assert.equal(await page.evaluate(() => window.sheet.scrollTop), 0);
+  for (const dark of [false, true]) {
+    await page.evaluate(dark => document.documentElement.toggleAttribute('dark', dark), dark);
+    const typography = await detail.evaluate(node => {
+      const parent = node.querySelector('.detail-parent .comment-text');
+      const reply = node.querySelector('.detail-replies .comment-text');
+      const parentStyle = getComputedStyle(parent), replyStyle = getComputedStyle(reply);
+      return { parentColor: parentStyle.color, replyColor: replyStyle.color,
+        panelColor: getComputedStyle(node.closest('.sheet')).color,
+        parentFont: parentStyle.font, replyFont: replyStyle.font };
+    });
+    assert.equal(typography.parentColor, typography.replyColor, 'parent and reply text use the same foreground in mouse mode');
+    assert.equal(typography.parentColor, typography.panelColor, 'comments inherit the panel foreground instead of fullscreen white');
+    assert.equal(typography.parentFont, typography.replyFont, 'all comment bodies share the same typography');
+    const labels = await detail.locator('.comment-author, .comment-text, .comment-translate, .detail-reply-count').evaluateAll(nodes => nodes.map(node => {
+      const style = getComputedStyle(node);
+      return { color: style.color, fontSize: style.fontSize, lineHeight: style.lineHeight, fontWeight: style.fontWeight };
+    }));
+    for (const label of labels) assert.deepEqual(label, { color: typography.panelColor, fontSize: '14px', lineHeight: '20px', fontWeight: '400' });
+  }
+  await page.evaluate(() => document.documentElement.removeAttribute('dark'));
   mkdirSync(new URL('../output/playwright/', import.meta.url), { recursive: true });
   await page.screenshot({ path: `output/playwright/comment-detail-${layout}.png` });
   assert.equal(await host.locator('[data-focus-id="comments:more"]').count(), 0);
   assert.equal(await detail.getByText('Parent comment 11 with some text for reading.', { exact: true }).count(), 0);
   await host.locator('[data-focus-id="replies:more"]').click();
   assert.equal(await host.locator('.comment-reply').count(), 10);
-  assert.equal(await page.evaluate(() => document.querySelector('#panels').shadowRoot.activeElement.dataset.focusId), 'comment:reply:["parent-10","reply-5"]');
+  assert.equal(await page.evaluate(() => document.querySelector('#panels').shadowRoot.activeElement.dataset.focusId), 'comment:reply:["parent-10","reply-10-5"]');
   assert.deepEqual(await page.evaluate(() => window.requests), [['comments', true]], 'cached batches do not issue network requests');
   await host.locator('[data-focus-id="replies:more"]').click();
   assert.equal(await host.locator('.comment-reply').count(), 12);
@@ -90,6 +136,30 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
   await original.click();
   assert.equal(await host.locator('.comment-reply').count(), 5, 'reentering starts with a small batch again');
   assert.equal(await page.evaluate(() => window.video === document.querySelector('#playing-video')), true);
+  for (const language of ['ja', 'de', 'zh-Hans', 'en']) {
+    await page.evaluate(language => {
+      for (const item of window.records) { if (item.translationTarget) item.translationTarget = language;
+        for (const reply of item.replies) reply.translationTarget = language; }
+      window.panels.refresh();
+    }, language);
+    const translate = detail.locator('.detail-parent .comment-translate');
+    assert.match(await translate.textContent(), /Translate to/);
+    await translate.click();
+    assert.equal(await detail.locator('.detail-parent .comment-text').textContent(), `Translated parent-10 to ${language}`);
+    assert.equal(await translate.textContent(), 'Show original');
+    const requests = await page.evaluate(() => window.requests.length);
+    await translate.click();
+    assert.equal(await detail.locator('.detail-parent .comment-text').textContent(), 'Parent comment 10 with some text for reading.');
+    await translate.click();
+    assert.equal(await page.evaluate(() => window.requests.length), requests, 'original/translation toggles do not request again');
+  }
+  const replyTranslation = detail.locator('.comment-reply .comment-translate').first();
+  await replyTranslation.click();
+  assert.equal(await detail.locator('.comment-reply .comment-text').first().textContent(), 'Translated reply-10-0 to en');
+  assert.equal(await detail.locator('.comment-reply .comment-text').nth(1).textContent(), 'Reply 1 to parent 10');
+  await page.evaluate(() => { delete window.records[10].translationTarget; window.panels.refresh(); });
+  assert.equal(await detail.locator('.detail-parent .comment-translate').count(), 0, 'removing the native entry removes the button even with a cached translation');
+  assert.equal(await detail.locator('.detail-parent .comment-text').textContent(), 'Parent comment 10 with some text for reading.');
   await page.evaluate(() => window.panels.open('comments'));
   assert.equal(await detail.count(), 0, 'selecting the comments tab returns to its list');
   await page.evaluate(() => { window.deferReplies = true; window.records[11].replies = []; });
@@ -131,7 +201,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`comments use independent 
     window.panels = WatchPanelsFixture.YTGamepadWatchPanels.create({ make, dialog, sheet, surface,
       description: make('div', 'description'), panelTitle: make('h2'), close: make('button', 'control'),
       watchState: () => state, send(event) { if (event.type === 'WATCH_PANEL') state.panel = event.panel; },
-      focus() {}, controllerStyle: { bind() {}, hint(node, value) { node.textContent = value; } },
+      focus() {}, controllerStyle: { bind() {}, hint(node, value) { node.textContent = value; }, badge() {} },
       controller: { readRoute: () => ({ key: 'fixture' }), readComments: () => [], request() {} }, descriptionText: 'Description'
     });
     window.panels.open('comments');
@@ -207,7 +277,7 @@ for (const trustedTypes of [false, true]) {
           if (event.type === 'WATCH_FOCUS') window.state.panelIndex = event.index;
           if (event.type === 'WATCH_PANEL_COUNT') window.state.panelIndex = Math.min(window.state.panelIndex, event.count); },
         focus() { [close, ...window.panels.buttons][window.state.panelIndex]?.focus(); },
-        controllerStyle: { hint(node, text) { node.textContent = text; return node; }, bind() { return () => {}; } },
+        controllerStyle: { hint(node, text) { node.textContent = text; return node; }, bind() { return () => {}; }, badge() {} },
         controller: { readRoute: () => ({ key: window.routeKey }), readComments: () => structuredClone(window.records),
           readCommentsStatus: () => window.commentsStatus,
           readWatchFeatures: () => ({ comments: window.failed ? 'failed' : 'available' }),
@@ -266,8 +336,13 @@ for (const trustedTypes of [false, true]) {
     assert.match(await host.getByRole('status').textContent(), /Loading comments/);
     await page.evaluate(() => { window.commentsStatus = { loading: false, failed: true, hasMore: true }; window.panels.refresh(); });
     assert.match(await host.getByRole('status').textContent(), /Could not load comments/);
+    assert.equal(await host.locator('[data-load-state="failed"]').count(), 1);
+    assert.equal(await host.locator('[data-focus-id="comments:more"]').count(), 1, 'shared status owns the only retry action');
     await host.getByRole('button', { name: 'Retry', exact: true }).click();
     assert.equal(await page.evaluate(() => window.requests.at(-1)[0]), 'comments');
+    await page.evaluate(() => { window.commentsStatus = { loading: true, failed: true, hasMore: true }; window.panels.refresh(); });
+    assert.match(await host.getByRole('status').textContent(), /Loading comments/);
+    assert.equal(await host.getByRole('button', { name: 'Retry', exact: true }).count(), 0, 'loading takes precedence over a stale failure');
     await page.evaluate(() => { window.commentsStatus = { loading: false, failed: false, hasMore: false }; window.panels.refresh(); });
     assert.match(await host.getByRole('status').textContent(), /No more comments/);
     assert.equal(await host.locator('[data-focus-id="comments:more"]').count(), 0);
@@ -296,3 +371,68 @@ for (const trustedTypes of [false, true]) {
     assert.equal(await page.locator('video').count(), 1);
   });
 }
+
+
+for (const layout of ['windowed', 'fullscreen']) test(`subscription menu persists preferences, handles failure and keeps cancellation explicit (${layout})`, async t => {
+  const page = await browserPage(t);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setContent('<html><body style="margin:0"></body></html>');
+  await page.addStyleTag({ content: readFileSync(new URL('../src/ui/theme.css', import.meta.url), 'utf8') });
+  await page.evaluate(code);
+  await page.evaluate(({ layout, styles }) => {
+    document.documentElement.dataset.ytgPlaybackLayout = layout;
+    const host = document.createElement('div'); host.id = 'subscription-fixture'; document.body.append(host);
+    const root = host.attachShadow({ mode: 'open' });
+    const make = (tag, className = '') => { const node = document.createElement(tag); node.className = className; return node; };
+    const style = make('style'); style.textContent = styles;
+    const dialog = make('div', 'dialog'), sheet = make('section', 'sheet'), surface = make('div', 'surface');
+    const anchor = make('button'); anchor.dataset.action = 'subscribe'; anchor.textContent = 'Subscribed';
+    anchor.style.cssText = 'position:fixed;top:150px;left:100px'; surface.append(anchor);
+    dialog.hidden = true; dialog.append(sheet); root.append(style, surface, dialog);
+    window.subscriptionState = { panel: '', panelIndex: 0 };
+    window.subscriptionPage = { subscribed: true, notificationPreference: 'PERSONALIZED' };
+    window.subscriptionCalls = []; window.failSubscription = false; window.refreshes = 0;
+    const close = make('button', 'control');
+    window.subscriptionPanels = WatchPanelsFixture.YTGamepadWatchPanels.create({ make, dialog, sheet, surface,
+      description: make('div', 'description'), panelTitle: make('h2'), close,
+      watchState: () => window.subscriptionState, send(event) {
+        if (event.type === 'WATCH_PANEL') { window.subscriptionState.panel = event.panel; window.subscriptionState.panelIndex = 0; }
+        if (event.type === 'WATCH_FOCUS') window.subscriptionState.panelIndex = event.index;
+      }, focus() { [close, ...window.subscriptionPanels.buttons][window.subscriptionState.panelIndex]?.focus(); },
+      controllerStyle: { bind(node, text, attribute) { if (attribute) node.setAttribute(attribute, text); else node.textContent = text; }, hint() {}, badge() {} },
+      controller: { readRoute: () => ({ key: 'video' }), readWatchPage: () => window.subscriptionPage,
+        requestRefresh() { window.refreshes++; }, async request(type, action) {
+          window.subscriptionCalls.push([type, action]);
+          if (window.failSubscription) return false;
+          if (action === 'unsubscribe') window.subscriptionPage.subscribed = false;
+          else window.subscriptionPage.notificationPreference = { notificationsAll: 'ALL', notificationsNone: 'NONE', notificationsPersonalized: 'PERSONALIZED' }[action];
+          return true;
+        } }, descriptionText: '' });
+    close.addEventListener('click', () => window.subscriptionPanels.close());
+    window.subscriptionPanels.open('subscription');
+  }, { layout, styles: readFileSync(new URL('../src/ui/watch.css', import.meta.url), 'utf8') });
+  const host = page.locator('#subscription-fixture');
+  assert.equal(await host.locator('[data-focus-id="notificationsPersonalized"]').getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(await page.evaluate(() => window.subscriptionCalls), [], 'opening the menu cannot unsubscribe');
+  assert.equal(await page.evaluate(() => document.querySelector('#subscription-fixture').shadowRoot.activeElement.dataset.focusId), 'notificationsAll');
+  const rect = await host.locator('.sheet').boundingBox();
+  assert.ok(rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= 1280);
+  await host.locator('[data-focus-id="notificationsAll"]').click();
+  assert.equal(await page.evaluate(() => window.subscriptionState.panel), '');
+  assert.equal(await page.evaluate(() => window.subscriptionPage.notificationPreference), 'ALL');
+  await page.evaluate(() => { window.failSubscription = true; window.subscriptionPanels.open('subscription'); });
+  await host.locator('[data-focus-id="notificationsNone"]').click();
+  await host.getByRole('alert').waitFor();
+  assert.equal(await host.locator('[data-focus-id="notificationsAll"]').getAttribute('aria-pressed'), 'true');
+  await page.evaluate(() => { window.failSubscription = false; });
+  await host.locator('[data-focus-id="notificationsNone"]').click();
+  await page.evaluate(() => window.subscriptionPanels.open('subscription'));
+  assert.equal(await host.locator('[data-focus-id="notificationsNone"]').getAttribute('aria-pressed'), 'true');
+  mkdirSync(new URL('../output/playwright/', import.meta.url), { recursive: true });
+  await page.screenshot({ path: `output/playwright/subscription-menu-${layout}.png` });
+  await host.locator('[data-focus-id="unsubscribe"]').click();
+  assert.equal(await page.evaluate(() => window.subscriptionPage.subscribed), false);
+  assert.equal(await page.evaluate(() => window.subscriptionState.panel), '');
+  assert.deepEqual(await page.evaluate(() => window.subscriptionCalls.at(-1)), ['watchAction', 'unsubscribe']);
+  await page.evaluate(() => window.subscriptionPanels.destroy());
+});

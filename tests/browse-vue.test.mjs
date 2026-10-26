@@ -5,6 +5,122 @@ import { mainFixture } from './helpers/main-bundle.mjs';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { modernVideo } from './helpers/modern-video.mjs';
 
+test('channel badges use Material icons and retain identity across the feed bridge', async t => {
+  const items = ['verified', 'artist', 'none'].map(id => modernVideo(id));
+  for (const [index, imageName] of [[0, 'CHECK_CIRCLE_FILLED'], [1, 'OFFICIAL_ARTIST_BADGE']]) {
+    const text = items[index].lockupViewModel.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[0].metadataParts[0].text;
+    text.attachmentRuns = [{ startIndex: text.content.length, length: 0, element: { type: { imageType: {
+      image: { sources: [{ clientResource: { imageName } }] }
+    } } } }];
+  }
+  const page = await browserPage(t);
+  await page.route('https://www.youtube.com/**', route => route.request().url().includes('/youtubei/')
+    ? route.fulfill({ json: { contents: items } })
+    : route.fulfill({ contentType: 'text/html', body: '<html><body><ytd-page-manager></ytd-page-manager></body></html>' }));
+  await page.goto('https://www.youtube.com/');
+  await page.evaluate(() => { window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined }; });
+  await mainBundle(page);
+  for (const badge of ['verified', 'artist']) {
+    const icon = page.locator(`[data-browse-id="video:${badge}"] .channel-badge svg`);
+    await icon.waitFor();
+    assert.equal(await icon.getAttribute('data-icon'), `material:${badge}-fill`);
+    assert.equal(await icon.evaluate(node => getComputedStyle(node).width), '14px');
+  }
+  assert.equal(await page.locator('[data-browse-id="video:none"] .channel-badge').count(), 0);
+});
+
+test('mouse card previews wait for hover, stay single and stop immediately for gamepad input', { timeout: 30000 }, async t => {
+  const page = await browserPage(t);
+  await page.addInitScript(() => {
+    window.__previewApiCalls = [];
+    window.addEventListener('message', event => {
+      if (!event.source || event.source === window) return;
+      const message = JSON.parse(event.data);
+      if (message.event !== 'preview-test-command') return;
+      window.__previewApiCalls.push(message.func === 'playVideo' ? 'play' : message.func === 'stopVideo' ? 'destroy' : message.func);
+    });
+  });
+  let embeds = 0;
+  let failEmbeds = false;
+  await page.route('https://www.youtube.com/**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.startsWith('/embed/')) {
+      embeds++;
+      return route.fulfill({ contentType: 'text/html', body: `<html><body><script>
+        window.addEventListener('message', event => {
+          if (event.source !== parent) return;
+          const message = JSON.parse(event.data);
+          const send = value => parent.postMessage(JSON.stringify(value), 'https://www.youtube.com');
+          if (message.event === 'listening') send({ event: ${failEmbeds ? "'onError'" : "'onReady'"} });
+          if (message.event === 'command' && ['mute', 'playVideo', 'stopVideo'].includes(message.func)) {
+            send({ event: 'preview-test-command', func: message.func });
+            if (message.func === 'playVideo') send({ event: 'onStateChange', info: 1 });
+          }
+        });
+      </script></body></html>` });
+    }
+    return route.fulfill(url.pathname.includes('/youtubei/') ? { json: { contents: ['M7lc1UVf-VE', 'dQw4w9WgXcQ'].map(videoId => ({
+      videoRenderer: { videoId, title: { simpleText: videoId } }
+    })) } } : { contentType: 'text/html', body: '<html><body><ytd-page-manager></ytd-page-manager></body></html>' });
+  });
+  await page.goto('https://www.youtube.com/');
+  await page.evaluate(() => { window.ytcfg = { get: () => ({ client: { clientName: 'WEB', clientVersion: 'test' } }) }; });
+  await mainBundle(page);
+  const card = page.locator('[data-browse-id="video:M7lc1UVf-VE"]');
+  const second = page.locator('[data-browse-id="video:dQw4w9WgXcQ"]');
+  const preview = page.locator('.card-video-preview');
+  await card.waitFor();
+  const mode = value => page.evaluate(value => {
+    document.documentElement.dataset.ytgInputMode = value;
+    document.documentElement.classList.toggle('ytg-gamepad-input', value === 'gamepad');
+    window.dispatchEvent(new CustomEvent('yt-gamepad-input-mode', { detail: { mode: value } }));
+  }, value);
+  const enter = node => node.dispatchEvent('pointerenter', { pointerType: 'mouse' });
+  await mode('mouse');
+  await enter(card);
+  await page.waitForTimeout(150);
+  assert.equal(await preview.count(), 0, 'brief hover does not create a player');
+  await mode('gamepad');
+  await page.waitForTimeout(700);
+  assert.equal(embeds, 0, 'switching to gamepad cancels a pending preview');
+  await card.focus(); await enter(card);
+  await page.waitForTimeout(700);
+  assert.equal(await preview.count(), 0, 'a focused gamepad card never starts a preview');
+  await mode('mouse'); await enter(card);
+  await preview.waitFor();
+  await card.locator('iframe.ready').waitFor();
+  const src = new URL(await preview.getAttribute('src'));
+  assert.equal(src.pathname, '/embed/M7lc1UVf-VE');
+  for (const key of ['autoplay', 'mute', 'cc_load_policy', 'controls']) assert.equal(src.searchParams.get(key), '1');
+  assert.equal(src.searchParams.get('enablejsapi'), '1');
+  assert.deepEqual(await page.evaluate(() => window.__previewApiCalls), ['mute', 'play']);
+  await mode('gamepad');
+  assert.equal(await preview.count(), 0, 'gamepad takeover removes the playing iframe');
+  await mode('mouse'); await enter(card); await preview.waitFor();
+  await enter(second);
+  assert.equal(await preview.count(), 0, 'moving to a different card stops the old player before waiting');
+  await second.locator('iframe').waitFor();
+  assert.equal(await preview.count(), 1, 'only one card can preview');
+  await second.dispatchEvent('pointerleave', { pointerType: 'mouse' });
+  assert.equal(await preview.count(), 0, 'leaving a card stops playback');
+  await enter(card); await preview.waitFor();
+  await page.evaluate(() => window.dispatchEvent(new Event('scroll')));
+  assert.equal(await preview.count(), 0, 'scrolling stops playback');
+  await enter(card); await preview.waitFor();
+  await page.evaluate(() => window.dispatchEvent(new Event('yt-navigate-start')));
+  assert.equal(await preview.count(), 0, 'navigation stops playback');
+  failEmbeds = true;
+  const beforeFailure = embeds;
+  const failedRequest = page.waitForRequest('**/embed/**');
+  await enter(card);
+  await failedRequest;
+  await preview.waitFor({ state: 'detached' });
+  assert.equal(embeds, beforeFailure + 1, 'an unavailable embed falls back to the thumbnail');
+  await card.dispatchEvent('pointermove', { pointerType: 'mouse' });
+  await page.waitForTimeout(700);
+  assert.equal(embeds, beforeFailure + 1, 'a failed preview does not reload on every pointer movement');
+});
+
 test('video cards size their content and hover surface independently while keeping rows aligned and creator avatars visible', { timeout: 30000 }, async t => {
   const items = Array.from({ length: 6 }, (_, i) => {
     const item = modernVideo(`content-height-${i}`);
@@ -52,7 +168,7 @@ test('video cards size their content and hover surface independently while keepi
   await cards.nth(2).hover();
   await page.evaluate(() => document.documentElement.setAttribute('data-ytg-input-mode', 'mouse'));
   const hover = await cards.nth(2).evaluate(node => {
-    const style = getComputedStyle(node, '::before');
+    const style = getComputedStyle(node, '::after');
     return { opacity: style.opacity, height: parseFloat(style.height), shadow: style.boxShadow };
   });
   assert.equal(hover.opacity, '1');
@@ -64,6 +180,9 @@ test('video cards size their content and hover surface independently while keepi
 });
 
 test('modern video cards show creator avatars, view counts, publication time and duration across the feed bridge', { timeout: 30000 }, async t => {
+  const inlineCard = modernVideo('metadata-one', 45);
+  const inlineMetadata = inlineCard.lockupViewModel.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel;
+  inlineMetadata.metadataRows = [{ metadataParts: inlineMetadata.metadataRows.flatMap(row => row.metadataParts) }];
   const channelCard = modernVideo('metadata-two');
   channelCard.lockupViewModel.metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows.shift();
   const page = await browserPage(t);
@@ -74,7 +193,7 @@ test('modern video cards show creator avatars, view counts, publication time and
   await page.route('https://yt3.ggpht.com/**', route => route.fulfill({ contentType: 'image/svg+xml',
     body: '<svg xmlns="http://www.w3.org/2000/svg" width="88" height="88"><rect width="88" height="88" fill="#754bb8"/><circle cx="44" cy="32" r="16" fill="white"/><ellipse cx="44" cy="81" rx="29" ry="28" fill="white"/></svg>' }));
   await page.route('https://www.youtube.com/**', route => route.request().url().includes('/youtubei/')
-    ? route.fulfill({ json: { contents: [modernVideo('metadata-one', 45), channelCard] } })
+    ? route.fulfill({ json: { contents: [inlineCard, channelCard] } })
     : route.fulfill({ contentType: 'text/html', body: '<html><body><ytd-page-manager></ytd-page-manager></body></html>' }));
   await page.goto('https://www.youtube.com/');
   await page.evaluate(() => { window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined }; });
@@ -83,13 +202,16 @@ test('modern video cards show creator avatars, view counts, publication time and
   await card.waitFor();
   assert.equal(await card.locator('.card-channel-avatar img').getAttribute('src'), 'https://yt3.ggpht.com/creator=s88');
   assert.equal(await card.locator('.channel').textContent(), 'JaidenAnimations');
-  assert.equal(await card.locator('.card-stats').textContent(), '1694万次观看 · 9年前');
+  assert.equal(await card.locator('.channel .view-count-icon').count(), 0);
+  assert.equal(await card.locator('.card-view-count').textContent(), '1694万次观看');
+  assert.equal(await card.locator('.card-view-count .view-count-icon').count(), 1);
+  assert.equal(await card.locator('.card-stats').textContent(), '1694万次观看 9年前');
   assert.equal(await card.locator('.card-duration').textContent(), '8:47');
   assert.equal(await card.locator('.card-watch-progress>span').evaluate(node => node.style.width), '45%');
   assert.equal(await card.locator('.card-watch-progress>span').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(255, 0, 51)');
   const channel = page.locator('[data-browse-id="video:metadata-two"]');
   assert.equal(await channel.locator('.card-watch-progress').count(), 0);
-  assert.equal(await channel.locator('.card-stats').textContent(), '1694万次观看 · 9年前');
+  assert.equal(await channel.locator('.card-stats').textContent(), '1694万次观看 9年前');
   assert.equal(await channel.locator('.channel').textContent(), '');
   mkdirSync('output/playwright', { recursive: true });
   await card.screenshot({ path: 'output/playwright/video-card-metadata.png', animations: 'disabled' });
@@ -587,15 +709,16 @@ test('playlist stack uses native theme colors across the page bridge with a miss
   await page.evaluate(() => document.documentElement.setAttribute('dark', ''));
   assert.equal(await color(card), 'rgb(128, 88, 88)');
   assert.equal(await color(fallback), 'rgb(170, 170, 170)');
-  assert.equal(await card.evaluate(el => getComputedStyle(el, '::after').content), 'none', 'only one stack pseudo-element is used');
+  assert.equal(await card.evaluate(el => getComputedStyle(el, '::after').opacity), '0', 'the independent hover surface stays hidden during controller selection');
   await page.evaluate(() => document.documentElement.removeAttribute('dark'));
   await card.focus();
   const spacing = await card.evaluate(el => {
     const cover = el.querySelector('.card-cover'), image = cover.querySelector('img');
     const outer = cover.getBoundingClientRect(), inner = image.getBoundingClientRect();
-    return [inner.left - outer.left, inner.top - outer.top, inner.width / inner.height, getComputedStyle(image).scale, parseFloat(getComputedStyle(el, '::before').top) - 4];
+    const scale = parseFloat(getComputedStyle(el).scale) || 1;
+    return [(inner.left - outer.left) / scale, (inner.top - outer.top) / scale, inner.width / inner.height, getComputedStyle(image).scale, parseFloat(getComputedStyle(el, '::before').top) - 4];
   });
-  assert.deepEqual(spacing.slice(0, 2), [8, 16], 'the image stays inset from the blue focus frame');
+  assert.ok(Math.abs(spacing[0] - 8) < .01 && Math.abs(spacing[1] - 16) < .01, 'the image stays inset from the focus frame while the whole card scales');
   assert.ok(Math.abs(spacing[2] - 16 / 9) < 0.01, 'the inset image retains 16:9');
   assert.equal(spacing[3], '1', 'selection cannot enlarge the image over the stack');
   assert.ok(spacing[4] > 0, 'both stack edges stay inside the focus frame');
@@ -758,7 +881,8 @@ test('scroll pagination uses API continuation, locks requests and retries the sa
     if (!route.request().url().includes('/youtubei/')) return route.fulfill({ contentType: 'text/html', body:
       '<html><body><ytd-page-manager><ytd-continuation-item-renderer><button>Native more</button></ytd-continuation-item-renderer></ytd-page-manager></body></html>' });
     const body = route.request().postDataJSON(); requests.push(body);
-    if (body.continuation && ++attempts === 1) { await gate; return route.fulfill({ status: 503 }); }
+    // A non-transient error reaches the UI; 503 is retried by the request layer.
+    if (body.continuation && ++attempts === 1) { await gate; return route.fulfill({ status: 500 }); }
     return route.fulfill({ json: { contents: [
       ...Array.from({ length: body.continuation ? 2 : 36 }, (_, i) => ({ videoRenderer: {
         videoId: body.continuation && i ? 'new' : `video${i}`, title: { simpleText: `Video ${i}` }
@@ -931,6 +1055,7 @@ for (const reducedMotion of ['no-preference', 'reduce']) {
       const category = body.browseId || 'more';
       if (category === 'music') await musicGate;
       return route.fulfill({ json: { ...feedFixture,  contents: [
+        ...feedFixture.chips,
         ...Array.from({ length: 18 }, (_, i) => ({ videoRenderer: { videoId: `${category}-${i}`, title: { simpleText: `${category} ${i}` } } })),
         { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'more' } } } }
       ]  } });
@@ -957,15 +1082,19 @@ for (const reducedMotion of ['no-preference', 'reduce']) {
     assert.equal(await grid.locator('.feed-skeletons').count(), 0);
     assert.equal(await grid.getAttribute('aria-busy'), 'false');
     const cover = card.locator('.card-cover');
-    const before = await cover.boundingBox();
+    const before = await cover.evaluate(node => ({ width: node.offsetWidth, height: node.offsetHeight }));
     assert.equal(await cover.getAttribute('data-loading'), 'true');
     releaseImages();
     await page.waitForFunction(() => window.__pageDOM.querySelector('[data-browse-id="video:FEwhat_to_watch-0"] img')?.dataset.loaded === 'true');
     await card.focus();
-    await page.evaluate(() => { document.documentElement.classList.add('ytg-gamepad-input'); window.YTGamepad.refresh(); });
+    await page.evaluate(() => { document.documentElement.classList.add('ytg-gamepad-input'); document.documentElement.dataset.ytgInputMode = 'gamepad'; window.YTGamepad.refresh(); });
     await page.waitForTimeout(220);
-    assert.deepEqual(await cover.boundingBox(), before, 'image loading and focus zoom must not move the cover or ring target');
-    assert.equal(await card.locator('img').evaluate(node => getComputedStyle(node).scale), reducedMotion === 'reduce' ? 'none' : '1.035');
+    const focusedCover = await cover.boundingBox();
+    const focusScale = reducedMotion === 'reduce' ? 1 : 1.04;
+    assert.ok(Math.abs(focusedCover.width / before.width - focusScale) < .005, 'focus enlarges the entire cover');
+    assert.ok(Math.abs(focusedCover.height / before.height - focusScale) < .005, 'focus preserves the thumbnail aspect ratio');
+    assert.equal(await card.evaluate(node => getComputedStyle(node).scale), reducedMotion === 'reduce' ? 'none' : '1.04');
+    assert.equal(await card.locator('img').evaluate(node => getComputedStyle(node).scale), 'none', 'the image is not cropped by an additional zoom');
     const calls = await page.evaluate(() => window.__motionCalls.filter(id => id === 'ytg-feed-enter').length);
     assert.equal(calls, reducedMotion === 'reduce' ? 0 : 1);
     await page.evaluate(() => { window.YTGamepad.act('right'); window.YTGamepad.act('left'); });
@@ -1046,18 +1175,59 @@ test('header and sidebar icons preserve theme and current-page variants', { time
   const badge = page.locator('[data-ytg-page-mode] [data-ytg-icon="true"]');
   const prompt = await badge.evaluate(node => ({
     background: getComputedStyle(node).backgroundColor,
-    mask: getComputedStyle(node, '::before').maskImage,
-    tint: getComputedStyle(node, '::before').backgroundColor,
-    color: getComputedStyle(node).color,
+    image: getComputedStyle(node).backgroundImage,
   }));
   assert.equal(prompt.background, 'rgba(0, 0, 0, 0)');
-  assert.match(prompt.mask, /data:image\/svg\+xml;base64/);
-  assert.equal(prompt.tint, prompt.color);
+  // Face buttons use their own artwork; they do not use the monochrome mask.
+  assert.notEqual(prompt.image, 'none', 'the controller prompt has button artwork');
+  const promptLoaded = await badge.evaluate(async node => {
+    const image = new Image();
+    image.src = getComputedStyle(node).backgroundImage.match(/^url\(["']?(.*?)["']?\)$/)?.[1] || '';
+    try { await image.decode(); return image.naturalWidth > 0 && image.naturalHeight > 0; }
+    catch { return false; }
+  });
+  assert.ok(promptLoaded, 'the controller prompt artwork can be decoded');
+  assert.equal(await badge.isVisible(), true);
+  const accountIcon = page.locator('.client-account svg');
+  assert.equal(await accountIcon.getAttribute('data-icon'), 'mingcute:person-line');
+  async function checkIcons() {
+    const colors = [];
+    for (const icon of [accountIcon, homeIcon, page.locator('[data-sidebar-id="subscriptions"] svg')]) {
+      assert.equal(await icon.isVisible(), true);
+      const appearance = await icon.evaluate(node => {
+        const style = getComputedStyle(node), bounds = node.getBoundingClientRect();
+        const shapes = [...node.querySelectorAll('path,circle,rect,polygon,polyline,line,ellipse')]
+          .filter(shape => {
+            const box = shape.getBBox(), shapeStyle = getComputedStyle(shape);
+            return box.width + box.height > 0 && shapeStyle.display !== 'none'
+              && shapeStyle.visibility === 'visible' && Number(shapeStyle.opacity) > 0
+              && (shapeStyle.fill !== 'none' || shapeStyle.stroke !== 'none');
+          });
+        return { width: bounds.width, height: bounds.height, color: style.color,
+          parentColor: getComputedStyle(node.parentElement).color,
+          paints: shapes.map(shape => {
+            const style = getComputedStyle(shape);
+            return style.fill !== 'none' ? style.fill : style.stroke;
+          }) };
+      });
+      assert.ok(appearance.width > 0 && appearance.height > 0, 'the SVG has visible dimensions');
+      assert.equal(appearance.color, appearance.parentColor, 'the SVG inherits its control color');
+      assert.ok(appearance.paints.length > 0, 'the SVG contains painted shapes');
+      for (const paint of appearance.paints) assert.equal(paint, appearance.color, 'the SVG artwork follows the theme color');
+      colors.push(appearance.color);
+    }
+    return colors;
+  }
+  const lightColors = await checkIcons();
   await page.locator('[data-sidebar-id="subscriptions"]').focus();
   assert.equal(await homeIcon.getAttribute('data-icon'), 'mingcute:home-fill', 'focus must not replace the current-page fill variant');
   mkdirSync('output/playwright', { recursive: true });
   await page.screenshot({ path: 'output/playwright/mingcute-icons-light.png' });
   await page.evaluate(() => document.documentElement.setAttribute('dark', ''));
+  const darkColors = await checkIcons();
+  assert.notEqual(darkColors[0], lightColors[0], 'the header icon adapts to the dark theme');
+  assert.equal(await homeIcon.getAttribute('data-icon'), 'mingcute:home-fill');
+  assert.equal(await page.locator('[data-sidebar-id="subscriptions"] svg').getAttribute('data-icon'), 'material:subscriptions-line');
   await page.screenshot({ path: 'output/playwright/mingcute-icons-dark.png' });
 });
 
@@ -1097,9 +1267,12 @@ test('explicit focus regions connect cards, sidebar, categories, search and sett
     const category = window.__pageDOM.activeElement;
     const button = category.querySelector('button');
     return { wrapperOutline: getComputedStyle(category).outlineStyle,
-      buttonOutline: getComputedStyle(button).outlineStyle };
+      buttonOutline: getComputedStyle(button).outlineStyle,
+      buttonShadow: getComputedStyle(button).boxShadow };
   });
-  assert.deepEqual(categoryFocus, { wrapperOutline: 'none', buttonOutline: 'solid' }, 'category navigation marks focus independently of the active filter');
+  assert.equal(categoryFocus.wrapperOutline, 'none');
+  assert.equal(categoryFocus.buttonOutline, 'none');
+  assert.notEqual(categoryFocus.buttonShadow, 'none', 'category navigation uses the shared hover shadow');
   await input('up'); assert.equal(await section(), 'header');
   // Search inputs own physical editing keys; exercise the header's directional
   // exit from a non-editing control rather than its newly focusable text field.
@@ -1673,12 +1846,13 @@ test('category navigation and hover wait for controller confirmation or a mouse 
   assert.equal(calls.length, initialCalls, 'directional focus does not request a new list');
   assert.equal(await page.locator('[data-browse-id="video:FEwhat_to_watch"]').count(), 1);
   const focused = bar.getByRole('button', { name: 'Music', exact: true });
-  assert.equal(await focused.evaluate(node => getComputedStyle(node).outlineStyle), 'solid');
+  assert.equal(await focused.evaluate(node => getComputedStyle(node).outlineStyle), 'none');
+  assert.notEqual(await focused.evaluate(node => getComputedStyle(node).boxShadow), 'none');
   mkdirSync('output/playwright', { recursive: true });
   await bar.screenshot({ path: 'output/playwright/category-focus-before-confirm.png' });
   await page.evaluate(() => document.documentElement.setAttribute('dark', ''));
-  assert.equal(await focused.evaluate(node => getComputedStyle(node).outlineStyle), 'solid');
-  assert.equal(await focused.evaluate(node => getComputedStyle(node).outlineColor === getComputedStyle(node.closest('#ytg-browse-categories')).color), true, 'dark-theme focus uses the contrasting text color');
+  assert.equal(await focused.evaluate(node => getComputedStyle(node).outlineStyle), 'none');
+  assert.notEqual(await focused.evaluate(node => getComputedStyle(node).boxShadow), 'none', 'dark-theme navigation retains the shared shadow');
   await bar.screenshot({ path: 'output/playwright/category-focus-dark.png' });
   await page.evaluate(() => document.documentElement.removeAttribute('dark'));
   await press(0);
@@ -1689,6 +1863,11 @@ test('category navigation and hover wait for controller confirmation or a mouse 
   assert.equal(await bar.locator('.ytg-selected button').textContent(), 'Gaming');
   assert.equal(await active.textContent(), 'Music');
   assert.equal(calls.filter(id => id === 'gaming').length, 0);
+  const appearance = node => {
+    const style = getComputedStyle(node);
+    return { background: style.backgroundColor, color: style.color, shadow: style.boxShadow, outline: style.outlineStyle };
+  };
+  const gamepadAppearance = await bar.getByRole('button', { name: 'Gaming', exact: true }).evaluate(appearance);
   await page.mouse.move(500, 400);
   const gaming = bar.getByRole('button', { name: 'Gaming', exact: true });
   await gaming.hover();
@@ -1697,6 +1876,7 @@ test('category navigation and hover wait for controller confirmation or a mouse 
   assert.equal(await active.textContent(), 'Music');
   assert.equal(calls.filter(id => id === 'gaming').length, 0, 'hover and DOM focus do not activate a filter');
   assert.equal(await gaming.evaluate(node => getComputedStyle(node).outlineStyle), 'none');
+  assert.deepEqual(await gaming.evaluate(appearance), gamepadAppearance, 'mouse hover and gamepad selection share the same appearance');
   await bar.screenshot({ path: 'output/playwright/category-hover-before-click.png' });
   await gaming.click();
   await page.locator('[data-browse-id="video:gaming"]').waitFor();

@@ -6,7 +6,8 @@ export type Direction = 'up' | 'down' | 'left' | 'right';
 export type Action = Direction | 'confirm' | 'back' | 'help' | 'search' | 'playPause'
   | 'goLive' | 'pause' | 'mute' | 'captions' | 'volumeDown' | 'volumeUp' | 'seekBack' | 'seekForward'
   | 'keyboardSymbols' | 'keyboardCandidates';
-export type WatchAction = 'subscribe' | 'like' | 'dislike' | 'save';
+export type WatchAction = 'subscribe' | 'unsubscribe' | 'notificationsAll' | 'notificationsPersonalized' | 'notificationsNone' | 'like' | 'dislike' | 'save';
+export type NotificationPreference = 'ALL' | 'PERSONALIZED' | 'NONE';
 export interface SavedPlaylistSnapshot { readonly key: string; readonly title: string; readonly selected: boolean }
 export type Capability = 'available' | 'missing' | 'failed';
 export interface RouteSnapshot { readonly key: string; readonly isWatch: boolean }
@@ -26,23 +27,28 @@ export interface PlaybackSnapshot {
   readonly captionsEnabled: boolean; readonly settingsOpen: boolean;
 }
 export interface RecommendationSnapshot {
+  readonly channelBadge?: 'verified' | 'artist';
   readonly href?: string; readonly queue?: boolean; readonly selected?: boolean;
-  readonly metadata?: string; readonly duration?: string; readonly watchedPercent?: number;
+  readonly metadata?: string; readonly viewCount?: string; readonly duration?: string; readonly watchedPercent?: number;
   readonly key: string; readonly label: string; readonly channel: string;
   readonly thumbnail: string; readonly thumbnailFallback: string;
   readonly isPlaylist?: boolean;
 }
 export interface WatchPageSnapshot extends RouteSnapshot {
+  readonly channelBadge?: 'verified' | 'artist';
   readonly queue?: readonly RecommendationSnapshot[];
   readonly title: string; readonly channel: string; readonly description: string;
   readonly recommendations: readonly RecommendationSnapshot[];
   // Optional because the existing degraded read returns a minimal page snapshot.
+  readonly notificationPreference?: NotificationPreference;
   readonly waiting?: boolean; readonly avatar?: string; readonly subscribed?: boolean;
   readonly liked?: boolean; readonly disliked?: boolean; readonly viewCount?: string | number | null;
 }
 export interface CommentReplySnapshot {
   readonly key: string; readonly author: string; readonly text: string;
   readonly avatar?: string;
+  readonly translationTarget?: string;
+  readonly translation?: { readonly language: string; readonly text?: string; readonly loading: boolean; readonly failed: boolean };
 }
 export interface CommentSnapshot extends CommentReplySnapshot {
   readonly replyCount?: number;
@@ -75,6 +81,7 @@ export interface WatchRequest {
   (type: 'seek', value: number): OperationResult;
   (type: 'recommendation', value: string): RecommendationResult | false;
   (type: 'replies', value: string): OperationResult;
+  (type: 'translateComment', value: string): OperationResult;
   (type: 'comments', value?: boolean): OperationResult;
   (type: 'settings' | 'backSettings' | 'channel'): OperationResult;
 }
@@ -112,7 +119,7 @@ export interface AppSnapshot {
 export interface WatchSnapshot {
   readonly row: 'controls' | 'progress' | 'recommendations'; readonly index: number;
   readonly controlIndex: number; readonly recommendationIndex: number; readonly adjusting: boolean;
-  readonly panel: '' | 'description' | 'comments' | 'playlists'; readonly panelIndex: number; readonly playIndex: number;
+  readonly panel: '' | 'description' | 'comments' | 'playlists' | 'subscription'; readonly panelIndex: number; readonly playIndex: number;
 }
 export interface MenuSnapshot {
   readonly opened: boolean; readonly view: 'main' | 'search'; readonly openedFrom: 'quickMenu' | 'pageSearch' | null;
@@ -258,6 +265,7 @@ export interface SitePort extends WatchDataPort, SearchDataPort {
   openRecommendation(key: string, prepareVideo: (href: string) => boolean): RecommendationResult;
   openChannel(beforeNavigate: () => void): boolean;
   expandReplies(key: string): boolean; loadComments(start?: boolean): OperationResult;
+  translateComment(key: string): boolean;
   loadRecommendations(): OperationResult;
   settingsOpen(): boolean; openSettings(): boolean; backSettings(menu?: HTMLElement | null): boolean;
   seekTo(time: number): boolean; observePage(onChange: () => void): Dispose;
@@ -345,7 +353,7 @@ export interface MenuDependencies extends SharedDependencies {
   createSearch(port: Omit<SearchPort, 'controllerStyle' | 'pinyin' | 'keyboard'>): SearchInstance;
 }
 export interface WatchPanels {
-  open(action: 'description' | 'comments' | 'playlists'): void; hide(): void; close(): void;
+  open(action: 'description' | 'comments' | 'playlists' | 'subscription'): void; hide(): void; close(): void;
   back(): boolean;
   refresh(): void; load(): void; readonly buttons: HTMLElement[]; destroy(): void;
 }

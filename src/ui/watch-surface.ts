@@ -46,7 +46,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     send: callbacks.send, focus: callbacks.focus, focusManager, controllerStyle,
     get controller() { return callbacks.controller(); }, get descriptionText() { return descriptionText; }
   });
-  const releasePanels = (['description', 'comments', 'playlists'] as const).map(id => ui.registerPanel(id, {
+  const releasePanels = (['description', 'comments', 'playlists', 'subscription'] as const).map(id => ui.registerPanel(id, {
     isOpen: () => !destroyed && callbacks.state().panel === id,
     open: () => {
       if (destroyed || host.hidden || callbacks.controller().navigating || ui.state.openPanels.some(panel =>
@@ -161,6 +161,9 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     press(id: string) { const node = controls.find(node => node.dataset.action === id); if (node) animate(node, [{ scale: '.95', offset: 0 }], 100, 'ytg-press'); },
     feedback(value: PlaybackFeedback | null, action = '') {
       if (destroyed) return;
+      if (action === 'playPause' && document.documentElement.dataset.ytgInputMode === 'mouse') {
+        value = null; action = '';
+      }
       const repeated = feedbackAction === action; feedbackAction = action;
       host.removeAttribute?.('data-feedback'); status.classList.remove('media-feedback'); status.classList.remove('feedback-closing'); status.removeAttribute?.('aria-label');
       presentation.feedback(value);
@@ -171,7 +174,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       }
     },
     closeFeedback() { if (window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) { status.classList.add('feedback-closing'); return true; } return false; },
-    panel: { open: (id: 'description' | 'comments' | 'playlists') => { ui.openPanel(id); }, close: panels.close, back: panels.back, refresh: panels.refresh, load: panels.load,
+    panel: { open: (id: 'description' | 'comments' | 'playlists' | 'subscription') => { ui.openPanel(id); }, close: panels.close, back: panels.back, refresh: panels.refresh, load: panels.load,
       activate(index: number) { panelNodes()[index]?.click(); },
       scroll(delta: number) { sheet.scrollBy({ top: delta, behavior: 'instant' }); },
       scrollDelta(index: number, action: Action) {

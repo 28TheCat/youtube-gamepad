@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from '../shared/use-i18n';
+import LoadStatus from './LoadStatus.vue';
 import type { AccountSnapshot } from '../sites/youtube-account';
 const props = defineProps<{ snapshot?: AccountSnapshot; loading: boolean; failed: boolean;
   retry: () => void; refresh: () => void; focus: (node: HTMLElement) => void }>();
@@ -54,9 +55,10 @@ onBeforeUnmount(() => { disposed = true; document.documentElement.classList.remo
           <span class="account-profile-note">{{ t('YouTube account') }}</span>
         </aside>
         <div class="account-options" :aria-busy="loading">
-          <p v-if="loading" class="account-empty" role="status">{{ t('Loading account…') }}</p>
-          <div v-else-if="failed" class="account-empty" role="status"><p>{{ t('Could not load your account menu.') }}</p><button type="button" data-account-action @click="retry">{{ t('Retry') }}</button></div>
-          <template v-else-if="snapshot?.signedIn">
+          <LoadStatus class="account-empty" :loading="loading" :failed="failed" error-role="status"
+            :loading-message="t('Loading account…')" :error-message="t('Could not load your account menu.')"
+            retryable :retry-attributes="{ 'data-account-action': '' }" @retry="retry" />
+          <template v-if="!loading && !failed && snapshot?.signedIn">
             <div class="account-group" :aria-label="t('Accounts')">
               <div v-for="item in snapshot.accounts" :key="item.key" class="account-list-item" :class="{ 'is-current': item.selected }" :aria-current="item.selected ? 'true' : undefined">
                 <img v-if="item.avatar" :src="item.avatar" alt="" referrerpolicy="no-referrer" />
@@ -71,7 +73,7 @@ onBeforeUnmount(() => { disposed = true; document.documentElement.classList.remo
               </button>
             </div>
           </template>
-          <div v-else class="account-group"><button type="button" data-account-action @click="navigate('/signin?next=%2F')">{{ t('Sign in') }}</button></div>
+          <div v-else-if="!loading && !failed" class="account-group"><button type="button" data-account-action @click="navigate('/signin?next=%2F')">{{ t('Sign in') }}</button></div>
         </div>
       </div>
     </div>

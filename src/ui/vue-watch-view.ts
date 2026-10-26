@@ -10,6 +10,7 @@ import type { PlaybackMetadata as Metadata, PlaybackControlState, PlaybackPresen
 import { sameRecommendations } from './playback-presentation';
 import { createPlaybackModel } from '../playback/playback-model';
 import { currentLanguage } from '../shared/i18n';
+import mediaActionCSS from './media-action.css?inline';
 
 export function createVueWatchView({ activate, seek, closePanel, controllerStyle, styles }: WatchViewDependencies): WatchView {
   const host = document.createElement('div'); host.id = 'ytg-watch'; host.hidden = true; host.lang = currentLanguage();
@@ -20,7 +21,7 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
     if (text !== undefined) node.textContent = text;
     return node;
   };
-  const style = make('style'); style.textContent = styles.watch;
+  const style = make('style'); style.textContent = styles.watch + mediaActionCSS;
   // Separate Vue roots keep high-frequency progress/focus work out of metadata
   // and list rendering. The shell and control DOM identities remain stable.
   const surface = make('div', 'surface'), bottom = make('section', 'bottom');
@@ -60,7 +61,7 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
     render(h(Timeline, { model, state: model.state.value, selected: selected === 'progress', adjusting, controllerStyle }), progressRoot);
   }
   function paintControls() {
-    render(h(PlaybackControls, { page: metadata, playback: playbackControls!, commentsOpen, activate: model.request }), controlsRoot);
+    render(h(PlaybackControls, { page: metadata, playback: playbackControls!, commentsOpen, activate: model.request, controllerStyle }), controlsRoot);
     if (!controlNodes.size) for (const node of controlsRoot.querySelectorAll<HTMLButtonElement>('[data-action]')) controlNodes.set(node.dataset.action!, node);
     paintSelection();
   }
@@ -78,8 +79,8 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
     hints = next; render(h(PlaybackHints, { ...next, controllerStyle }), hintsRoot);
   }
   function updatePlaybackControls() {
-    const { paused, captionsEnabled, isLive, canSeek, atLiveEdge } = model.state.value;
-    const next = { paused, captionsEnabled, isLive, canSeek, atLiveEdge };
+    const { paused, muted, captionsEnabled, isLive, canSeek, atLiveEdge } = model.state.value;
+    const next = { paused, muted, captionsEnabled, isLive, canSeek, atLiveEdge };
     if (playbackControls && equal(playbackControls, next)) return;
     playbackControls = next; paintControls();
   }
@@ -89,9 +90,9 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
     page(value, features) {
       if (destroyed) return;
       const next: Metadata = { title: value.title, channel: value.channel, viewCount: value.viewCount,
-        avatar: value.avatar, subscribed: value.subscribed, liked: value.liked, disliked: value.disliked };
-      const headingChanged = ['title', 'channel', 'viewCount'].some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
-      const controlsChanged = ['channel', 'avatar', 'subscribed', 'liked', 'disliked'].some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
+        channelBadge: value.channelBadge, avatar: value.avatar, notificationPreference: value.notificationPreference, subscribed: value.subscribed, liked: value.liked, disliked: value.disliked };
+      const headingChanged = ['title', 'channel', 'channelBadge', 'viewCount'].some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
+      const controlsChanged = ['channel', 'channelBadge', 'avatar', 'notificationPreference', 'subscribed', 'liked', 'disliked'].some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
       metadata = next;
       if (headingChanged) render(h(PlaybackMetadata, { page: metadata }), headingRoot);
       if (controlsChanged) paintControls();

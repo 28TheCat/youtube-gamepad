@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Gamepad",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Browse YouTube and control video playback with a gamepad.",
   "icons": {
     "128": "assets/icons/gamepad-128.png"
@@ -21,8 +21,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/*"],
-      "js": ["bundles/early.js"],
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "bundles/early.js"
+      ],
       "world": "ISOLATED",
       "run_at": "document_start"
     },

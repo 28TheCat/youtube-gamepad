@@ -50,7 +50,7 @@ function fixture(pathname = '/@creator/videos', handler) {
       return { ok: true, json: async () => raw };
     }
   };
-  vm.runInNewContext(code, sandbox);
+  vm.runInNewContext(code, Object.assign(sandbox, { Headers, Request, Response }));
   return { ...sandbox.ChannelFixture, calls, location };
 }
 
@@ -70,9 +70,9 @@ test(`library channel endpoint parsing preserves resolved tab parameters for ${p
   assert.equal(second.items[0].id, 'video:second');
   assert.equal(s.calls[2].body.continuation, 'videos-next');
   assert.equal(s.calls.length, 3);
-  assert.equal(s.calls[1].options.headers['X-Goog-AuthUser'], '2');
-  assert.equal(s.calls[1].options.headers['X-Goog-PageId'], 'brand-account');
-  assert.match(s.calls[1].options.headers.Authorization, /^SAPISIDHASH /);
+  assert.equal(s.calls[1].options.headers['x-goog-authuser'], '2');
+  assert.equal(s.calls[1].options.headers['x-goog-pageid'], 'brand-account');
+  assert.match(s.calls[1].options.headers.authorization, /^SAPISIDHASH /);
   assert.equal(s.calls[1].options.credentials, 'same-origin');
 });
 

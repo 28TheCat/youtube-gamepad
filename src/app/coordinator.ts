@@ -375,9 +375,10 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   function request(type: 'seek', value: number): OperationResult;
   function request(type: 'recommendation', value: string): RecommendationResult | false;
   function request(type: 'replies', value: string): OperationResult;
+  function request(type: 'translateComment', value: string): OperationResult;
   function request(type: 'comments', value?: boolean): OperationResult;
   function request(type: 'settings' | 'backSettings' | 'channel'): OperationResult;
-  function request(...[type,value]: ['moreRecommendations'|'settings'|'backSettings'|'channel'|'playlists'] | ['mode',Mode] | ['media',Action] | ['watchAction',WatchAction] | ['seek',number] | ['recommendation'|'replies'|'savePlaylist',string] | ['comments',boolean?]) {
+  function request(...[type,value]: ['moreRecommendations'|'settings'|'backSettings'|'channel'|'playlists'] | ['mode',Mode] | ['media',Action] | ['watchAction',WatchAction] | ['seek',number] | ['recommendation'|'replies'|'translateComment'|'savePlaylist',string] | ['comments',boolean?]) {
     if (lifecycle.destroyed) return false;
     if (!preferences.enabled || appState().navigation || appState().returning) return false;
     if (type === 'mode' && value !== 'browse' && !surfaceReady()) return false;
@@ -399,6 +400,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       case 'recommendation': return site.openRecommendation(value, prepareVideo);
       case 'moreRecommendations': return site.loadRecommendations();
       case 'replies': return site.expandReplies(value);
+      case 'translateComment': return site.translateComment(value);
       case 'comments': return site.loadComments(value);
       default: return false;
     }
@@ -508,7 +510,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   }
   function shouldShowSelection({ scope }: ActionContext) {
     if (!preferences.enabled) return false;
-    if (scope === document && isShortsPlaybackRoute() && !shorts?.native) return false;
+    if (scope === document && isShortsPlaybackRoute()) return false;
     if (scope === document && document.documentElement.getAttribute('data-ytg-browse-mode') === 'youtube' &&
       location.pathname !== '/watch' && !isShortsPlaybackRoute()) return false;
     return !menu?.opened && (scope !== document || (visibleMode() !== 'playback' && !(watch && visibleMode() === 'controls')));
@@ -623,10 +625,29 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     const { action } = (event as CustomEvent<{ action?: string }>).detail || {};
     if (!['seekBack', 'seekForward'].includes(action ?? '')) cancelHeldSeek();
   });
+  let pointerLayoutPending = false;
+  function finishPointerLayout() {
+    if (!pointerLayoutPending) return;
+    pointerLayoutPending = false;
+    playbackInputMode = 'mouse';
+    renderMode();
+  }
+  // A first mouse press can take over from fullscreen gamepad playback. Keep
+  // its target stationary through pointerup/click before changing the layout.
+  lifecycle.listen(window, 'pointerup', () => {
+    if (pointerLayoutPending) lifecycle.timeout(finishPointerLayout, 0);
+  }, true);
+  lifecycle.listen(window, 'pointercancel', finishPointerLayout, true);
+  lifecycle.listen(window, 'blur', finishPointerLayout);
   lifecycle.listen(window, 'yt-gamepad-input-mode', event => {
-    const { mode } = (event as CustomEvent<{ mode?: string }>).detail || {};
+    const { mode, source } = (event as CustomEvent<{ mode?: string; source?: string }>).detail || {};
     if (mode !== 'gamepad') cancelHeldSeek();
     if (mode === 'gamepad' || mode === 'mouse' || mode === 'keyboard') {
+      if (mode === 'mouse' && source === 'pointer-down' && fullscreenLayout() && location.pathname === '/watch') {
+        pointerLayoutPending = true;
+        return;
+      }
+      pointerLayoutPending = false;
       playbackInputMode = mode;
       renderMode();
     }

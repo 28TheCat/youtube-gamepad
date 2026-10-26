@@ -66,6 +66,7 @@ export function createFeedClient() {
             new URL(item.channelAvatar).protocol === 'https:') channelAvatar = item.channelAvatar; } catch { /* No avatar. */ }
           return { id: item.id, title: item.title.slice(0, 2000), channel: item.channel.slice(0, 2000),
           ...(channelAvatar ? { channelAvatar } : {}),
+          ...(['verified', 'artist'].includes(item.channelBadge || '') ? { channelBadge: item.channelBadge } : {}),
           ...(typeof item.viewCount === 'string' ? { viewCount: item.viewCount.slice(0, 200) } : {}),
           ...(typeof item.publishedTime === 'string' ? { publishedTime: item.publishedTime.slice(0, 200) } : {}),
           ...(typeof item.duration === 'string' ? { duration: item.duration.slice(0, 40) } : {}),

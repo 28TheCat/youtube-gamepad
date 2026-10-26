@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import InterfaceIcon from '../ui/InterfaceIcon.vue';
+import LoadStatus from '../ui/LoadStatus.vue';
 import { useI18n } from '../shared/use-i18n';
 const { t } = useI18n();
 import VideoGridSettings from './VideoGridSettings.vue';
@@ -28,7 +29,8 @@ onBeforeUnmount(model.dispose);
       </button>
     </nav>
     <div class="settings-content">
-  <p v-if="!state.values" role="status">{{ t(state.error || 'Loading settings…') }}</p>
+  <LoadStatus v-if="!state.values" :loading="!state.error" :failed="!!state.error" error-role="status"
+    :loading-message="t('Loading settings…')" :error-message="t(state.error)" />
   <template v-else-if="!state.category">
     <h3>{{ t("Your gamepad, your way") }}</h3>
     <p>{{ t("Changes save automatically and apply to your open YouTube tabs.") }}</p>

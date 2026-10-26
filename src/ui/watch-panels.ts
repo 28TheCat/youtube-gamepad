@@ -1,3 +1,6 @@
+import { createDrawer } from './drawer';
+import { createCommentOperations } from './comment-operations';
+import { createPlaylistOperations } from './playlist-operations';
 import { mountWatchPanel } from './mount-watch-panel';
 import type { ModuleFactory, WatchPanels, WatchPanelsPort } from '../../types/ports';
 export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
@@ -12,155 +15,187 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     const descriptionHeader = port.make('header', 'panel-heading');
     let commentKey = '', commentButtons: HTMLElement[] = [];
     let commentRoute = '';
-    const replyBatchSize = 5;
-    let threadKey = '', replyLimit = replyBatchSize;
-    let nextReplyIndex: number | undefined;
-    let listPosition = { top: 0, id: '', index: 0 };
+    const comments = createCommentOperations({
+      records: () => port.controller.readComments(), status: () => port.controller.readCommentsStatus?.(),
+      replies: key => { port.controller.request('replies', key); }
+    });
+    let managedFocus = false;
+    const drawer = createDrawer({
+      element: () => dialog, content: () => sheet,
+      activeElement: () => (dialog.getRootNode?.() as ShadowRoot | undefined)?.activeElement as HTMLElement | null,
+      route: () => port.controller.readRoute().key,
+      items: () => [close, ...commentButtons], index: () => watchState().panelIndex,
+      opened(modal) { if (modal && focusManager) { focusManager.open(dialog, 'watch'); managedFocus = true; } },
+      cleared: clearPanel,
+      restoreReturn(target, restore) {
+        if (managedFocus) { focusManager?.close(dialog, restore); managedFocus = false; }
+        else if (restore && target?.isConnected && !target.closest('[hidden],[inert]')) target.focus({ preventScroll: true });
+      },
+      restoreDetail(position) {
+        const index = commentButtons.findIndex(button => button.dataset.focusId === position.id);
+        send({ type: 'WATCH_FOCUS', region: 'panel', index: index >= 0 ? index + 1 : Math.min(position.index, commentButtons.length) });
+        focus();
+      }
+    });
     let renderer: ReturnType<typeof mountWatchPanel> | undefined;
     let destroyed = false;
-    let playlists: readonly import('../../types/ports').SavedPlaylistSnapshot[] = [];
-    let playlistLoading = false, playlistFailed = false, playlistVersion = 0;
-    function paint(panel: 'description' | 'comments' | 'playlists', records: readonly import('../../types/ports').CommentSnapshot[] = [], unavailable = false) {
+    let subscriptionLoading = false, subscriptionFailed = false, subscriptionVersion = 0;
+    const playlist = createPlaylistOperations({
+      read: async () => await port.controller.request('playlists') as readonly import('../../types/ports').SavedPlaylistSnapshot[] | undefined,
+      toggle: async key => !!await port.controller.request('savePlaylist', key),
+      active: () => !destroyed && watchState().panel === 'playlists', route: () => port.controller.readRoute().key, changed: paintPlaylists
+    });
+    function paint(panel: 'description' | 'comments' | 'playlists' | 'subscription', records: readonly import('../../types/ports').CommentSnapshot[] = [], unavailable = false) {
       if (destroyed) return;
       renderer ||= mountWatchPanel(description, controllerStyle, {
         openThread, replies: loadReplies,
-        load: loadComments, savePlaylist: togglePlaylist, retryPlaylists: loadPlaylists
+        translate(key) { comments.translate(key, key => { port.controller.request('translateComment', key); }); commentKey = ''; readComments(); },
+        load: loadComments, subscriptionAction: updateSubscription, savePlaylist: togglePlaylist, retryPlaylists: loadPlaylists
       });
       renderer.update({ panel, text: port.descriptionText, records, unavailable,
-        thread: threadKey ? records.find(item => item.key === threadKey) : undefined, replyLimit,
-        playlists, playlistLoading, playlistFailed,
+        thread: comments.state.thread ? records.find(item => item.key === comments.state.thread) : undefined, replyLimit: comments.state.limit,
+        notificationPreference: panel === 'subscription' ? port.controller.readWatchPage().notificationPreference : undefined, subscriptionLoading, subscriptionFailed,
+        playlists: playlist.state.items, playlistLoading: playlist.state.loading, playlistFailed: playlist.state.failed,
         commentsStatus: port.controller.readCommentsStatus?.() });
-      dialog.classList.toggle('thread-detail', panel === 'comments' && !!threadKey);
+      dialog.classList.toggle('thread-detail', panel === 'comments' && !!comments.state.thread);
       commentButtons = panel !== 'description' ? renderer.buttons() : [];
     }
+    function positionSubscription() {
+      if (watchState().panel !== 'subscription') return;
+      const anchor = surface.querySelector<HTMLElement>('[data-action="subscribe"]');
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect(), bounds = dialog.getBoundingClientRect();
+      const width = Math.min(260, bounds.width - 16), height = Math.min(sheet.scrollHeight, bounds.height - 16);
+      const top = rect.bottom + 8 + height <= bounds.bottom ? rect.bottom + 8 : rect.top - height - 8;
+      sheet.style.left = Math.max(8, Math.min(rect.left - bounds.left, bounds.width - width - 8)) + 'px';
+      sheet.style.top = Math.max(8, Math.min(top - bounds.top, bounds.height - height - 8)) + 'px';
+    }
+    function paintSubscription() {
+      if (destroyed || watchState().panel !== 'subscription') return;
+      paint('subscription'); send({ type: 'WATCH_PANEL_COUNT', count: commentButtons.length });
+      positionSubscription();
+      if (!port.controller.navigating && !port.controller.hasTemporaryLayer?.()) focus();
+    }
+    async function updateSubscription(action: import('../../types/ports').WatchAction) {
+      if (subscriptionLoading || destroyed || watchState().panel !== 'subscription' ||
+          !['unsubscribe', 'notificationsAll', 'notificationsPersonalized', 'notificationsNone'].includes(action)) return;
+      const version = ++subscriptionVersion, route = port.controller.readRoute().key;
+      subscriptionLoading = true; subscriptionFailed = false; paintSubscription();
+      try {
+        const ok = await port.controller.request('watchAction', action);
+        if (destroyed || version !== subscriptionVersion || route !== port.controller.readRoute().key) return;
+        if (ok) { closePanel(); port.controller.requestRefresh?.(); }
+        else subscriptionFailed = true;
+      } catch { if (version === subscriptionVersion) subscriptionFailed = true; }
+      finally { if (!destroyed && version === subscriptionVersion) { subscriptionLoading = false; paintSubscription(); } }
+    }
+    function outsideClick(event: Event) { if (watchState().panel === 'subscription' && event.target === dialog) closePanel(); }
+    dialog.addEventListener('click', outsideClick);
+    window.addEventListener('resize', positionSubscription);
+    window.addEventListener('scroll', positionSubscription, true);
     function paintPlaylists() {
       if (destroyed || watchState().panel !== 'playlists') return;
       paint('playlists'); send({ type: 'WATCH_PANEL_COUNT', count: commentButtons.length });
       if (!port.controller.navigating && !port.controller.hasTemporaryLayer?.()) focus();
     }
-    async function loadPlaylists() {
-      if (playlistLoading || destroyed || watchState().panel !== 'playlists') return;
-      const version = ++playlistVersion, route = port.controller.readRoute().key;
-      playlistLoading = true; playlistFailed = false; paintPlaylists();
-      try {
-        const value = await port.controller.request('playlists');
-        if (version !== playlistVersion || destroyed || route !== port.controller.readRoute().key) return;
-        playlistFailed = !Array.isArray(value); if (Array.isArray(value)) playlists = value;
-      } catch { if (version === playlistVersion) playlistFailed = true; }
-      finally { if (version === playlistVersion && !destroyed) { playlistLoading = false; paintPlaylists(); } }
-    }
-    async function togglePlaylist(key: string) {
-      if (playlistLoading || destroyed || watchState().panel !== 'playlists') return;
-      const version = ++playlistVersion, route = port.controller.readRoute().key;
-      playlistLoading = true; playlistFailed = false; paintPlaylists();
-      try {
-        const ok = await port.controller.request('savePlaylist', key);
-        if (version !== playlistVersion || destroyed || route !== port.controller.readRoute().key) return;
-        playlistFailed = !ok;
-        if (ok) playlists = playlists.map(item => item.key === key ? { ...item, selected: !item.selected } : item);
-      } catch { if (version === playlistVersion) playlistFailed = true; }
-      finally { if (version === playlistVersion && !destroyed) { playlistLoading = false; paintPlaylists(); } }
-    }
+    function loadPlaylists() { return playlist.load(); }
+    function togglePlaylist(key: string) { return playlist.toggle(key); }
     function unmount() { renderer?.dispose(); renderer = undefined; commentButtons = []; commentKey = ''; }
   function clearPanel() {
-    threadKey = ''; replyLimit = replyBatchSize; nextReplyIndex = undefined; listPosition = { top: 0, id: '', index: 0 };
-    ++playlistVersion; playlistLoading = false; playlistFailed = false; playlists = [];
+    comments.reset();
+    ++subscriptionVersion; subscriptionLoading = false; subscriptionFailed = false;
+    playlist.reset();
     // Keep the panel geometry through the discrete display/opacity exit transition.
     // Removing "comments" here turns the fading sidebar into a full-screen backdrop.
-    unmount(); send({ type: 'WATCH_PANEL', panel: '' }); dialog.hidden = true; surface.classList.remove('comments-open');
+    unmount(); send({ type: 'WATCH_PANEL', panel: '' }); surface.classList.remove('comments-open');
     document.documentElement.classList.remove('ytg-comments');
   }
   function closePanel() {
-    clearPanel(); focusManager?.close(dialog);
+    drawer.close();
   }
   function openThread(key: string) {
     if (destroyed || watchState().panel !== 'comments') return;
     const record = port.controller.readComments().find(item => item.key === key);
     if (!record || (!record.hasReplies && !record.replies.length)) return;
-    const active = (dialog.getRootNode?.() as ShadowRoot | undefined)?.activeElement as HTMLElement | null;
-    listPosition = { top: sheet.scrollTop, id: active?.dataset.focusId || 'replies:' + key, index: watchState().panelIndex };
-    threadKey = key; replyLimit = replyBatchSize; nextReplyIndex = undefined;
+    drawer.enterDetail(() => {
+      comments.reset();
+      controllerStyle.bind(close, 'Back');
+      controllerStyle.bind(panelTitle, 'Comments'); controllerStyle.bind(dialog, 'Comments', 'aria-label');
+      commentKey = ''; readComments();
+    });
+    comments.open(key);
     controllerStyle.bind(close, 'Back to comments');
     controllerStyle.bind(panelTitle, 'Replies'); controllerStyle.bind(dialog, 'Replies', 'aria-label');
     send({ type: 'WATCH_FOCUS', region: 'panel', index: 0 });
     commentKey = ''; readComments(); sheet.scrollTop = 0;
-    if (!record.replies.length && record.hasReplies) {
-      port.controller.request('replies', key); commentKey = ''; readComments(); sheet.scrollTop = 0;
-    }
   }
   function back() {
-    if (destroyed || watchState().panel !== 'comments' || !threadKey) return false;
-    threadKey = ''; replyLimit = replyBatchSize; nextReplyIndex = undefined;
-    controllerStyle.bind(close, 'Back');
-    controllerStyle.bind(panelTitle, 'Comments'); controllerStyle.bind(dialog, 'Comments', 'aria-label');
-    commentKey = ''; readComments();
-    const index = commentButtons.findIndex(button => button.dataset.focusId === listPosition.id);
-    send({ type: 'WATCH_FOCUS', region: 'panel', index: index >= 0 ? index + 1 : Math.min(listPosition.index, commentButtons.length) });
-    focus(); sheet.scrollTop = listPosition.top;
-    return true;
+    if (destroyed || watchState().panel !== 'comments' || !comments.state.thread) return false;
+    return drawer.backDetail();
   }
   function loadReplies() {
-    if (destroyed || watchState().panel !== 'comments' || !threadKey || port.controller.readCommentsStatus?.()?.loading) return;
-    const record = port.controller.readComments().find(item => item.key === threadKey);
-    if (!record) return;
-    nextReplyIndex = Math.min(replyLimit, record.replies.length);
-    if (replyLimit < record.replies.length) replyLimit += replyBatchSize;
-    else if (record.hasReplies || port.controller.readCommentsStatus?.()?.failed) {
-      replyLimit = record.replies.length + replyBatchSize;
-      port.controller.request('replies', threadKey);
-    }
+    if (destroyed || watchState().panel !== 'comments' || !comments.state.thread || port.controller.readCommentsStatus?.()?.loading) return;
+    if (!comments.more()) return;
     commentKey = ''; readComments();
   }
   function readComments() {
     if (destroyed) return;
+    if (watchState().panel === 'subscription') { paintSubscription(); return; }
     if (watchState().panel === 'playlists') { paintPlaylists(); return; }
     if (watchState().panel === 'description') { paint('description'); return; }
     if (watchState().panel !== 'comments') return;
     const route = port.controller.readRoute().key;
-    if (route !== commentRoute) { commentRoute = route; threadKey = ''; replyLimit = replyBatchSize; nextReplyIndex = undefined; commentKey = ''; }
+    if (route !== commentRoute) { commentRoute = route; comments.reset(); drawer.clearDetails(); commentKey = ''; }
     const records = port.controller.readComments();
     const unavailable = port.controller.readWatchFeatures?.().comments === 'failed';
-    if (threadKey && !records.some(item => item.key === threadKey)) {
+    if (comments.state.thread && !records.some(item => item.key === comments.state.thread)) {
       back(); return;
     }
-    const key = JSON.stringify([records, unavailable, port.controller.readCommentsStatus?.(), threadKey, replyLimit]);
+    const key = JSON.stringify([records, unavailable, port.controller.readCommentsStatus?.(), comments.state.thread, comments.state.limit]);
     if (key === commentKey) return;
     let activeId = ((dialog.getRootNode?.() as ShadowRoot | undefined)?.activeElement as HTMLElement | null)?.dataset.focusId;
     commentKey = key;
     paint('comments', records, unavailable);
-    const nextReply = nextReplyIndex === undefined ? undefined : records.find(item => item.key === threadKey)?.replies[nextReplyIndex];
-    if (nextReply) { activeId = 'comment:reply:' + JSON.stringify([threadKey, nextReply.key]); nextReplyIndex = undefined; }
+    const nextReply = comments.state.nextIndex === undefined ? undefined : records.find(item => item.key === comments.state.thread)?.replies[comments.state.nextIndex];
+    if (nextReply) { activeId = 'comment:reply:' + JSON.stringify([comments.state.thread, nextReply.key]); comments.state.nextIndex = undefined; }
     const index = activeId ? commentButtons.findIndex(button => button.dataset.focusId === activeId) : -1;
     if (index >= 0) send({ type: 'WATCH_FOCUS', region: 'panel', index: index + 1 });
     send({ type: 'WATCH_PANEL_COUNT', count: commentButtons.length }); if (!port.controller.navigating && !port.controller.hasTemporaryLayer?.()) focus();
   }
   function loadComments() {
     if (destroyed || watchState().panel !== 'comments') return;
-    if (threadKey) { loadReplies(); return; }
+    if (comments.state.thread) { loadReplies(); return; }
     port.controller.request('comments');
   }
   function open(action: string) {
-    if (destroyed || (action !== 'description' && action !== 'playlists' && action !== 'comments')) return;
+    if (destroyed || (action !== 'description' && action !== 'playlists' && action !== 'comments' && action !== 'subscription')) return;
     if (action === 'comments' && back()) return;
-    threadKey = ''; replyLimit = replyBatchSize; nextReplyIndex = undefined;
+    comments.reset();
     // Choose the incoming geometry before state updates can reveal or measure it.
     dialog.classList.toggle('comments', action === 'comments');
     dialog.classList.toggle('description-panel', action === 'description');
-    if (action === 'description' || action === 'playlists') focusManager?.open(dialog, 'watch');
+    dialog.classList.toggle('subscription-panel', action === 'subscription');
+    sheet.style.removeProperty('left'); sheet.style.removeProperty('top');
     controllerStyle.bind(close, action === 'description' ? 'Close' : 'Back');
     if (action === 'description') {
       descriptionHeader.replaceChildren(panelTitle, close);
       sheet.replaceChildren(descriptionHeader, description);
-    } else sheet.replaceChildren(panelTitle, close, description);
+    } else if (action === 'subscription') sheet.replaceChildren(panelTitle, description, close);
+    else sheet.replaceChildren(panelTitle, close, description);
     sheet.scrollTop = 0;
-    const title = action === 'description' ? 'Video description' : action === 'playlists' ? 'Save to playlist' : 'Comments';
+    const title = action === 'description' ? 'Video description' : action === 'playlists' ? 'Save to playlist' : action === 'subscription' ? 'Notifications' : 'Comments';
+    drawer.open(action !== 'comments');
     send({ type: 'WATCH_PANEL', panel: action });
     controllerStyle.bind(panelTitle, title); controllerStyle.bind(dialog, title, 'aria-label');
-    dialog.setAttribute('aria-modal', String(action !== 'comments')); dialog.hidden = false;
+    dialog.setAttribute('aria-modal', String(action !== 'comments'));
     if (action === 'description') {
       paint('description'); focus();
+    } else if (action === 'subscription') {
+      subscriptionLoading = false; subscriptionFailed = false;
+      paintSubscription();
+      send({ type: 'WATCH_FOCUS', region: 'panel', index: 1 }); focus();
     } else if (action === 'playlists') {
-      playlists = []; playlistFailed = false; playlistLoading = false;
+      playlist.reset();
       paintPlaylists(); void loadPlaylists();
     } else {
       commentKey = ''; surface.classList.add('comments-open');
@@ -170,11 +205,11 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     }
   }
   function hide() {
-    focusManager?.close(dialog, false); clearPanel();
+    drawer.close(false);
   }
   return { open, hide, close: closePanel, back, refresh: readComments, load: loadComments,
     get buttons() { return commentButtons; },
-    destroy() { if (destroyed) return; hide(); destroyed = true; }
+    destroy() { if (destroyed) return; hide(); destroyed = true; dialog.removeEventListener('click', outsideClick); window.removeEventListener('resize', positionSubscription); window.removeEventListener('scroll', positionSubscription, true); }
   };
   } };
 })();

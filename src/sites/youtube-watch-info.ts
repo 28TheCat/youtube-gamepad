@@ -2,13 +2,16 @@ import { createWatchDataService, type WatchDataService } from './youtube-watch-d
 import { Innertube, Session, Parser, YTNodes } from 'youtubei.js/web';
 import type { YouTubeVideoDetails } from '../../types/core';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
-import { createYouTubeHeaders, requestYouTube } from './youtube-request';
+import { createYouTubeHeaders, requestYouTube, mutateYouTube } from './youtube-request';
 import { PAGE_WATCH_INFO } from '../bridge/page-protocol';
 import './youtube-parser';
+import { channelBadge } from './youtube-channel-badge';
 
 export interface SavedPlaylist { key: string; title: string; selected: boolean }
 export interface WatchInfoSnapshot {
   route: string; details?: YouTubeVideoDetails; avatar: string;
+  channelBadge?: 'verified' | 'artist';
+  notificationPreference?: import('../../types/ports').NotificationPreference;
   subscribed: boolean; liked: boolean; disliked: boolean;
   canLike: boolean; canSubscribe: boolean; canSave: boolean;
   loading: boolean; failed: boolean; working: boolean;
@@ -48,7 +51,7 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
       const path = endpoint.replace(/^\//, '');
       const readOnly = ['player', 'next', 'playlist/get_add_to_playlist'].includes(path);
       if (!readOnly && !['like/like', 'like/dislike', 'like/removelike', 'subscription/subscribe',
-        'subscription/unsubscribe', 'browse/edit_playlist'].includes(path)) throw Error('Unexpected watch API endpoint');
+        'subscription/unsubscribe', 'notification/modify_channel_preference', 'browse/edit_playlist'].includes(path)) throw Error('Unexpected watch API endpoint');
       if (destroyed || captured !== state || signal.aborted || captured.route !== route()) throw Error('Watch request cancelled');
       const headers = await createYouTubeHeaders(context);
       const body: Node = {};
@@ -59,20 +62,7 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
         body: JSON.stringify({ context, ...body }), signal };
       let raw: Node;
       if (readOnly) raw = await (path === 'next' ? dataService.read(init) : requestYouTube(path, init));
-      else {
-        // Mutations are never automatically retried: a lost response may have
-        // followed a successful write on YouTube.
-        const timeout = new AbortController();
-        const cancel = () => timeout.abort();
-        signal.addEventListener('abort', cancel, { once: true });
-        const timer = setTimeout(cancel, 20000);
-        try {
-          const response = await fetch(`/youtubei/v1/${path}`, { ...init, signal: timeout.signal });
-          if (!response.ok) throw Error('Watch action failed');
-          raw = await response.json();
-          if (!raw || raw.error || raw.success === false) throw Error('Watch action failed');
-        } finally { clearTimeout(timer); signal.removeEventListener('abort', cancel); }
-      }
+      else raw = await mutateYouTube(path, init);
       if (destroyed || captured !== state || signal.aborted || captured.route !== route()) throw Error('Watch request cancelled');
       if (path === 'next') nextResponse = raw;
       return args.parse ? Parser.parseResponse(raw) : { success: true, status_code: 200, data: raw };
@@ -96,12 +86,15 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
         captured.details = { videoId: basic.id, title: basic.title, author: basic.author,
           channelId, shortDescription: basic.short_description, viewCount: String(basic.view_count ?? ''), isLive: basic.is_live };
         const secondary = info.secondary_info;
+        captured.channelBadge = channelBadge(secondary?.owner?.author, secondary?.owner?.attributed_title);
         const subscribe = secondary?.subscribe_button;
         const subscriptionEntity = nextResponse?.frameworkUpdates?.entityBatchUpdate?.mutations?.find((entry: Node) =>
           entry.payload?.subscriptionStateEntity?.channelId === channelId &&
           typeof entry.payload.subscriptionStateEntity.subscribed === 'boolean')?.payload.subscriptionStateEntity;
         const subscribed = subscribe?.is(YTNodes.SubscribeButton) ? subscribe.subscribed : subscriptionEntity?.subscribed;
         captured.subscribed = subscribed === true;
+        const preferenceId = Number(subscribe?.is(YTNodes.SubscribeButton) ? subscribe.notification_preference_button?.current_state_id : undefined);
+        captured.notificationPreference = preferenceId === 2 ? 'ALL' : preferenceId === 1 ? 'PERSONALIZED' : preferenceId === 3 ? 'NONE' : undefined;
         captured.canSubscribe = !!channelId && typeof subscribed === 'boolean' && client().session.logged_in;
         const liked = basic.is_liked, disliked = basic.is_disliked;
         captured.liked = liked === true; captured.disliked = disliked === true;
@@ -130,14 +123,21 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
     catch { return fallback; }
     finally { if (captured === state) { captured.working = false; notify(); } }
   }
-  async function act(action: 'like' | 'dislike' | 'subscribe') {
+  async function act(action: 'like' | 'dislike' | 'subscribe' | 'unsubscribe' | 'notificationsAll' | 'notificationsPersonalized' | 'notificationsNone') {
     return exclusive(async () => {
       const current = state, id = state.details!.videoId!;
       const interaction = client().interact;
-      if (action === 'subscribe') {
+      if (action.startsWith('notifications')) {
+        if (!state.canSubscribe || !state.subscribed) return false;
+        const preference = action === 'notificationsAll' ? 'ALL' : action === 'notificationsPersonalized' ? 'PERSONALIZED' : 'NONE';
+        await interaction.setNotificationPreferences(channelId, preference);
+        current.notificationPreference = preference;
+      } else if (action === 'subscribe' || action === 'unsubscribe') {
         if (!state.canSubscribe) return false;
+        if (action === 'unsubscribe' && !state.subscribed) return true;
         await (state.subscribed ? interaction.unsubscribe(channelId) : interaction.subscribe(channelId));
         current.subscribed = !current.subscribed;
+        current.notificationPreference = undefined;
       } else {
         if (!state.canLike) return false;
         const removing = action === 'like' ? state.liked : state.disliked;

@@ -2,7 +2,6 @@ export function isShortsPlaybackRoute() {
   return /^\/shorts\/[\w-]{1,100}$/.test(location.pathname);
 }
 
-export const shortsPlayerHref = (id: string) => `/shorts/${encodeURIComponent(id)}`;
 export const shortsQueueKey = 'ytg-shorts-queue-v1';
 export interface ShortsQueue { ids: string[]; returnTo: string; currentId?: string }
 export function readShortsQueue(): ShortsQueue {

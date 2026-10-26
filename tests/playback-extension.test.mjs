@@ -2,6 +2,23 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { launchExtension, virtualPad } from './helpers/extension.mjs';
 
+// Sample neutral/pressed states in browser frames, independently of runner delays.
+async function padFrames(page, count = 3) {
+  await page.evaluate(count => new Promise(resolve => {
+    const tick = () => --count > 0 ? requestAnimationFrame(tick) : resolve();
+    requestAnimationFrame(tick);
+  }), count);
+}
+async function pressPad(page, button) {
+  await page.evaluate(async button => {
+    const frames = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const set = state => document.documentElement.setAttribute('data-test-pad', JSON.stringify(state));
+    set({ connected: true }); await frames();
+    set({ connected: true, button }); await frames();
+    set({ connected: true }); await frames();
+  }, button);
+}
+
 const mediaSource = `
 const video=document.querySelector('video');
 video.dataset.paused='false'; video.dataset.position='30';
@@ -28,7 +45,7 @@ function nextOrPage(route, options) {
   return route.request().url().includes('/youtubei/v1/next') ? route.fulfill({json:nextFixture}) : route.fulfill(options);
 }
 
-test('InnerTube recommendations and playlist queue work without native cards and retain queue navigation', { timeout: 60000 }, async t => {
+for (const input of ['mouse', 'gamepad']) test(`InnerTube recommendations and playlist queue retain queue navigation (${input})`, { timeout: 60000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, language: 'en' }));
   const body = fixture.replace(/<ytd-watch-next-secondary-results-renderer>[\s\S]*?<\/ytd-watch-next-secondary-results-renderer>/, '');
@@ -57,11 +74,16 @@ test('InnerTube recommendations and playlist queue work without native cards and
   const setPad = await virtualPad(context, page);
   await page.bringToFront(); await setPad({ connected: true });
   await page.waitForFunction(() => document.documentElement.classList.contains('ytg-theater'));
-  await setPad({ connected: true, button: 13 }); await page.waitForTimeout(200); await setPad({ connected: true });
+  await pressPad(page, 13);
   const queued = host.locator('.card').filter({ hasText: 'Queued video' });
   await queued.waitFor({ state: 'visible' });
   assert.match(await queued.innerText(), /Playlists/);
-  await queued.click();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.ytgPlaybackLayout), 'fullscreen');
+  if (input === 'mouse') await queued.click();
+  else {
+    assert.equal(await host.evaluate(node => node.shadowRoot.activeElement?.dataset.videoId), await queued.getAttribute('data-video-id'));
+    await setPad({ connected: true, button: 0 });
+  }
   await page.waitForURL('**/watch?v=queued&list=PLtest&index=2');
 });
 
@@ -124,7 +146,8 @@ test('held media previews and commits on release through real extension input', 
     expression: `window.dispatchEvent(new CustomEvent('yt-gamepad-action',{detail:{action:'${action}'}}))` });
   await page.bringToFront(); await setPad({ connected: true });
   await page.waitForFunction(() => document.documentElement.dataset.ytgMode === 'playback');
-  const neutral = async () => { await setPad({ connected: true }); await page.waitForTimeout(100); };
+  await padFrames(page);
+  const neutral = async () => { await setPad({ connected: true }); await padFrames(page); };
   const position = () => page.locator('video').getAttribute('data-position');
   const count = async () => Number(await page.locator('video').getAttribute('data-seek-count') || 0);
 
@@ -203,9 +226,10 @@ test('R3 temporary speed restores the saved rate on release, menu and disconnect
   await page.locator('video').evaluate(video => { video.playbackRate = 1.5; });
   await setPad({ connected: true }); await page.bringToFront();
   await page.waitForFunction(() => document.documentElement.dataset.ytgMode === 'playback');
+  await padFrames(page);
   const rate = value => page.waitForFunction(value => document.querySelector('video').playbackRate === value, value);
   const hold = async () => {
-    await setPad({ connected: true }); await page.waitForTimeout(100);
+    await setPad({ connected: true }); await padFrames(page);
     await setPad({ connected: true, button: 11 });
     await rate(2);
     await page.locator('#ytg-temporary-speed').waitFor({ state: 'visible' });
@@ -222,9 +246,9 @@ test('R3 temporary speed restores the saved rate on release, menu and disconnect
   await rate(1.5);
   await page.waitForTimeout(450);
   assert.equal(await page.locator('video').evaluate(video => video.playbackRate), 1.5);
-  await setPad({ connected: true }); await page.waitForTimeout(100);
-  await setPad({ connected: true, button: 1 }); await page.waitForTimeout(150);
-  await setPad({ connected: true }); await page.waitForTimeout(150);
+  await setPad({ connected: true }); await padFrames(page);
+  await pressPad(page, 1);
+  await page.locator('#yt-gamepad-menu').waitFor({ state: 'hidden' });
   await hold();
   await setPad({ connected: false }); await rate(1.5);
   await page.locator('#ytg-temporary-speed').waitFor({ state: 'hidden' });
@@ -258,11 +282,8 @@ for (const trustedTypes of [false, true]) {
     await setPad({connected:true}); await page.bringToFront();
     await page.waitForFunction(()=>document.documentElement.classList.contains('ytg-theater'));
     await page.waitForFunction(()=>document.documentElement.dataset.ytgMode === 'playback');
-    const press=async button=>{
-      await setPad({connected:true}); await page.waitForTimeout(120);
-      await setPad({connected:true,button}); await page.waitForTimeout(140);
-      await setPad({connected:true}); await page.waitForTimeout(120);
-    };
+    await padFrames(page);
+    const press = button => pressPad(page, button);
     const active=()=>host.evaluate(node=>node.shadowRoot.activeElement?.dataset.focusId);
     await press(12); await host.locator('[data-vue-playback]').waitFor();
     assert.equal(await active(),'playPause');
@@ -282,7 +303,7 @@ for (const trustedTypes of [false, true]) {
       cards: Array.from(node.shadowRoot.querySelectorAll('.card')).map(card => ({ id: card.dataset.focusId, hidden: card.hidden, selected: card.classList.contains('selected') })),
       classes: document.documentElement.className, errors: window.__testErrors
     }))));
-    await press(0); await page.waitForURL('**/watch?v=r0');
+    await setPad({connected:true,button:0}); await page.waitForURL('**/watch?v=r0');
     assert.deepEqual(errors,[]);
   });
 }

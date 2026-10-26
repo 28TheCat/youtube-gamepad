@@ -21,7 +21,7 @@ function fixture(handler) {
       calls.push({ url, body: JSON.parse(init.body), headers: init.headers, signal: init.signal });
       return { ok: true, json: async () => handler ? await handler(calls.length) : accountData() };
     } };
-  vm.runInNewContext(code, sandbox);
+  vm.runInNewContext(code, Object.assign(sandbox, { Headers, Request, Response }));
   return { service: sandbox.AccountFixture.createAccountService(), calls, settings,
     signOut() { settings.LOGGED_IN = false; }, advance() { now += 61000; } };
 }
@@ -33,9 +33,9 @@ test('account API reuses the page identity and exposes display data without priv
   assert.equal(value.accounts[1].name, '<img> Other creator');
   assert.equal(s.calls[0].url, '/youtubei/v1/account/accounts_list');
   assert.equal(s.calls[0].body.requestType, 'ACCOUNTS_LIST_REQUEST_TYPE_CHANNEL_SWITCHER');
-  assert.equal(s.calls[0].headers['X-Goog-AuthUser'], '2');
-  assert.equal(s.calls[0].headers['X-Goog-PageId'], 'brand');
-  assert.match(s.calls[0].headers.Authorization, /^SAPISIDHASH /);
+  assert.equal(s.calls[0].headers['x-goog-authuser'], '2');
+  assert.equal(s.calls[0].headers['x-goog-pageid'], 'brand');
+  assert.match(s.calls[0].headers.authorization, /^SAPISIDHASH /);
   assert.equal(JSON.stringify(value).includes('private'), false);
   value.accounts[0].name = 'Modified by caller';
   assert.equal((await s.service.read()).accounts[0].name, 'Example Creator');

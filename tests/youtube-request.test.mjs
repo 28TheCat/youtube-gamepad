@@ -1,8 +1,41 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { importSettingsModel } from './helpers/settings-model.mjs';
-const { requestYouTube } = await importSettingsModel('src/sites/youtube-request.ts');
+const { requestYouTube, mutateYouTube } = await importSettingsModel('src/sites/youtube-request.ts');
 const ok = () => ({ ok: true, json: async () => ({ contents: [] }) });
+
+test('requests use YouTube.js action normalization and retain page context and credentials', async t => {
+  let sent;
+  t.mock.method(globalThis, 'fetch', async (url, options) => { sent = { url, options }; return ok(); });
+  const context = { client: { clientName: 'WEB', clientVersion: 'page', visitorData: 'visitor' }, user: {} };
+  await requestYouTube('browse', { headers: { Authorization: 'captured', 'X-Goog-AuthUser': '2' },
+    body: JSON.stringify({ context, token: 'cursor', parse: true }) });
+  assert.equal(sent.url, '/youtubei/v1/browse');
+  const body = JSON.parse(sent.options.body);
+  assert.deepEqual(body.context, context);
+  assert.equal(body.continuation, 'cursor');
+  assert.equal(body.token, undefined);
+  assert.equal(body.parse, undefined);
+  assert.equal(body.skip_auth_check, undefined);
+  assert.equal(sent.options.headers.authorization, 'captured');
+  assert.equal(sent.options.headers['x-goog-authuser'], '2');
+  assert.equal(sent.options.headers['x-goog-visitor-id'], 'visitor');
+  assert.equal(sent.options.credentials, 'same-origin');
+  assert.equal(sent.options.method, 'POST');
+});
+
+test('mutations use the shared client, never retry failures and enforce their endpoint list', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => { calls++; return { ok: false, status: 503 }; });
+  await assert.rejects(mutateYouTube('like/like', {}), error => error.kind === 'http');
+  assert.equal(calls, 1);
+  await assert.rejects(mutateYouTube('browse', {}));
+  assert.equal(calls, 1);
+  for (const data of [{ success: false }, { error: {} }, null]) {
+    t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => data }));
+    await assert.rejects(mutateYouTube('like/like', {}), error => error.kind === 'response');
+  }
+});
 
 test('transient failures retry once while retaining the same request', async t => {
   for (const failure of ['network', 502, 503, 504]) {

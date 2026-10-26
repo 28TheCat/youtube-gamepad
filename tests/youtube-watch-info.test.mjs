@@ -13,7 +13,7 @@ function fixture({ signedIn = true, handler } = {}) {
   const calls = [], events = [];
   const location = { pathname: '/watch', search: '?v=first', origin: 'https://www.youtube.com' };
   const sandbox = { URL, URLSearchParams, AbortController, setTimeout, clearTimeout, structuredClone,
-    TextEncoder, Event, crypto: webcrypto, location, console,
+    TextEncoder, TextDecoder, Event, btoa, atob, crypto: webcrypto, location, console,
     document: { cookie: signedIn ? 'SAPISID=fixture' : '', dispatchEvent: event => events.push(event.type),
       querySelector() { throw Error('Native page JS must not be read'); } },
     window: { ytcfg: { get: key => ({ INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: 'fixture' }, user: {} },
@@ -25,7 +25,7 @@ function fixture({ signedIn = true, handler } = {}) {
         url.endsWith('/get_add_to_playlist') ? { contents: { addToPlaylistRenderer: { playlists: [option('PLone'), option('WL', true)] } } } : { success: true }) };
     }
   };
-  vm.runInNewContext(code, sandbox);
+  vm.runInNewContext(code, Object.assign(sandbox, { Headers, Request, Response }));
   return { calls, events, location, service: sandbox.InfoFixture.createWatchInfoService() };
 }
 async function ready(s) {
@@ -62,6 +62,23 @@ test('unknown reaction and subscription states disable writes instead of guessin
   s.service.destroy();
 });
 
+test('watch channel verification follows owner badges independently of subscription state', async () => {
+  for (const [style, badge] of [['BADGE_STYLE_TYPE_VERIFIED', 'verified'], ['BADGE_STYLE_TYPE_VERIFIED_ARTIST', 'artist'], ['BADGE_STYLE_TYPE_PREMIUM', undefined]]) {
+    const s = fixture({ handler: url => {
+      if (!url.endsWith('/next')) return;
+      const raw = next();
+      const secondary = raw.contents.twoColumnWatchNextResults.results.results.contents[1].videoSecondaryInfoRenderer;
+      secondary.owner.videoOwnerRenderer.badges = [{ metadataBadgeRenderer: { style } }];
+      secondary.subscribeButton.subscribeButtonRenderer.subscribed = true;
+      return raw;
+    } });
+    const info = await ready(s);
+    assert.equal(info.channelBadge, badge);
+    assert.equal(info.subscribed, true);
+    s.service.destroy();
+  }
+});
+
 test('video details come from player/next APIs and reuse the selected page account', async () => {
   const s = fixture(), info = await ready(s);
   assert.equal(info.details.title, 'Title first');
@@ -71,9 +88,9 @@ test('video details come from player/next APIs and reuse the selected page accou
   assert.equal(s.calls.length, 2);
   for (const call of s.calls) {
     assert.equal(call.init.credentials, 'same-origin');
-    assert.match(call.init.headers.Authorization, /^SAPISIDHASH /);
-    assert.equal(call.init.headers['X-Goog-AuthUser'], '2');
-    assert.equal(call.init.headers['X-Goog-PageId'], 'brand-account');
+    assert.match(call.init.headers.authorization, /^SAPISIDHASH /);
+    assert.equal(call.init.headers['x-goog-authuser'], '2');
+    assert.equal(call.init.headers['x-goog-pageid'], 'brand-account');
   }
   s.service.destroy();
 });
@@ -181,5 +198,50 @@ test('duplicate actions are blocked while a confirmed mutation is pending', asyn
   assert.equal(await first, true);
   assert.equal(s.service.read().liked, true);
   assert.equal(s.calls.filter(call => call.url.includes('/like/')).length, 1);
+  s.service.destroy();
+});
+
+
+test('subscription notifications save real preferences and explicit unsubscribe never subscribes', async () => {
+  const s = fixture({ handler: url => {
+    if (!url.endsWith('/next')) return;
+    const raw = next();
+    const button = raw.contents.twoColumnWatchNextResults.results.results.contents[1].videoSecondaryInfoRenderer.subscribeButton.subscribeButtonRenderer;
+    button.subscribed = true;
+    button.notificationPreferenceButton = { subscriptionNotificationToggleButtonRenderer: { currentStateId: '1', states: [] } };
+    return raw;
+  } });
+  assert.equal((await ready(s)).notificationPreference, 'PERSONALIZED');
+  for (const [action, preference] of [['notificationsAll', 'ALL'], ['notificationsNone', 'NONE'], ['notificationsPersonalized', 'PERSONALIZED']]) {
+    assert.equal(await s.service.act(action), true);
+    assert.ok(s.calls.at(-1).url.endsWith('/notification/modify_channel_preference'));
+    assert.equal(typeof s.calls.at(-1).body.params, 'string');
+    assert.equal(s.service.read().notificationPreference, preference);
+    assert.equal(s.service.read().subscribed, true);
+  }
+  assert.equal(await s.service.act('unsubscribe'), true);
+  assert.ok(s.calls.at(-1).url.endsWith('/subscription/unsubscribe'));
+  assert.equal(s.service.read().subscribed, false);
+  const count = s.calls.length;
+  assert.equal(await s.service.act('unsubscribe'), true);
+  assert.equal(await s.service.act('notificationsAll'), false);
+  assert.equal(s.calls.length, count);
+  s.service.destroy();
+});
+
+test('failed notification update preserves the previous preference', async () => {
+  const s = fixture({ handler: url => {
+    if (url.endsWith('/notification/modify_channel_preference')) return { error: { code: 403 } };
+    if (!url.endsWith('/next')) return;
+    const raw = next();
+    const button = raw.contents.twoColumnWatchNextResults.results.results.contents[1].videoSecondaryInfoRenderer.subscribeButton.subscribeButtonRenderer;
+    button.subscribed = true;
+    button.notificationPreferenceButton = { subscriptionNotificationToggleButtonRenderer: { currentStateId: '3', states: [] } };
+    return raw;
+  } });
+  assert.equal((await ready(s)).notificationPreference, 'NONE');
+  assert.equal(await s.service.act('notificationsAll'), false);
+  assert.equal(s.service.read().notificationPreference, 'NONE');
+  assert.equal(s.service.read().subscribed, true);
   s.service.destroy();
 });

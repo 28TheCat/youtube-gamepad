@@ -1,17 +1,24 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue';
-import { useThumbnail } from './use-thumbnail';
+import VideoThumbnail from './VideoThumbnail.vue';
+import { useCardPreview } from './use-card-preview';
+import { useI18n } from '../shared/use-i18n';
+import ChannelBadge from './ChannelBadge.vue';
+import ChannelAvatar from './ChannelAvatar.vue';
+import ViewCountIcon from './ViewCountIcon.vue';
 import type { BrowseItem } from '../shared/browse-data';
 const props = defineProps<{ item: BrowseItem; selected: boolean; register: (id: string, node: HTMLAnchorElement | null) => void }>();
 const emit = defineEmits<{ select: [id: string]; open: [id: string] }>();
-const { source, failed, loaded, imageError } = useThumbnail(() => props.item);
-const cover = ref<HTMLElement>();
-const failedAvatar = ref('');
+const { t } = useI18n();
+const { source: previewSource, ready: previewReady, enter: previewEnter, stop: stopPreview, leave: previewLeave,
+  loaded: previewLoaded, failed: previewFailed } = useCardPreview(() => props.item);
+const cover = ref<InstanceType<typeof VideoThumbnail>>();
 let press: Animation | undefined;
 function open() {
+  stopPreview();
   press?.cancel();
   if (window.matchMedia('(prefers-reduced-motion: no-preference)').matches) {
-    press = cover.value?.animate([{ scale: '.97' }, { scale: '1' }], {
+    press = cover.value?.element?.animate([{ scale: '.97' }, { scale: '1' }], {
       duration: 120, easing: 'cubic-bezier(.2,.8,.2,1)', id: 'ytg-card-press'
     });
   }
@@ -22,23 +29,25 @@ onBeforeUnmount(() => press?.cancel());
 <template>
   <a :ref="node => register(item.id, node as HTMLAnchorElement | null)" :href="item.href"
     :data-browse-id="item.id" :data-selected="selected" @focus="emit('select', item.id)"
+    @pointerenter="previewEnter" @pointermove="previewEnter" @pointerleave="previewLeave"
     @click.prevent="open">
-    <div ref="cover" class="card-cover" :data-loading="!!source && !failed && !loaded">
-      <img v-if="source && !failed" :key="source" :src="source" :data-loaded="loaded" alt="" loading="lazy" decoding="async" @load="loaded = true" @error="imageError">
-      <span v-else class="thumbnail-placeholder"></span>
-      <span v-if="item.duration && !item.isPlaylist" class="card-duration">{{ item.duration }}</span>
-      <span v-if="item.watchedPercent && !item.isPlaylist" class="card-watch-progress" aria-hidden="true"><span :style="{ width: `${item.watchedPercent}%` }"></span></span>
+    <VideoThumbnail ref="cover" class="card-cover" :item="item">
+      <template #preview>
+        <iframe v-if="previewSource" class="card-video-preview" :class="{ ready: previewReady }" :src="previewSource"
+          :title="t('Video preview')" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"
+          tabindex="-1" @load="previewLoaded" @error="previewFailed" />
+      </template>
       <slot name="cover-overlay" />
-    </div>
+    </VideoThumbnail>
     <div class="card-copy" :class="{ 'has-channel-avatar': (item.channel || item.channelAvatar) && !item.isPlaylist }">
-      <span v-if="(item.channel || item.channelAvatar) && !item.isPlaylist" class="card-channel-avatar" aria-hidden="true">
-        <img v-if="item.channelAvatar && failedAvatar !== item.channelAvatar" :key="item.channelAvatar" :src="item.channelAvatar"
-          alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="failedAvatar = item.channelAvatar || ''" />
-        <span v-else>{{ Array.from(item.channel.trim())[0] }}</span>
-      </span>
+      <ChannelAvatar v-if="(item.channel || item.channelAvatar) && !item.isPlaylist" class="card-channel-avatar"
+        :src="item.channelAvatar" :name="item.channel" :size="36" />
       <div class="card-details">
-        <strong>{{ item.title }}</strong><span class="channel">{{ item.channel }}</span>
-        <span v-if="item.viewCount || item.publishedTime" class="card-stats">{{ [item.viewCount, item.publishedTime].filter(Boolean).join(' · ') }}</span>
+        <strong>{{ item.title }}</strong>
+        <div class="card-metadata-row">
+          <span class="channel">{{ item.channel }}<ChannelBadge :badge="item.channelBadge" /></span>
+          <span v-if="item.viewCount || item.publishedTime" class="card-stats"><span v-if="item.viewCount" class="card-view-count"><ViewCountIcon />{{ item.viewCount }}</span>{{ item.viewCount && item.publishedTime ? ' ' : '' }}<span v-if="item.publishedTime">{{ item.publishedTime }}</span></span>
+        </div>
       </div>
     </div>
   </a>

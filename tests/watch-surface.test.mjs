@@ -33,7 +33,7 @@ for (const layout of ['windowed', 'fullscreen']) for (const dark of [false, true
       view.host.hidden = false;
       window.descriptionPanels = api.YTGamepadWatchPanels.create({ ...view, controllerStyle,
         watchState: () => state, send(event) { if (event.type === 'WATCH_PANEL') state.panel = event.panel; },
-        focus() { view.close.focus({ preventScroll: true }); }, controller: {},
+        focus() { view.close.focus({ preventScroll: true }); }, controller: { readRoute: () => ({ key: location.pathname + location.search }) },
         descriptionText: '视频简介\n这是一段需要清晰阅读的中文简介。\n\n'.repeat(80)
       });
       window.descriptionPanels.open('description');
@@ -142,6 +142,25 @@ test('watch surface exposes data and restores recommendation identity after reor
   await page.evaluate(() => surface.scroll(200));
   assert.ok(await sheet.evaluate(node => node.scrollTop > 100), 'comment text scrolls independently of recommendation cards');
   assert.equal(await page.locator('#ytg-watch .recommendations').evaluate(node => node.scrollTop), 0);
+  await page.addStyleTag({ content: readFileSync(new URL('../src/ui/theme.css', import.meta.url), 'utf8') });
+  await page.evaluate(() => {
+    surface.panel.close();
+    document.documentElement.dataset.ytgInputMode = 'gamepad';
+    surface.feedback({ label: 'Playing', icon: 'play' }, 'playPause');
+  });
+  assert.equal(await page.locator('#ytg-watch').getAttribute('data-feedback'), 'playPause');
+  for (const dark of [false, true]) {
+    await page.evaluate(dark => document.documentElement.toggleAttribute('dark', dark), dark);
+    assert.equal(await page.locator('#ytg-watch .status svg').evaluate(node => getComputedStyle(node).color), 'rgb(255, 255, 255)');
+  }
+  await page.evaluate(() => {
+    document.documentElement.dataset.ytgInputMode = 'mouse';
+    surface.feedback({ label: 'Paused', icon: 'pause' }, 'playPause');
+  });
+  assert.equal(await page.locator('#ytg-watch').getAttribute('data-feedback'), null);
+  assert.equal(await page.locator('#ytg-watch .status').textContent(), '');
+  await page.evaluate(() => surface.feedback({ label: 'Volume 50%', level: 50 }, 'volumeUp'));
+  assert.equal(await page.locator('#ytg-watch').getAttribute('data-feedback'), 'volumeUp');
   await page.evaluate(() => { disposeSurface(); surface.page({ isWatch: true, recommendations: [] }, {}); surface.feedback({ label: 'late completion' }); });
   assert.equal(await page.locator('#ytg-watch').count(), 0);
   assert.equal(await page.evaluate(() => WatchSurfaceFixture.ui.openPanel('comments')), false);

@@ -4,6 +4,8 @@ import type { YT, YTNodes } from 'youtubei.js/web';
 import type { CommentSnapshot, CommentReplySnapshot } from '../../types/ports';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import { PAGE_COMMENTS } from '../bridge/page-protocol';
+import { commentLanguage } from '../shared/comment-language';
+import { nativeCommentTranslations, type NativeCommentTranslation } from './native-comment-translation';
 
 export interface CommentsSnapshot {
   route: string; items: CommentSnapshot[]; loading: boolean; failed: boolean; hasMore: boolean;
@@ -20,12 +22,18 @@ export function createCommentsService() {
   let pending: AbortController | undefined, destroyed = false, initialized = false, emptyPages = 0;
   let failedKey: string | undefined;
   const threads = new Map<string, ThreadState>();
+  const translations = new Map<string, NonNullable<CommentReplySnapshot['translation']>>();
+  const translationJobs = new Map<string, AbortController>();
+  const nativeTranslations = new Map<string, NativeCommentTranslation>();
   const route = () => location.pathname + location.search;
   function notify() { if (!destroyed) document.dispatchEvent(new Event(PAGE_COMMENTS)); }
   function syncRoute() {
     if (state.route === route()) return;
     pending?.abort(); pending = undefined; page = undefined; api = undefined;
     initialized = false; failedKey = undefined; emptyPages = 0; threads.clear();
+    for (const job of translationJobs.values()) job.abort();
+    translationJobs.clear(); translations.clear();
+    nativeTranslations.clear();
     state = { route: route(), items: [], loading: false, failed: false, hasMore: true };
   }
   async function send(continuation: string) {
@@ -38,6 +46,10 @@ export function createCommentsService() {
     const raw = await requestYouTube('next', { method: 'POST', credentials: 'same-origin', headers,
       body: JSON.stringify({ context, continuation }), signal: controller.signal });
     if (destroyed || captured !== state || captured.route !== route() || controller.signal.aborted) throw new Error('Comments cancelled');
+    for (const [key, entry] of nativeCommentTranslations(raw)) {
+      if (entry) nativeTranslations.set(key, entry);
+      else nativeTranslations.delete(key);
+    }
     return raw;
   }
   function client() {
@@ -69,9 +81,13 @@ export function createCommentsService() {
     state.items = [...threads].map(([key, entry]) => {
       const comment = entry.thread.comment;
       const replyCount = Number(comment?.reply_count?.replace(/,/g, ''));
-      const replies = [...entry.replies.values()].slice(0, Math.min(100, remainingReplies));
+      const replies = [...entry.replies.values()].slice(0, Math.min(100, remainingReplies))
+        .map(reply => ({ ...reply, ...(nativeTranslations.has(reply.key) ? { translationTarget: nativeTranslations.get(reply.key)!.language } : {}),
+          ...(translations.has(reply.key) ? { translation: translations.get(reply.key) } : {}) }));
       remainingReplies -= replies.length;
       return { key, author: String(comment?.author?.name || '').slice(0, 200),
+        ...(nativeTranslations.has(key) ? { translationTarget: nativeTranslations.get(key)!.language } : {}),
+        ...(translations.has(key) ? { translation: translations.get(key) } : {}),
         ...(comment?.author?.best_thumbnail?.url ? { avatar: comment.author.best_thumbnail.url.slice(0, 4096) } : {}),
         text: String(comment?.content?.toString() || '').slice(0, 4000),
         ...(Number.isSafeInteger(replyCount) && replyCount >= 0 ? { replyCount } : {}),
@@ -146,6 +162,44 @@ export function createCommentsService() {
     if (!hasReplies(threads.get(key)!)) return false;
     void request(key); return true;
   }
-  return { read() { syncRoute(); return { ...state }; }, more, replies, routeChanged: syncRoute,
-    destroy() { destroyed = true; pending?.abort(); pending = undefined; threads.clear(); api = undefined; page = undefined; } };
+  function translate(key: string, language: string) {
+    syncRoute();
+    const target = commentLanguage(language);
+    const native = nativeTranslations.get(key);
+    if (destroyed || !target || !native || native.language !== target) return false;
+    const item = state.items.find(item => item.key === key) || state.items.flatMap(item => item.replies).find(item => item.key === key);
+    if (!item) return false;
+    const cached = translations.get(key);
+    if (cached?.language === target && (cached.loading || cached.text)) return true;
+    translationJobs.get(key)?.abort();
+    const controller = new AbortController(), captured = state;
+    translationJobs.set(key, controller);
+    translations.set(key, { language: target, loading: true, failed: false }); snapshot();
+    void Promise.resolve().then(() => { if (captured === state && !destroyed) notify(); });
+    void (async () => {
+      try {
+        const context = (window as any).ytcfg?.get?.('INNERTUBE_CONTEXT');
+        if (!context?.client) throw new Error('YouTube context unavailable');
+        const headers = await createYouTubeHeaders(context);
+        const raw = await requestYouTube('comment/perform_comment_action', { method: 'POST', credentials: 'same-origin', headers,
+          body: JSON.stringify({ context, actions: [native.action] }), signal: controller.signal });
+        const mutations = raw.frameworkUpdates?.entityBatchUpdate?.mutations;
+        const translated = mutations?.find((mutation: any) => typeof mutation?.payload?.commentEntityPayload?.translatedContent?.content === 'string')
+          ?.payload.commentEntityPayload.translatedContent.content;
+        if (typeof translated !== 'string' || !translated.trim()) throw new Error('Translation unavailable');
+        if (captured === state && captured.route === route() && !controller.signal.aborted && !destroyed)
+          translations.set(key, { language: target, text: translated.slice(0, 8000), loading: false, failed: false });
+      } catch {
+        if (captured === state && !controller.signal.aborted && !destroyed)
+          translations.set(key, { language: target, loading: false, failed: true });
+      } finally {
+        if (translationJobs.get(key) === controller) translationJobs.delete(key);
+        if (captured === state && captured.route === route() && !controller.signal.aborted && !destroyed) { snapshot(); notify(); }
+      }
+    })();
+    return true;
+  }
+  return { read() { syncRoute(); return { ...state }; }, more, replies, translate, routeChanged: syncRoute,
+    destroy() { destroyed = true; pending?.abort(); pending = undefined; for (const job of translationJobs.values()) job.abort();
+      translationJobs.clear(); translations.clear(); nativeTranslations.clear(); threads.clear(); api = undefined; page = undefined; } };
 }

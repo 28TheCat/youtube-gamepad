@@ -8,6 +8,7 @@ import { createYouTubeFeedService } from '../sites/youtube-feed';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import { createWatchNextService } from '../sites/youtube-next';
 import { createCommentsService } from '../sites/youtube-comments';
+import { commentLanguage } from '../shared/comment-language';
 import { sidebarBrowseEndpoint } from '../shared/explore-pages';
 import { createWatchInfoService } from '../sites/youtube-watch-info';
 
@@ -36,7 +37,7 @@ export function startPageServer() {
     if (destroyed || serving) return;
     const request = parsePageMessage((event as CustomEvent).detail);
     if (!request || typeof request.id !== 'string' || request.id.length > 100 ||
-        !['readSidebar', 'readAccount', 'ping', 'readPlayerVideoId', 'readVideoDetails', 'readWatchInfo', 'watchAction', 'watchPlaylists', 'watchPlaylistToggle', 'showControls', 'hideControls', 'readBrowseCategories', 'requestBrowse', 'cancelBrowse', 'openBrowseVideo', 'openBrowseRoute', 'readWatchNext', 'moreWatchNext', 'readComments', 'moreComments', 'commentReplies'].includes(request.operation as string)) return;
+        !['readSidebar', 'readAccount', 'ping', 'readPlayerVideoId', 'readVideoDetails', 'readWatchInfo', 'watchAction', 'watchPlaylists', 'watchPlaylistToggle', 'showControls', 'hideControls', 'readBrowseCategories', 'requestBrowse', 'cancelBrowse', 'openBrowseVideo', 'openBrowseRoute', 'readWatchNext', 'moreWatchNext', 'readComments', 'moreComments', 'commentReplies', 'commentTranslate'].includes(request.operation as string)) return;
     const reply = (ok: boolean, value?: unknown) => {
       if (!destroyed) document.dispatchEvent(new CustomEvent(PAGE_RESPONSE, { detail: JSON.stringify({ version: 1,
         id: request.id, operation: request.operation, ok, value }) }));
@@ -50,8 +51,8 @@ export function startPageServer() {
     if (request.operation === 'readWatchInfo') { reply(true, watchInfoSnapshot(watchInfo.read())); return; }
     if (request.operation === 'readVideoDetails') { reply(true, videoDetails(watchInfo.read().details)); return; }
     if (request.operation === 'watchAction') {
-      if (!['like', 'dislike', 'subscribe'].includes(request.action as string)) return;
-      void watchInfo.act(request.action as 'like' | 'dislike' | 'subscribe').then(value => reply(true, value), () => reply(false)); return;
+      if (!['like', 'dislike', 'subscribe', 'unsubscribe', 'notificationsAll', 'notificationsPersonalized', 'notificationsNone'].includes(request.action as string)) return;
+      void watchInfo.act(request.action as 'like' | 'dislike' | 'subscribe' | 'unsubscribe' | 'notificationsAll' | 'notificationsPersonalized' | 'notificationsNone').then(value => reply(true, value), () => reply(false)); return;
     }
     if (request.operation === 'watchPlaylists') {
       void watchInfo.listPlaylists().then(value => reply(true, value), () => reply(false)); return;
@@ -68,6 +69,10 @@ export function startPageServer() {
       if (typeof request.key !== 'string' || request.key.length > 200) return;
       reply(true, comments.replies(request.key)); return;
     }
+    if (request.operation === 'commentTranslate') {
+      if (typeof request.key !== 'string' || !request.key || request.key.length > 200 || !commentLanguage(request.language)) return;
+      reply(true, comments.translate(request.key, request.language as string)); return;
+    }
     if (request.operation === 'openBrowseRoute') {
       try {
         const endpoint = sidebarBrowseEndpoint(request.href);
@@ -81,6 +86,13 @@ export function startPageServer() {
       const short = parseShortLink(request.href);
       if (short && short.href === request.href) {
         try {
+          const app = document.querySelector('ytd-app') as (HTMLElement & { navigate_?: (endpoint: object) => void }) | null;
+          if (location.pathname.startsWith('/shorts/')) {
+            if (typeof app?.navigate_ !== 'function') { reply(false); return; }
+            app.navigate_({ commandMetadata: { webCommandMetadata: { url: short.href, webPageType: 'WEB_PAGE_TYPE_SHORTS' } },
+              reelWatchEndpoint: { videoId: short.videoId } });
+            reply(true, true); return;
+          }
           // Shorts must start the native reel pipeline, including from our feed.
           location.assign(short.href);
           reply(true, true);

@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { useThumbnail } from './use-thumbnail';
+import VideoThumbnail from './VideoThumbnail.vue';
+import ChannelBadge from './ChannelBadge.vue';
+import ViewCountIcon from './ViewCountIcon.vue';
 import type { RecommendationSnapshot } from '../../types/ports';
 import { useI18n } from '../shared/use-i18n';
 const { t } = useI18n();
-const props = defineProps<{ item: RecommendationSnapshot; selected: boolean; focusId?: string }>();
+defineProps<{ item: RecommendationSnapshot; selected: boolean; focusId?: string }>();
 const emit = defineEmits<{ open: [key: string] }>();
-const { source, failed, imageError } = useThumbnail(() => props.item);
 </script>
 <template>
   <button class="card" :class="{ selected }" :data-video-id="item.key" :data-focus-id="focusId || `recommendation:${item.key}`" :aria-label="item.label" @click="emit('open', item.key)">
-    <div class="card-thumbnail"><img alt="" loading="lazy" :src="source || undefined" :style="{ visibility: failed ? 'hidden' : 'visible' }" @error="imageError" /><span v-if="item.duration" class="card-duration">{{ item.duration }}</span><span v-if="item.watchedPercent && !item.isPlaylist" class="card-watch-progress" aria-hidden="true"><span :style="{ width: `${item.watchedPercent}%` }"></span></span></div>
-    <div class="card-title">{{ item.label }}</div><div v-if="item.queue" class="card-meta">{{ t('Playlists') }}</div><div class="card-meta">{{ item.channel }}</div><div v-if="item.metadata" class="card-meta">{{ item.metadata }}</div>
+    <VideoThumbnail class="card-thumbnail" :item="item" />
+    <div class="card-title">{{ item.label }}</div><div v-if="item.queue" class="card-meta">{{ t('Playlists') }}</div>
+    <div class="card-metadata-row">
+      <span class="card-meta card-channel">{{ item.channel }}<ChannelBadge :badge="item.channelBadge" /></span>
+      <span v-if="item.metadata" class="card-meta card-stats"><ViewCountIcon v-if="item.viewCount" />{{ item.metadata }}</span>
+    </div>
   </button>
 </template>

@@ -1,0 +1,10 @@
+/* Shared action appearance; each player supplies state and commands. */
+:host .media-action.control,
+:host-context(html) .toolbar .cluster .control.media-action,
+:host .rail button.media-action{display:inline-flex;align-items:center;justify-content:center;flex:none;width:40px;min-width:40px;height:40px;min-height:40px;padding:9px;border:0;border-radius:50%;background:var(--ytg-surface,#272727);color:var(--ytg-text,#f6f6f6);cursor:pointer;box-shadow:none;scale:1}
+:host .media-action.control svg,:host .rail button.media-action svg{width:22px;height:22px;padding:0;border-radius:0;background:transparent;color:inherit}
+:host .media-action.control:hover{background:var(--ytg-overlay-subtle,#444)}
+:host .media-action.control[aria-pressed=true]{background:var(--ytg-text,#f1f1f1);color:var(--ytg-background,#111)}
+:host .media-action.control:disabled{opacity:.4;cursor:default}
+:host .media-action.control:is(:focus-visible,.selected,[data-selected]){outline:3px solid var(--ytg-focus-color,#fff);outline-offset:4px}
+:host .drawer-body .media-action.control{width:100%;justify-content:flex-start;border-radius:12px;padding-inline:16px;margin-top:12px}

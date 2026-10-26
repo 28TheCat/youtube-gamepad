@@ -21,16 +21,16 @@ function fixture(handler) {
       calls.push({ url, body: JSON.parse(init.body), headers: init.headers, signal: init.signal });
       return { ok: true, json: async () => handler ? await handler(calls.length) : guideData() };
     } };
-  vm.runInNewContext(code, sandbox);
+  vm.runInNewContext(code, Object.assign(sandbox, { Headers, Request, Response }));
   return { calls, settings, service: sandbox.SidebarFixture.createSidebarService(), advance() { now += 61000; } };
 }
 
 test('sidebar guide uses the selected page account and parses nested entries without DOM reads', async () => {
   const s = fixture(); const value = await s.service.read();
   assert.equal(s.calls[0].url, '/youtubei/v1/guide');
-  assert.equal(s.calls[0].headers['X-Goog-AuthUser'], '2');
-  assert.equal(s.calls[0].headers['X-Goog-PageId'], 'brand');
-  assert.match(s.calls[0].headers.Authorization, /^SAPISIDHASH /);
+  assert.equal(s.calls[0].headers['x-goog-authuser'], '2');
+  assert.equal(s.calls[0].headers['x-goog-pageid'], 'brand');
+  assert.match(s.calls[0].headers.authorization, /^SAPISIDHASH /);
   assert.deepEqual(Array.from(value.explore, item => item.label), ['Musique régionale', 'Games']);
   assert.equal(value.personal.find(item => item.id === 'videos').href, 'https://studio.youtube.com/channel/UCcreator/videos');
   assert.equal(JSON.stringify(value).includes('navigationEndpoint'), false);
@@ -77,7 +77,7 @@ test('account changes reject stale guide results and load the current identity',
   s.settings.SESSION_INDEX = 3;
   const second = s.service.read(); release(guideData());
   await assert.rejects(first, /cancelled/); assert.equal((await second).explore.length, 2);
-  assert.equal(s.calls[1].headers['X-Goog-AuthUser'], '3'); s.service.destroy();
+  assert.equal(s.calls[1].headers['x-goog-authuser'], '3'); s.service.destroy();
 });
 
 test('destroy aborts pending guide requests and refuses new requests', async () => {
