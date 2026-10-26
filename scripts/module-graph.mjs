@@ -1,0 +1,51 @@
+// Compatibility dependencies for legacy VM/DOM fixtures only. Production
+// dependencies are declared by source imports and resolved by Vite.
+// Site and view instances are connected by coordinator; they do not import each other.
+export const dependencies = {
+  'src/shared/playback-layout.ts': [],
+  'src/ui/ui-api.ts': [],
+  'src/shared/watch-link.ts': [],
+  'src/bridge/page-protocol.ts': ['src/shared/watch-link.ts'],
+  'src/shared/page-dom.ts': [],
+  'src/shared/actions.ts': [],
+  'src/playback/seek.ts': [],
+  'src/playback/shorts.ts': ['src/shared/shorts-route.ts'],
+  'src/input/bindings.ts': ['src/shared/actions.ts'],
+  'src/shared/runtime.ts': [],
+  'src/diagnostics/diagnostics.ts': ['src/shared/runtime.ts'],
+  'src/diagnostics/diagnostics-store.ts': [],
+  'src/app/route-state.ts': [],
+  'src/app/state-machine.ts': ['src/app/route-state.ts'],
+  'src/app/route-controller.ts': ['src/shared/runtime.ts', 'src/app/state-machine.ts'],
+  'src/input/controller-style.ts': ['src/shared/runtime.ts', 'src/ui/styles.ts', 'src/input/bindings.ts'],
+  'src/input/gamepad.ts': ['src/shared/runtime.ts', 'src/input/controller-style.ts'],
+  'src/navigation/navigation.ts': [],
+  'src/navigation/focus.ts': [],
+  'src/navigation/stick-scroll.ts': [],
+  'src/navigation/core.ts': ['src/shared/page-dom.ts', 'src/navigation/stick-scroll.ts', 'src/shared/runtime.ts', 'src/input/controller-style.ts', 'src/app/state-machine.ts', 'src/navigation/navigation.ts', 'src/navigation/focus.ts'],
+  'src/search/keyboard.ts': [],
+  'src/search/pinyin-data.ts': [],
+  'src/search/pinyin.ts': ['src/search/pinyin-data.ts'],
+  'src/ui/styles.ts': [],
+  'src/search/search-text.ts': [],
+  'src/search/search-model.ts': ['src/search/search-text.ts'],
+  'src/search/mount-search.ts': [],
+  'src/search/search.ts': ['src/input/controller-style.ts', 'src/search/keyboard.ts', 'src/search/pinyin.ts', 'src/app/state-machine.ts', 'src/search/search-model.ts', 'src/search/mount-search.ts'],
+  'src/ui/menu.ts': ['src/ui/ui-api.ts', 'src/navigation/stick-scroll.ts', 'src/shared/runtime.ts', 'src/ui/styles.ts', 'src/search/search.ts', 'src/navigation/focus.ts', 'src/app/state-machine.ts', 'src/input/controller-style.ts'],
+  'src/ui/watch-view.ts': ['src/input/controller-style.ts', 'src/ui/styles.ts'],
+  'src/ui/mount-watch-panel.ts': [],
+  'src/ui/watch-panels.ts': ['src/input/controller-style.ts', 'src/ui/mount-watch-panel.ts'],
+  'src/ui/playback-presentation.ts': [],
+  'src/ui/watch-surface.ts': ['src/ui/ui-api.ts', 'src/navigation/stick-scroll.ts', 'src/ui/playback-presentation.ts'],
+  'src/playback/watch.ts': ['src/shared/runtime.ts', 'src/app/state-machine.ts', 'src/ui/watch-view.ts', 'src/ui/watch-panels.ts', 'src/navigation/focus.ts', 'src/ui/watch-surface.ts'],
+  'src/app/browse.ts': ['src/shared/runtime.ts'],
+  'src/sites/youtube.ts': ['src/shared/explore-pages.ts', 'src/shared/page-dom.ts', 'src/bridge/page-protocol.ts', 'src/shared/actions.ts', 'src/playback/seek.ts', 'src/shared/runtime.ts', 'src/navigation/focus.ts'],
+  'src/app/coordinator.ts': ['src/shared/playback-layout.ts', 'src/playback/shorts.ts', 'src/input/bindings.ts', 'src/diagnostics/diagnostics.ts', 'src/shared/runtime.ts', 'src/app/route-controller.ts', 'src/navigation/core.ts', 'src/sites/youtube.ts'],
+  'src/app/content.ts': ['src/shared/playback-layout.ts', 'src/ui/ui-api.ts', 'src/input/bindings.ts'],
+  'src/settings/inline-settings.ts': ['src/input/bindings.ts', 'src/diagnostics/diagnostics-store.ts'],
+  'src/background/background.ts': ['src/diagnostics/diagnostics-store.ts']
+};
+// Full extension assembly requires these definitions; small VM policy tests can
+// provide module doubles instead of rendering every feature.
+export const compositionModules = ['src/navigation/focus.ts', 'src/input/controller-style.ts', 'src/input/gamepad.ts',
+  'src/ui/menu.ts', 'src/playback/watch.ts', 'src/app/browse.ts', 'src/ui/styles.ts', 'src/search/keyboard.ts', 'src/search/pinyin.ts'];

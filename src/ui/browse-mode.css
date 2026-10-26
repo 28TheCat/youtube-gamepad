@@ -1,0 +1,17 @@
+.ytg-mode-switch{position:relative;display:inline-flex;flex:none;align-items:center;justify-content:center;gap:10px;box-sizing:border-box;min-height:48px;margin:0;padding:6px 8px;border:0;border-radius:8px;background:transparent;color:var(--ytg-muted,#606060);font:600 15px/1.2 var(--ytg-font-family,Roboto,Arial,sans-serif);cursor:pointer}
+.ytg-mode-switch .ytg-mode-track{position:relative;display:block;flex:none;width:44px;height:26px;border-radius:999px;background:var(--ytg-muted,#606060);box-shadow:inset 0 0 0 1px #00000012}
+.ytg-mode-switch .ytg-mode-thumb{position:absolute;left:3px;top:3px;display:block;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0003;transform:translateX(0)}
+.ytg-mode-switch[aria-checked=true]{color:var(--ytg-text,#171717)}
+.ytg-mode-switch[aria-checked=true] .ytg-mode-track{background:var(--ytg-selected-background,#171717)}
+.ytg-mode-switch[aria-checked=true] .ytg-mode-thumb{transform:translateX(18px);background:var(--ytg-selected-text,#fff)}
+.ytg-mode-switch:is(:focus-visible,.ytg-selected){outline:var(--ytg-focus-width,6px) solid var(--ytg-focus-color,#000);outline-offset:2px}
+.ytg-mode-switch:disabled{opacity:.6;cursor:wait}
+.ytg-mode-state{min-width:3em;text-align:center;font-size:12px;color:var(--ytg-muted,#606060)}
+.ytg-mode-key{display:inline-block;flex:none;width:32px;min-width:32px;height:32px;text-align:center;line-height:32px;opacity:0}
+:host-context(html.ytg-gamepad-input) .ytg-mode-key{display:inline-block;opacity:0}
+:host-context(html.ytg-gamepad-input) .ytg-mode-switch:is(:focus,.ytg-selected) .ytg-mode-key{opacity:1}
+:host-context(html.ytg-gamepad-input) .ytg-mode-switch:is(:focus,.ytg-selected){background:var(--ytg-client-active,#e8eef8);outline-width:var(--ytg-focus-width,6px)}
+.ytg-mode-error{position:absolute;top:100%;right:0;padding:6px 10px;border-radius:8px;background:var(--ytg-client-surface,#fff);color:var(--ytg-text,#171717);font:14px var(--ytg-font-family,Roboto,Arial,sans-serif)}
+@media(prefers-reduced-motion:no-preference){.ytg-mode-thumb{transition:transform 160ms ease}.ytg-mode-track{transition:background-color 160ms ease}}
+@media(max-width:700px){.ytg-mode-switch{gap:6px;padding-inline:4px;font-size:13px}}
+@media(max-width:700px){.ytg-mode-switch :is(.ytg-mode-label,.ytg-mode-state,.ytg-mode-key){display:none}}

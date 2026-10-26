@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/entries/popup.ts",
+    "src/entries/options.ts",
+    "src/popup/**/*.ts",
+    "src/popup/**/*.vue",
+    "src/settings/**/*.ts",
+    "src/settings/**/*.vue",
+    "src/shared/settings.ts",
+    "src/shared/page-appearance.ts",
+    "types/**/*.d.ts"
+  ]
+}

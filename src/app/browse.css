@@ -1,0 +1,44 @@
+/* Keep the native browse roots hidden for the entire custom-surface lifetime.
+   Leave their DOM intact for native playback and page navigation.
+   This manifest stylesheet applies to late/replaced roots before they paint. */
+html.ytg-custom-browse:not([data-ytg-native]) :is(ytd-page-manager,ytd-guide-renderer,ytd-mini-guide-renderer,tp-yt-app-drawer#guide){
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+html.ytg-custom-browse.ytg-api-categories :is(ytd-feed-filter-chip-bar-renderer,#chips-wrapper,yt-chip-cloud-chip-renderer){visibility:hidden!important;pointer-events:none!important}
+
+/* A video card's DOM focus can land on its title link while the overlay
+   highlights its thumbnail. Suppress the second focus ring only for the
+   selected card during gamepad input; keyboard focus keeps its native ring. */
+html.ytg-gamepad-input :is(ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model).ytg-selected :is(:focus,:focus-visible),
+html.ytg-gamepad-input #ytg-browse-grid a[data-browse-id]:is(:focus,:focus-visible){
+  outline:none!important;
+  box-shadow:none!important;
+}
+
+/* Keep native title typography, reducing only its size while adaptation is active. */
+html.ytg-browse:not([data-ytg-native]) :is(#video-title,#video-title-link){
+  font-size:14px!important;
+}
+html.ytg-browse:not([data-ytg-native]) :is(a#thumbnail,.yt-lockup-view-model__content-image){
+  border-radius:var(--ytg-card-radius)!important;
+}
+
+/* Emphasize the thumbnail without moving the native navigation geometry. */
+html.ytg-browse.ytg-gamepad-input:not([data-ytg-native]) .ytg-selected :is(a#thumbnail,.yt-lockup-view-model__content-image){
+  box-shadow:var(--ytg-shadow-focus);
+  outline:var(--ytg-focus-width) solid var(--ytg-focus-color);
+  outline-offset:var(--ytg-focus-offset);
+}
+@media(prefers-reduced-motion:no-preference){
+  html.ytg-browse:not([data-ytg-native]) :is(a#thumbnail,.yt-lockup-view-model__content-image){transition:box-shadow var(--ytg-focus-duration) var(--ytg-focus-easing)}
+}
+
+/* Browse and non-immersive watch pages share our banner; retain native actions. */
+/* Keep the shared header geometry while preventing focus on hidden controls. */
+html:is(.ytg-browse-header,.ytg-custom-browse):not([data-ytg-native]) ytd-masthead{display:block!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important}
+html.ytg-browse-header[data-ytg-browse-mode="youtube"] ytd-app{--ytd-masthead-height:56px;--ytd-toolbar-height:56px}
+/* The account overlay owns scrolling until it closes. Lock both native roots
+   here because the overlay stylesheet lives inside the browse ShadowRoot. */
+html.ytg-account-open,html.ytg-account-open body{overflow:hidden!important}

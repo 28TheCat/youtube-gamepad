@@ -1,0 +1,15 @@
+.category-settings{margin-top:24px;color:var(--ytg-text);font:inherit}
+.category-settings .category-settings-heading{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.category-settings h3{margin:0;font-size:18px}.category-settings p{margin:8px 0;color:var(--ytg-muted);font-size:14px;line-height:1.6}
+.category-settings ol{list-style:none;padding:0;margin:16px 0;display:flex;flex-direction:column;gap:8px}
+.category-settings li{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;border:1px solid var(--ytg-border);border-radius:14px;background:var(--ytg-background)}
+.category-settings li[data-visible=true]{background:var(--ytg-surface);border-color:var(--ytg-border)}
+.category-settings .category-label{flex:1;min-width:80px}.category-settings .category-drag{cursor:grab;font-size:24px;color:var(--ytg-muted)}
+.category-settings .category-actions{display:flex;gap:8px;align-items:center;margin-left:auto}
+.category-settings button{font:inherit;font-size:14px;border:1px solid var(--ytg-border);border-radius:8px;background:var(--ytg-background);color:var(--ytg-text);padding:8px 12px;cursor:pointer;min-height:40px;margin:0}
+.category-settings button:disabled{opacity:.45;cursor:default}.category-settings button:focus-visible{outline:3px solid var(--ytg-text);outline-offset:2px}
+.category-settings .category-toggle{display:flex;gap:12px;align-items:center;border-color:transparent;background:transparent}
+.category-settings .category-switch{width:40px;height:24px;border-radius:20px;background:var(--ytg-border);position:relative;flex-shrink:0}
+.category-settings .category-switch::before{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff}
+.category-settings [aria-checked=true] .category-switch{background:var(--ytg-selected-background)}.category-settings [aria-checked=true] .category-switch::before{left:19px;background:var(--ytg-selected-text)}
+@media(max-width:480px){.category-settings li{padding:10px;gap:6px}.category-settings .category-actions{gap:4px}.category-settings button{padding:8px}}

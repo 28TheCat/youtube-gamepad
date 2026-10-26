@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Preserve controller artwork bytes used by SHA-256 checks and embedded styles.
+assets/controller/*.svg -text
+src/ui/styles.js text eol=lf

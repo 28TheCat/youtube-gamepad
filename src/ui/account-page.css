@@ -1,0 +1,25 @@
+#ytg-account-page{position:fixed;inset:0;z-index:2200;overflow:auto;overscroll-behavior:contain;background:var(--ytg-client-background);color:var(--ytg-text);pointer-events:auto;scroll-padding:24px}
+.account-layout{max-width:1180px;margin:auto;padding:28px 48px 64px}
+.account-toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:56px}
+#ytg-account-page button{font:inherit;color:inherit;cursor:pointer;border:0}
+.account-toolbar button{display:flex;align-items:center;gap:12px;border-radius:999px;padding:12px 20px;background:var(--ytg-client-surface)}
+.account-toolbar svg,.account-chevron{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8}
+.account-brand{font-size:18px;font-weight:700}.account-brand span{color:var(--ytg-muted);font-weight:400}
+.account-eyebrow{font-size:13px;color:var(--ytg-muted)}
+.account-heading{margin-bottom:32px}.account-heading h1{font-size:clamp(30px,4vw,46px);line-height:1.2;letter-spacing:-1px;margin:8px 0 12px}.account-heading p{margin:0;color:var(--ytg-muted);font-size:16px;font-weight:400}
+.account-columns{display:grid;grid-template-columns:300px minmax(0,1fr);align-items:start;gap:32px}
+.account-profile{position:sticky;top:24px;padding:32px 24px;background:var(--ytg-client-surface);border:1px solid var(--ytg-border);border-radius:20px;overflow-wrap:anywhere}
+.account-profile>img,.account-avatar-fallback{width:88px;height:88px;border-radius:50%;object-fit:cover;margin-bottom:24px}.account-avatar-fallback{padding:18px;background:var(--ytg-surface);fill:none;stroke:currentColor;stroke-width:1.4}
+.account-profile h2{font-size:24px;margin:0 0 8px}.account-profile p{font-size:15px;color:var(--ytg-muted);margin:0 0 24px;font-weight:400}
+.account-profile-note{display:block;border-top:1px solid var(--ytg-border);margin-top:28px;padding-top:20px;color:var(--ytg-muted);font-size:13px;font-weight:400}
+.account-options{display:grid;gap:16px;min-width:0}.account-group{border:1px solid var(--ytg-border);border-radius:16px;padding:8px;background:var(--ytg-client-surface)}
+.account-group button{display:flex;align-items:center;gap:18px;min-height:60px;width:100%;padding:16px;border-radius:10px;text-align:left;background:transparent;scroll-margin:24px;font-size:16px;font-weight:400}
+.account-group button>span{flex:1;overflow-wrap:anywhere}.account-chevron{width:18px;height:18px;flex:none;color:var(--ytg-muted)}
+#ytg-account-page button:is(:focus-visible,.ytg-selected){outline:var(--ytg-focus-width,6px) solid var(--ytg-focus-color);outline-offset:2px;background:var(--ytg-surface)}
+.account-empty{padding:32px;border:1px solid var(--ytg-border);border-radius:16px;background:var(--ytg-client-surface);font-weight:400}.account-empty button{padding:12px 20px;border-radius:12px;background:var(--ytg-surface)}
+@media(hover:hover){#ytg-account-page button:hover{background:var(--ytg-surface)}}
+@media(max-width:760px){.account-layout{padding:20px 20px 40px}.account-toolbar{margin-bottom:32px}.account-columns{grid-template-columns:1fr;gap:20px}.account-profile{position:static;padding:24px}.account-profile>img,.account-avatar-fallback{width:64px;height:64px;margin-bottom:16px}.account-profile-note{display:none}.account-heading{margin-bottom:24px}.account-group button{min-height:56px;gap:14px}.account-brand{font-size:14px}}
+@media(prefers-reduced-motion:no-preference){.account-group button{transition:background 120ms ease}}
+
+
+.account-list-item{display:flex;align-items:center;gap:16px;padding:16px;overflow-wrap:anywhere}.account-list-item>img{width:40px;height:40px;object-fit:cover;border-radius:50%;flex:none}.account-list-item>span:first-of-type{flex:1;min-width:0}.account-list-item strong,.account-list-item small{display:block}.account-list-item small,.account-current{font-size:13px;color:var(--ytg-muted);font-weight:400}.account-list-item.is-current{background:var(--ytg-surface);border-radius:10px}@media(max-width:760px){.account-list-item{flex-wrap:wrap}.account-current{margin-left:auto}}

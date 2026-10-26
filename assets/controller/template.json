@@ -1,0 +1,11 @@
+{
+  "author": "nicefrog",
+  "license": "CC0-1.0",
+  "source": "https://opengameart.org/content/generic-gamepad-template",
+  "files": {
+    "assets/controller/layout.svg": {
+      "source": "https://opengameart.org/sites/default/files/controller.svg",
+      "sha256": "e0b85afa473c335bd1185a65ad45f51ffaa1f57098183bef3c05ee181bcdb6e6"
+    }
+  }
+}
