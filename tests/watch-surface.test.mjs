@@ -214,6 +214,9 @@ test('watch surface exposes data and restores recommendation identity after reor
   assert.equal(initial.controls.some(target => ['seekBack', 'playPause', 'seekForward'].includes(target.id)), false, 'windowed navigation omits the hidden transport controls');
   assert.equal(initial.controls.find(target => target.id === 'fullscreen').available, true);
   assert.equal(initial.controls.find(target => target.id === 'goLive').available, false);
+  assert.deepEqual(await page.evaluate(() => surface.items('controls').map(item => item.itemKey)),
+    initial.controls.filter(target => target.available).map(target => target.itemKey),
+    'focus restoration uses the same visible control order as directional selection');
   assert.deepEqual(Object.keys(initial.recommendations[0]).sort(), ['available', 'id', 'index', 'itemKey', 'region']);
   await page.evaluate(() => { setPlayback(true); setPage(['a', 'b']); surface.focus(originalTarget, false, 'controls'); });
   assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement.dataset.videoId), 'b');
