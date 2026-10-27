@@ -1,14 +1,15 @@
-import { createYouTubeHeaders, requestYouTube } from './youtube-request';
-import { Innertube, Session, Parser } from 'youtubei.js/web';
+import { createYouTubeHeaders, requestYouTube, mutateYouTube } from './youtube-request';
+import { Innertube, Parser } from 'youtubei.js/web';
+import { createYouTubeSession } from './youtube-session';
 import type { YT, YTNodes } from 'youtubei.js/web';
-import type { CommentSnapshot, CommentReplySnapshot } from '../../types/ports';
+import type { CommentSnapshot, CommentReplySnapshot, CommentsStatus } from '../../types/ports';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import { PAGE_COMMENTS } from '../bridge/page-protocol';
 import { commentLanguage } from '../shared/comment-language';
 import { nativeCommentTranslations, type NativeCommentTranslation } from './native-comment-translation';
 
-export interface CommentsSnapshot {
-  route: string; items: CommentSnapshot[]; loading: boolean; failed: boolean; hasMore: boolean;
+export interface CommentsSnapshot extends CommentsStatus {
+  route: string; items: CommentSnapshot[];
 }
 type ReplyCursor = { replies?: Iterable<YTNodes.CommentThread>; has_continuation: boolean;
   getContinuation(): Promise<ReplyCursor> };
@@ -21,6 +22,9 @@ export function createCommentsService() {
   let page: YT.Comments | undefined, api: Innertube | undefined;
   let pending: AbortController | undefined, destroyed = false, initialized = false, emptyPages = 0;
   let failedKey: string | undefined;
+  let sort: 'TOP_COMMENTS' | 'NEWEST_FIRST' = 'TOP_COMMENTS', posting = false;
+  let writeController: AbortController | undefined;
+  const signedIn = () => (window as any).ytcfg?.get?.('LOGGED_IN') === true;
   const threads = new Map<string, ThreadState>();
   const translations = new Map<string, NonNullable<CommentReplySnapshot['translation']>>();
   const translationJobs = new Map<string, AbortController>();
@@ -31,6 +35,7 @@ export function createCommentsService() {
     if (state.route === route()) return;
     pending?.abort(); pending = undefined; page = undefined; api = undefined;
     initialized = false; failedKey = undefined; emptyPages = 0; threads.clear();
+    writeController?.abort(); writeController = undefined; posting = false; sort = 'TOP_COMMENTS';
     for (const job of translationJobs.values()) job.abort();
     translationJobs.clear(); translations.clear();
     nativeTranslations.clear();
@@ -56,15 +61,27 @@ export function createCommentsService() {
     if (api) return api;
     const context = (window as any).ytcfg?.get?.('INNERTUBE_CONTEXT');
     if (!context?.client) throw new Error('YouTube context unavailable');
-    const session = new Session(structuredClone({ ...context, user: context.user || {} }), '', 'v1', 0,
-      undefined, undefined, undefined, async () => {
-        throw new Error('Unexpected network request from comments parser');
-      });
+    const session = createYouTubeSession(context, async () => {
+      throw new Error('Unexpected network request from comments parser');
+    });
     // Keep the library's comment/reply cursors and initial token generation,
     // but connect their actions directly to our JSON transport. No synthetic
     // fetch, request-body round trip or Response serialization is needed.
     session.actions.execute = (async (endpoint: string, args?: Record<string, any>) => {
-      if (!['next', '/next'].includes(endpoint) || args?.protobuf || args?.override_endpoint) throw new Error('Unexpected comments request');
+      const path = endpoint.replace(/^\//, '');
+      if (args?.protobuf || args?.override_endpoint) throw new Error('Unexpected comments request');
+      if (['comment/create_comment', 'comment/create_comment_reply'].includes(path)) {
+        if (!posting || !writeController || !signedIn()) throw new Error('Comment submission unavailable');
+        const controller = writeController, captured = state;
+        const context = (window as any).ytcfg?.get?.('INNERTUBE_CONTEXT');
+        const { parse: _parse, ...payload } = args || {};
+        const headers = await createYouTubeHeaders(context);
+        if (destroyed || captured !== state || captured.route !== route() || controller.signal.aborted) throw new Error('Comment submission cancelled');
+        const raw = await mutateYouTube(path, { method: 'POST', credentials: 'same-origin', headers,
+          body: JSON.stringify({ ...payload, context }), signal: controller.signal });
+        return { success: true, status_code: 200, data: raw };
+      }
+      if (path !== 'next') throw new Error('Unexpected comments request');
       const continuation = args?.continuation || args?.token;
       if (typeof continuation !== 'string' || !continuation || continuation.length > 50000) throw new Error('Invalid comments continuation');
       const raw = await send(continuation);
@@ -76,6 +93,10 @@ export function createCommentsService() {
     if (entry.replies.size >= 100 || [...threads.values()].reduce((total, item) => total + item.replies.size, 0) >= 200) return false;
     return entry.cursor ? entry.cursor.has_continuation : entry.thread.has_replies;
   }
+  function canReply(entry: ThreadState) {
+    const dialog = entry.thread.comment?.reply_command?.dialog as YTNodes.CommentReplyDialog | undefined;
+    return signedIn() && !!dialog?.reply_button?.endpoint;
+  }
   function snapshot() {
     let remainingReplies = 200;
     state.items = [...threads].map(([key, entry]) => {
@@ -85,7 +106,7 @@ export function createCommentsService() {
         .map(reply => ({ ...reply, ...(nativeTranslations.has(reply.key) ? { translationTarget: nativeTranslations.get(reply.key)!.language } : {}),
           ...(translations.has(reply.key) ? { translation: translations.get(reply.key) } : {}) }));
       remainingReplies -= replies.length;
-      return { key, author: String(comment?.author?.name || '').slice(0, 200),
+      return { key, ...(canReply(entry) ? { canReply: true } : {}), author: String(comment?.author?.name || '').slice(0, 200),
         ...(nativeTranslations.has(key) ? { translationTarget: nativeTranslations.get(key)!.language } : {}),
         ...(translations.has(key) ? { translation: translations.get(key) } : {}),
         ...(comment?.author?.best_thumbnail?.url ? { avatar: comment.author.best_thumbnail.url.slice(0, 4096) } : {}),
@@ -124,7 +145,7 @@ export function createCommentsService() {
       } else {
         const target = parseWatchLink(captured.route) || parseShortLink(captured.route);
         if (!target) return;
-        const next = page ? await page.getContinuation() : await client().getComments(target.videoId);
+        const next = page ? await page.getContinuation() : await client().getComments(target.videoId, sort);
         if (captured !== state || captured.route !== route() || controller.signal.aborted || destroyed) return;
         const before = threads.size;
         for (const thread of next.contents) {
@@ -161,6 +182,34 @@ export function createCommentsService() {
     if (pending) return true;
     if (!hasReplies(threads.get(key)!)) return false;
     void request(key); return true;
+  }
+  function interaction() {
+    return { signedIn: signedIn(), canPost: signedIn() && !!(page?.header?.create_renderer as any)?.submit_button?.endpoint,
+      sort, sortAvailable: initialized, posting };
+  }
+  function changeSort(value: 'TOP_COMMENTS' | 'NEWEST_FIRST') {
+    syncRoute();
+    if (destroyed || posting || pending || !initialized || !['TOP_COMMENTS', 'NEWEST_FIRST'].includes(value)) return false;
+    if (sort === value) return true;
+    sort = value; page = undefined; initialized = false; failedKey = undefined; emptyPages = 0;
+    threads.clear(); state.items = []; state.hasMore = true;
+    void request(); return true;
+  }
+  async function post(text: string, key?: string) {
+    syncRoute();
+    if (destroyed || posting || pending || !signedIn() || typeof text !== 'string' || !text.trim() || text.length > 4000) return false;
+    const entry = key ? threads.get(key) : undefined;
+    if (key ? !entry || !canReply(entry) : !interaction().canPost) return false;
+    const captured = state, controller = new AbortController();
+    posting = true; writeController = controller; notify();
+    try {
+      const result = key ? await entry!.thread.comment!.reply(text.trim()) : await page!.createComment(text.trim());
+      if (destroyed || captured !== state || captured.route !== route() || controller.signal.aborted || !result.success) return false;
+      // Refresh through the server rather than inventing an author or comment ID.
+      page = undefined; initialized = false; threads.clear(); state.items = []; state.hasMore = true;
+      void request(); return true;
+    } catch { return false; }
+    finally { if (writeController === controller) { writeController = undefined; posting = false; notify(); } }
   }
   function translate(key: string, language: string) {
     syncRoute();
@@ -199,7 +248,7 @@ export function createCommentsService() {
     })();
     return true;
   }
-  return { read() { syncRoute(); return { ...state }; }, more, replies, translate, routeChanged: syncRoute,
-    destroy() { destroyed = true; pending?.abort(); pending = undefined; for (const job of translationJobs.values()) job.abort();
+  return { read() { syncRoute(); return { ...state, interaction: interaction() }; }, more, replies, translate, post, changeSort, routeChanged: syncRoute,
+    destroy() { destroyed = true; pending?.abort(); writeController?.abort(); pending = undefined; for (const job of translationJobs.values()) job.abort();
       translationJobs.clear(); translations.clear(); nativeTranslations.clear(); threads.clear(); api = undefined; page = undefined; } };
 }

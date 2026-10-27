@@ -10,8 +10,7 @@
 /* Native roots are hidden by the manifest's browse.css; retain their source DOM. */
 #ytg-browse-top{position:fixed;inset:0 0 auto;height:var(--ytg-client-header);display:flex;align-items:center;padding:0 32px;box-sizing:border-box;background:var(--ytg-client-surface);border-bottom:1px solid var(--ytg-border);z-index:2101}
 #ytg-browse-top .client-brand{display:flex;align-items:center;gap:12px;flex:none;min-height:48px;padding:8px 4px;background:transparent;border:0;color:var(--ytg-text);font:700 23px/1.1 var(--ytg-font-family);cursor:pointer;border-radius:var(--ytg-button-radius)}
-.client-brand svg{flex:none;fill:var(--ytg-brand-color)}
-.client-brand svg path{fill:#fff}
+.client-brand .youtube-brand-icon{flex:none;object-fit:contain}
 .client-brand span{display:flex;align-items:baseline;gap:8px;letter-spacing:-.5px}
 .client-brand small{text-transform:uppercase;color:var(--ytg-muted)}
 #ytg-client-search{flex:1;margin:auto;min-width:0}
@@ -105,18 +104,31 @@ html[dark] #ytg-browse-grid .card-cover{box-shadow:inset 0 0 0 1px #ffffff0a}
 #ytg-browse-sidebar .sidebar-group{display:grid;grid-template-rows:1fr;opacity:1;visibility:visible}
 #ytg-browse-sidebar .sidebar-group[data-open=false]{grid-template-rows:0fr;opacity:0;visibility:hidden}
 #ytg-browse-sidebar .sidebar-group-content{min-height:0;overflow:hidden}
-#ytg-browse-grid .feed-skeletons{display:grid;gap:32px 24px;margin-top:16px}
-#ytg-browse-grid .feed-skeleton>div{aspect-ratio:16/9;border-radius:var(--ytg-card-radius);background:var(--ytg-surface)}
-#ytg-browse-grid .feed-skeleton>span{display:block;width:85%;height:18px;margin-top:14px;border-radius:4px;background:var(--ytg-surface)}
-#ytg-browse-grid .feed-skeleton>span:last-child{width:50%;height:14px;margin-top:8px}
+#ytg-browse-grid .feed-loading-status{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+#ytg-browse-grid .feed-skeleton{display:flex;flex-direction:column;min-width:0;align-self:start;pointer-events:none}
+#ytg-browse-grid .skeleton-block{display:block;background:var(--ytg-surface);border-radius:4px}
+#ytg-browse-grid .feed-skeleton .card-cover{border-radius:var(--ytg-card-radius)}
+#ytg-browse-grid .feed-skeleton .card-channel-avatar{border-radius:50%}
+#ytg-browse-grid .skeleton-title{width:90%;height:16px;margin:3px 0 6px}
+#ytg-browse-grid .skeleton-title+.skeleton-title{width:65%}
+#ytg-browse-grid .skeleton-author{width:50%;height:14px;margin:6px 0}
+#ytg-browse-grid .skeleton-meta{width:75%;height:14px}
+#ytg-browse-grid .cards[data-horizontal=true] .feed-skeleton{flex-direction:row;align-items:start;gap:20px}
+#ytg-browse-grid .cards[data-horizontal=true] .feed-skeleton .card-cover{width:0;min-width:0;flex:var(--ytg-cover-flex,40) 1 0}
+#ytg-browse-grid .cards[data-horizontal=true] .feed-skeleton .card-copy{flex:var(--ytg-info-flex,60) 1 0;margin-top:0}
 @media(prefers-reduced-motion:no-preference){
   #ytg-browse-grid img{transition:opacity 160ms ease}
+  #ytg-browse-grid .video-thumbnail>img{transition:opacity 280ms ease-out}
   #ytg-browse-grid a[data-browse-id]{transition:scale var(--ytg-focus-duration) var(--ytg-motion-easing)}
   html:not([data-ytg-input-mode=mouse]) #ytg-browse-grid a[data-browse-id]:is(.ytg-selected,:focus-visible){scale:1.04;z-index:1}
   #ytg-browse-sidebar .sidebar-group{transition:grid-template-rows 180ms var(--ytg-motion-easing),opacity 180ms ease,visibility 180ms}
-  #ytg-browse-grid .feed-skeletons,#ytg-browse-grid .card-cover[data-loading=true]{animation:ytg-feed-pulse 1.4s ease-in-out infinite}
+  #ytg-browse-grid .skeleton-block{animation:ytg-feed-pulse 1.4s ease-in-out infinite}
 }
 @keyframes ytg-feed-pulse{50%{opacity:.55}}
+.home-loading-line{position:fixed;top:0;left:0;right:0;height:3px;z-index:1;pointer-events:none;overflow:hidden}
+.home-loading-line::before{content:"";display:block;width:55%;height:100%;background:#f03;transform-origin:left}
+@media(prefers-reduced-motion:no-preference){.home-loading-line::before{animation:ytg-home-loading 1.4s ease-out infinite}}
+@keyframes ytg-home-loading{from{transform:translateX(-100%) scaleX(.3)}to{transform:translateX(185%) scaleX(1)}}
 @media(max-width:700px){#ytg-browse-top{gap:8px}#ytg-browse-grid .ytg-search-leading{display:none}#ytg-browse-top .client-account{width:40px;height:40px;padding:8px}}
 
 /* Reserve the expanded rail's space for both the feed and category bar. */
@@ -158,7 +170,7 @@ html[dark] #ytg-browse-grid{
 #ytg-browse-top,#ytg-browse-sidebar{background:var(--ytg-client-surface);backdrop-filter:none;border:0}
 #ytg-browse-top{gap:24px;padding-inline:24px}
 #ytg-browse-top .client-brand{font-size:20px;letter-spacing:-1px}
-.client-brand svg{width:30px;height:22px}
+.client-brand .youtube-brand-icon{width:32px;height:22px}
 .client-brand small{font-size:10px;letter-spacing:.4px;font-weight:400}
 #ytg-client-search{max-width:640px}
 #ytg-browse-grid .ytg-search-submit{width:64px}
@@ -166,6 +178,22 @@ html[dark] #ytg-browse-grid{
 #ytg-browse-sidebar :is(a,button){width:calc(100% - 8px);min-height:48px;margin:6px 4px;padding-block:12px;padding-inline:var(--ytg-sidebar-compact-padding,8px);border:0;border-radius:10px;font-weight:400}
 html:not([data-ytg-input-mode=mouse]) #ytg-browse-grid:has(#ytg-browse-sidebar:focus-within),html[data-ytg-input-mode=mouse] #ytg-browse-grid:has(#ytg-browse-sidebar:hover){--ytg-sidebar-compact-padding:12px}
 #ytg-browse-sidebar [aria-current=page]{color:var(--ytg-text);font-weight:500}
+/* Keep subscribed people beside their videos, including when focus enters the feed. */
+#ytg-browse-grid:has(#ytg-browse-sidebar[data-subscription-page]){
+  --ytg-sidebar-width:270px;--ytg-sidebar-expanded-width:270px;
+  --ytg-sidebar-label-display:block;--ytg-sidebar-justify:flex-start;
+  --ytg-sidebar-gap:10px;--ytg-sidebar-compact-padding:12px;
+}
+#ytg-browse-sidebar .sidebar-channel-avatar{display:block;flex:none;width:40px;height:40px;border-radius:50%;object-fit:cover}
+#ytg-browse-sidebar .sidebar-channel-initial{display:flex;align-items:center;justify-content:center;background:var(--ytg-surface);font-size:18px}
+#ytg-browse-sidebar .sidebar-subscriptions a{min-height:50px;padding-block:5px}
+#ytg-browse-sidebar .sidebar-subscriptions [aria-current=page]{background:var(--ytg-client-active);color:var(--ytg-text);font-weight:600}
+@media(max-width:900px){
+  #ytg-browse-grid:has(#ytg-browse-sidebar[data-subscription-page]){--ytg-sidebar-width:210px;--ytg-sidebar-expanded-width:210px}
+}
+@media(max-width:600px){
+  #ytg-browse-grid:has(#ytg-browse-sidebar[data-subscription-page]){--ytg-sidebar-width:80px;--ytg-sidebar-expanded-width:210px;--ytg-sidebar-label-display:none;--ytg-sidebar-justify:center;--ytg-sidebar-gap:0px;--ytg-sidebar-compact-padding:8px}
+}
 #ytg-browse-sidebar section{margin-top:20px;padding-top:16px}
 #ytg-browse-sidebar :is(a,button):focus-visible,html.ytg-gamepad-input #ytg-browse-sidebar .ytg-selected{background:var(--ytg-client-active);color:var(--ytg-text)}
 #ytg-browse-grid [data-ytg-browse-grid]{padding:16px 24px 40px}
@@ -215,8 +243,5 @@ html:not([data-ytg-input-mode=mouse]) #ytg-browse-grid:has(#ytg-browse-sidebar:f
 #ytg-browse-grid .card-details strong{margin-top:0}
 #ytg-browse-grid .card-channel-avatar{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--ytg-surface);color:var(--ytg-muted);font-size:16px}
 #ytg-browse-grid .card-channel-avatar img{display:block;width:100%;height:100%;border-radius:50%;object-fit:cover;scale:1}
-#ytg-browse-grid .card-metadata-row{display:flex;align-items:center;gap:8px;margin-top:4px;color:var(--ytg-muted);font-size:14px;line-height:20px}
-#ytg-browse-grid .card-metadata-row .channel{min-width:0;min-height:0;margin-top:0}
-#ytg-browse-grid .card-stats{display:inline-flex;align-items:center;flex:none;gap:8px;white-space:nowrap}
-#ytg-browse-grid .card-view-count{display:inline-flex;align-items:center}
+#ytg-browse-grid .card-metadata-row{margin-top:4px;color:var(--ytg-muted);font-size:14px;line-height:20px}
 #ytg-browse-grid .cards[data-horizontal=true] .card-copy{margin-top:0}

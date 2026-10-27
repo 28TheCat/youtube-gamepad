@@ -1,7 +1,8 @@
 import { explorePages } from './explore-pages';
 
 export interface SidebarEntry { id: string; label: string; href: string; icon: string }
-export interface SidebarSnapshot { personal: SidebarEntry[]; explore: SidebarEntry[] }
+export interface SubscribedChannel { id: string; label: string; href: string; avatar?: string }
+export interface SidebarSnapshot { subscribedChannelIds?: string[]; subscriptions?: SubscribedChannel[]; personal: SidebarEntry[]; explore: SidebarEntry[] }
 export const personalSidebar: readonly SidebarEntry[] = [
   { id: 'history', label: '历史记录', href: '/feed/history', icon: 'history' },
   { id: 'playlists', label: '播放列表', href: '/feed/playlists', icon: 'playlists' },
@@ -39,5 +40,21 @@ export function sidebarSnapshot(raw: unknown): SidebarSnapshot | undefined {
       typeof item.label !== 'string' || !item.label.trim() || !icons.has(item.icon)) return [];
     return [{ id: item.id, label: item.label.slice(0, 200), href, icon: item.icon }];
   });
-  return { personal: entries(value.personal), explore: entries(value.explore) };
+  const ids = Array.isArray(value.subscribedChannelIds) ? [...new Set(value.subscribedChannelIds.filter(id => typeof id === 'string' && /^UC[\w-]{1,100}$/.test(id)))].slice(0, 1000) : [];
+  const seen = new Set<string>();
+  const subscriptions = Array.isArray(value.subscriptions) ? value.subscriptions.slice(0, 1000).flatMap(item => {
+    if (!item || typeof item.id !== 'string' || !/^UC[\w-]{1,100}$/.test(item.id) || seen.has(item.id) ||
+      typeof item.label !== 'string' || !item.label.trim()) return [];
+    seen.add(item.id);
+    let avatar: string | undefined;
+    try {
+      if (typeof item.avatar === 'string' && item.avatar.length <= 4096) {
+        const url = new URL(item.avatar);
+        if (url.protocol === 'https:' && !url.username && !url.password) avatar = url.href;
+      }
+    } catch { /* Keep the channel's initial when no valid avatar is available. */ }
+    return [{ id: item.id, label: item.label.slice(0, 200), href: `/channel/${item.id}/videos`, ...(avatar ? { avatar } : {}) }];
+  }) : [];
+  return { personal: entries(value.personal), explore: entries(value.explore), ...(ids.length ? { subscribedChannelIds: ids } : {}),
+    ...(subscriptions.length ? { subscriptions } : {}) };
 }

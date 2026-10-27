@@ -10,7 +10,7 @@
 html.ytg-gamepad-input,html.ytg-gamepad-input *{cursor:none!important}
 html.ytg-gamepad-input :is(ytd-rich-item-renderer,ytd-rich-grid-media,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model){background-color:transparent!important;box-shadow:none!important}
 html.ytg-gamepad-input :is(ytd-video-preview,ytd-moving-thumbnail-renderer,yt-video-preview-view-model,#inline-preview-player){display:none!important}
-html.ytg-theater:not([data-ytg-native]) .ytp-button{transform:scale(1.12)}
+html.ytg-theater:not([data-ytg-native]):not([data-ytg-browse-mode="youtube"]) .ytp-button{transform:scale(1.12)}
 /* The overlay supplies the selection ring around the thumbnail only. */
 /* Suppress native card focus paint so metadata does not look selected. */
 :is(ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model).ytg-selected,
@@ -24,7 +24,8 @@ html.ytg-watch-layout,html.ytg-watch-layout body{overflow:hidden!important}
 html.ytg-watch-layout :is(ytd-masthead,#secondary,#below,ytd-guide-renderer,ytd-mini-guide-renderer){display:none!important}
 /* The selected layout has one geometry from PREPARE_VIDEO through playback.
    Readiness controls the interface, never the size of the media frame. */
-html:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-top:0px;--ytg-watch-side:min(44vw,clamp(240px,34vw,620px));--ytg-watch-width:calc(100vw - var(--ytg-watch-side));--ytg-watch-height:max(80px,min(calc(100dvh - var(--ytg-watch-top) - 240px),calc((100dvh - var(--ytg-watch-top)) * .68),calc(var(--ytg-watch-width) * 9 / 16)))}
+/* Fit the media first; the side panel receives the remaining viewport width. */
+html:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-top:0px;--ytg-watch-ratio:var(--ytg-video-ratio,1.777777778);--ytg-watch-side-min:15vw;--ytg-watch-height-limit:max(80px,calc(100dvh - var(--ytg-watch-top) - 96px));--ytg-watch-width:min(calc(100vw - var(--ytg-watch-side-min)),calc(var(--ytg-watch-height-limit) * var(--ytg-watch-ratio)));--ytg-watch-side:calc(100vw - var(--ytg-watch-width));--ytg-watch-height:calc(var(--ytg-watch-width) / var(--ytg-watch-ratio))}
 html[data-ytg-playback-layout="windowed"]:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-top:56px}
 html[data-ytg-playback-layout="fullscreen"]:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-width:100vw;--ytg-watch-height:100vh}
 html:is(.ytg-watch-layout,.ytg-player-primed) #movie_player{position:fixed!important;inset:var(--ytg-watch-top) auto auto 0!important;width:var(--ytg-watch-width)!important;height:var(--ytg-watch-height)!important;max-width:none!important;max-height:none!important;z-index:2147483645!important;background:#000!important}
@@ -41,12 +42,15 @@ html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-bottom,
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-top{display:none!important}
 /* Recommendations belong to the gamepad surface, including after playback ends. */
 html.ytg-watch-active:not([data-ytg-native]) #movie_player :is(.html5-endscreen,.ytp-endscreen-content,.ytp-autonav-endscreen,.ytp-upnext,.ytp-ce-element,.ytp-fullscreen-grid,.ytp-fullscreen-grid-stills-container,.ytp-modern-videowall-still){display:none!important}
-html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-settings-menu{z-index:2147483647!important;bottom:160px!important;right:4vw!important;max-width:90vw;font-size:20px!important}
-html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-panel-menu{max-height:65vh!important}
+html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-settings-menu{z-index:2147483647!important;bottom:12px!important;right:12px!important;max-width:calc(100% - 24px)!important;max-height:calc(100% - 24px)!important;overflow:auto;font-size:20px!important}
+html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-panel-menu{max-height:max(40px,calc(var(--ytg-watch-height,100vh) - 96px))!important;overflow-y:auto}
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-menuitem{height:56px!important;font-size:20px!important}
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-panel-header{font-size:20px!important;min-height:56px}
-/* A settings panel must sit above our dimming layer without raising the entire player. */
-html.ytg-watch-active:not([data-ytg-native]).ytg-settings-open #ytg-watch{visibility:hidden}
+/* Native player menus remain dark even when the surrounding page uses light mode. */
+html.ytg-settings-open #yt-gamepad-overlay{--ytg-focus-color:#fff}
+/* Windowed panels remain visible beside/below the player while its menu owns input. */
+html[data-ytg-playback-layout="windowed"].ytg-watch-active:not([data-ytg-native]).ytg-settings-open #ytg-watch{z-index:2147483644!important}
+html[data-ytg-playback-layout="fullscreen"].ytg-watch-active:not([data-ytg-native]).ytg-settings-open #ytg-watch{visibility:hidden}
 /* Account prompts, subscription menus and playlist choosers stay interactive. */
 html.ytg-watch-active:not([data-ytg-native]) ytd-popup-container{position:relative;z-index:2147483647!important}
 html.ytg-watch-active:not([data-ytg-native]) :is(tp-yt-paper-dialog,ytd-menu-popup-renderer){z-index:2147483647!important}
@@ -59,3 +63,9 @@ html[data-ytg-native] #ytg-watch{display:none!important}
 /* Reserve the right panel and the metadata area without scrolling the watch page. */
 html.ytg-watch-layout body{background:var(--ytg-background)!important}
 html.ytg-watch-layout #movie_player .caption-window.ytp-caption-window-bottom{bottom:10%!important}
+
+
+/* Cover native page rearrangement without hiding the playing media below it. */
+#ytg-watch-transition{position:fixed!important;inset:0!important;z-index:2147483646!important;background:var(--ytg-background,#101010)!important;pointer-events:none!important}
+#ytg-watch-transition :is(img,canvas){position:absolute!important;left:0!important;top:var(--ytg-watch-top,0px)!important;width:var(--ytg-watch-width,100vw)!important;height:var(--ytg-watch-height,100vh)!important;object-fit:contain!important;background:#101010!important}
+#ytg-watch-transition [hidden]{display:none!important}

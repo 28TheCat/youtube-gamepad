@@ -148,3 +148,31 @@ test('adapter failure reveals clickable native videos without persisting the fal
   await page.waitForFunction(() => document.documentElement.getAttribute('data-ytg-browse-mode') === 'youtube');
   assert.equal(requests, 2, 'the user can explicitly retry');
 });
+
+test('Off keeps the banner and native watch layout across navigation and mode changes', { timeout: 45000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, browseMode: 'youtube' }));
+  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: `<html><body><ytd-app><ytd-masthead></ytd-masthead><ytd-page-manager><ytd-watch-flexy><div id="movie_player" style="width:640px;height:360px"><video></video><div class="ytp-chrome-bottom">Native controls</div></div><div id="below">Native description</div><div id="secondary">Native recommendations</div></ytd-watch-flexy></ytd-page-manager></ytd-app></body></html>` }));
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/watch?v=original');
+  const top = page.locator('#ytg-browse-root #ytg-browse-top');
+  await top.waitFor();
+  const assertNative = async () => {
+    await page.waitForFunction(() => document.documentElement.dataset.ytgBrowseMode === 'youtube' && !document.documentElement.classList.contains('ytg-watch-layout'));
+    assert.equal(await top.isVisible(), true);
+    assert.equal(await page.locator('#below').isVisible(), true);
+    assert.equal(await page.locator('#secondary').isVisible(), true);
+    assert.equal(await page.locator('.ytp-chrome-bottom').isVisible(), true);
+    assert.equal(await page.locator('#movie_player').evaluate(node => getComputedStyle(node).position), 'static');
+    assert.equal(await page.locator('#ytg-watch').isVisible(), false);
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains('ytg-watch-active')), false);
+  };
+  await assertNative();
+  await top.locator('[data-ytg-page-mode]').click();
+  await page.waitForFunction(() => document.documentElement.classList.contains('ytg-watch-layout'));
+  await worker.evaluate(() => chrome.storage.local.set({ browseMode: 'youtube' }));
+  await assertNative();
+  await page.reload();
+  await top.waitFor();
+  await assertNative();
+});

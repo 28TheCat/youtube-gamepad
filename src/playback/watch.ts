@@ -2,6 +2,7 @@ import type { Action, InteractionEvent, Mode, ModuleFactory, WatchDependencies, 
 
 import { YTGamepadActions } from '../shared/actions.ts';
 import { sameRecommendations } from '../ui/playback-presentation';
+import { defaultPlaybackControlIndex } from '../ui/playback-control-config';
 export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, YTGamepadWatch: WatchModule | undefined;
 // A gamepad-first watch surface. YouTube retains ownership of media and navigation.
 (() => {
@@ -15,11 +16,9 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   let controller: WatchPort;
   const enabled = () => !lifecycle.destroyed && controller?.state.enabled === true;
   const mode = () => controller?.state.mode || 'browse';
-  const playIndex = 4;
   let renderedMode: Mode = 'browse', timer: number|undefined;
   const watchState = () => interaction.state.watch;
   const send = (event: InteractionEvent) => interaction.dispatch(event);
-  send({ type: 'WATCH_RESET', playIndex });
   let route = '', lastRecommendations: readonly import('../../types/ports').RecommendationSnapshot[] = [], lastActivity = Date.now();
   const view = dependencies.createSurface({
     activate, state: watchState, controller: () => controller, send, focus,
@@ -34,6 +33,11 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     }
   }, lifecycle);
   const snapshot = () => view.snapshot();
+  const windowed = () => document.documentElement.dataset.ytgPlaybackLayout === 'windowed';
+  const playIndex = () => defaultPlaybackControlIndex(snapshot().controls);
+  let previousWindowed = windowed();
+  let controlIds = snapshot().controls.map(control => control.id);
+  send({ type: 'WATCH_RESET', playIndex: playIndex() });
   let playbackEnded = false;
   function clearFeedback() { lifecycle.clearTimeout(timer); view.feedback(null); }
   function seekPreview(value: import('../ui/playback-presentation').SeekPreview | null) {
@@ -61,7 +65,8 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   function focus() {
     const state = watchState(), data = snapshot();
     const targets = state.panel ? data.panel : state.row === 'recommendations' ? data.recommendations : data.controls;
-    const target = !state.panel && state.row === 'progress'
+    const target = !state.panel && state.row === 'metadata' ? data.metadata : !state.panel && state.row === 'player' ? data.player
+      : !state.panel && state.row === 'progress'
       ? { id: 'progress', region: 'progress', itemKey: 'progress', index: 0, available: data.canSeek }
       : targets[state.panel ? Math.min(state.panelIndex, targets.length - 1) : state.index];
     view.focus(target, state.adjusting, mode());
@@ -92,6 +97,11 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
       view.panel.open('playlists');
     } else if (action === 'channel') {
       if (!controller.request('channel')) feedback('Channel information is still loading');
+    } else if (action === 'fullscreen') {
+      Promise.resolve(controller.request('fullscreen')).then(ok => {
+        if (!ok && !lifecycle.destroyed) feedback('This action is currently unavailable');
+      });
+      return;
     } else if (action === 'settings') {
       if (!controller.request('settings')) feedback('Player settings are currently unavailable');
     } else if (['subscribe', 'like', 'dislike'].includes(action || '')) {
@@ -132,7 +142,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     const data = snapshot(), canSeek = data.canSeek;
     if (!watchState().panel && ((watchState().row === 'progress' && !canSeek) ||
         (watchState().row === 'controls' && (data.controls[watchState().index]?.available === false)))) {
-      send({ type: 'WATCH_FOCUS', region: 'controls', index: playIndex });
+      send({ type: 'WATCH_FOCUS', region: 'controls', index: playIndex() });
       if (view.visible && !hasTemporaryLayer()) focus();
     }
   }
@@ -163,7 +173,9 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     if (!enabled() || controller.state.navigating) return;
     lastActivity = Date.now();
     controller.request('mode', 'controls');
-    send({ type: 'WATCH_SHOW', target, count: snapshot().recommendations.length }); focus();
+    send({ type: 'WATCH_SHOW', target, count: snapshot().recommendations.length });
+    if (windowed() && target === 'controls' && snapshot().player) send({ type: 'WATCH_FOCUS', region: 'player', index: 0 });
+    focus();
   }
   function sync() {
     if (mode() !== renderedMode) lastActivity = Date.now();
@@ -174,10 +186,25 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     if (active) {
       const nextRoute = controller.readRoute().key;
       if (nextRoute !== route) {
-        route = nextRoute; lastRecommendations = []; send({ type: 'WATCH_RESET', playIndex });
+        route = nextRoute; lastRecommendations = []; send({ type: 'WATCH_RESET', playIndex: playIndex() });
         playbackEnded = false;
         clearFeedback();
         view.reset();
+        if (windowed() && snapshot().player) send({ type: 'WATCH_FOCUS', region: 'player', index: 0 });
+        controlIds = snapshot().controls.map(control => control.id);
+      }
+      const nextIds = snapshot().controls.map(control => control.id);
+      if (nextIds.join('|') !== controlIds.join('|')) {
+        const previousAction = controlIds[watchState().controlIndex];
+        const index = nextIds.indexOf(previousAction);
+        controlIds = nextIds;
+        send({ type: 'WATCH_CONTROL_LAYOUT', playIndex: playIndex(), index: index >= 0 ? index : playIndex() });
+      }
+      const nextWindowed = windowed();
+      if (nextWindowed !== previousWindowed) {
+        previousWindowed = nextWindowed;
+        send({ type: 'WATCH_FOCUS', region: nextWindowed && snapshot().player ? 'player' : 'controls', index: nextWindowed ? 0 : playIndex() });
+        if (mode() === 'controls' && !hasTemporaryLayer()) focus();
       }
       readPage(); updateProgress();
     }
@@ -186,6 +213,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     if (!enabled() || !controller.readRoute().isWatch || mode() === 'browse') return false;
     if (mode() === 'controls' && (action === 'seekBack' || action === 'seekForward')) {
       if (controller.hasTemporaryLayer?.()) return false;
+      if (view.cycleTab?.(action === 'seekBack' ? -1 : 1)) return true;
       if (watchState().panel === 'comments') { closePanel(); show('recommendations'); }
       else view.panel.open('comments');
       return true;
@@ -193,6 +221,9 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     if (mode() !== 'controls') return false;
     if (controller.navigating) return true;
     lastActivity = Date.now();
+    if (windowed() && watchState().panel === 'comments' && action === 'left') {
+      closePanel(); send({ type: 'WATCH_FOCUS', region: 'player', index: 0 }); focus(); return true;
+    }
     if (action === 'back' && controller.request('backSettings')) return true;
     if (action === 'back' && watchState().panel === 'comments' && view.panel.back()) return true;
     // Geometry remains in the view; the reducer receives only a scroll observation.
@@ -202,7 +233,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     // media/seek/poll updates and must not repaint on every held direction.
     if (!['up', 'down', 'left', 'right', 'back'].includes(action)) updateProgress();
     const data = snapshot();
-    const result = send({ type: 'WATCH_INPUT', action, canSeek: data.canSeek,
+    const result = send({ type: 'WATCH_INPUT', action, windowed: windowed(), canSeek: data.canSeek,
       availableControls: data.controls.filter(target => target.available).map(target => target.index), scrollDelta, commentCount: Math.max(0, data.panel.length - 1),
       cardCount: data.recommendations.length, cardColumns: recommendationColumns(), controlCount: data.controls.length,
       recommendationKey: data.recommendations[watchState().index]?.itemKey, controlAction: data.controls[watchState().index]?.id });
@@ -236,7 +267,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
       return view.capture(region, position);
     },
     items: region => view.items(region),
-    fallback: () => view.items('controls').find(item => item.index === playIndex) || view.items('controls')[0],
+    fallback: () => (windowed() ? view.items('player')[0] : undefined) || view.items('controls').find(item => item.index === playIndex()) || view.items('controls')[0],
     apply(target) {
       if (!target) return;
       send({ type: 'WATCH_FOCUS', region: target.region as import('../../types/ports').WatchSnapshot['row'] | 'panel', index: target.index });
@@ -246,7 +277,8 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   if (unregisterFocus) lifecycle.cleanup(unregisterFocus);
   function handleInput(action: Action) {
     if (!enabled() || !controller.readRoute().isWatch || mode() !== 'controls') return 'pass';
-    if (watchState().panel && !['back', 'confirm', 'up', 'down', 'seekBack', 'seekForward'].includes(action)) return 'blocked';
+    if (watchState().panel && !['back', 'confirm', 'up', 'down', 'seekBack', 'seekForward'].includes(action) &&
+        !(windowed() && watchState().panel === 'comments' && action === 'left')) return 'blocked';
     return handle(action) ? 'handled' : watchState().panel ? 'blocked' : 'pass';
   }
   YTGamepadWatch = { destroy: lifecycle.destroy,

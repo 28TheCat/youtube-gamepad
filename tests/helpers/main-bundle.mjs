@@ -1,16 +1,13 @@
 import { build } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { fileURLToPath } from 'node:url';
-import { dependencies } from '../../scripts/module-graph.mjs';
+import { moduleGraph } from '../../scripts/module-graph.mjs';
 
 let pending;
 // Browser scenarios inspect module instances through test-only getters. Build
 // the current composition root, including Vue views, rather than stripping imports.
 export function mainFixture() {
-  const modules = Object.keys(dependencies).filter(path => ![
-    'src/app/content.ts', 'src/background/background.ts', 'src/settings/inline-settings.ts',
-    'src/ui/watch-view.ts' // Exists only as a VM renderer fixture, never a production module.
-  ].includes(path));
+  const modules = [...moduleGraph(['src/app/application.ts']).keys()].filter(path => !['src/app/application.ts', 'src/app/content.ts', 'src/settings/inline-settings.ts'].includes(path));
   const id = fileURLToPath(new URL('./main-fixture-entry.ts', import.meta.url)).replaceAll('\\', '/');
   const source = modules.map((path, index) => `import * as m${index} from '/${path}';`).join('\n')
     + "\nimport '/src/entries/main.ts';\nimport '/src/app/application.ts';\nimport { ui } from '/src/ui/ui-api.ts';\nObject.defineProperty(window, '__testUi', { configurable: true, value: ui });\n"

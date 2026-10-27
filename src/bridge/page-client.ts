@@ -1,4 +1,4 @@
-import { PAGE_REQUEST, PAGE_RESPONSE, parsePageMessage, videoDetails, watchNextSnapshot, commentsSnapshot, watchInfoSnapshot, savedPlaylists, accountSnapshot } from './page-protocol';
+import { PAGE_REQUEST, PAGE_RESPONSE, parsePageMessage, videoDetails, watchNextSnapshot, commentsSnapshot, watchInfoSnapshot, savedPlaylists, accountSnapshot, shortsSettingsSnapshot } from './page-protocol';
 import type { PageAccess, PageOperation } from './page-protocol';
 import { sidebarSnapshot } from '../shared/sidebar-data';
 
@@ -48,6 +48,14 @@ export function createPageClient(): PageAccess {
     });
   }
   return {
+    shortsRecommendations: async (videoId, reset) => {
+      const raw = await asyncRequest('shortsRecommendations', { videoId, refresh: reset === true }) as { ids?: unknown; hasMore?: unknown } | undefined;
+      if (!raw || !Array.isArray(raw.ids)) return undefined;
+      return { ids: [...new Set(raw.ids.slice(0, 100).filter((id): id is string => typeof id === 'string' && /^[\w-]{1,100}$/.test(id)))], hasMore: raw.hasMore === true };
+    },
+    playShorts: videoId => request('playShorts', { videoId }) === true,
+    readShortsSettings: () => shortsSettingsSnapshot(request('readShortsSettings')),
+    shortsSetting: (videoId, action, quality) => request('shortsSetting', { videoId, action, quality }) === true,
     readSidebar: async () => sidebarSnapshot(await asyncRequest('readSidebar')),
     readAccount: async refresh => accountSnapshot(await asyncRequest('readAccount', { refresh: refresh === true })),
     destroy() { disposed = true; available = false; for (const cancel of [...cancellations]) cancel(); },
@@ -68,6 +76,8 @@ export function createPageClient(): PageAccess {
     moreComments: start => request('moreComments', { start: start === true }) === true,
     commentReplies: key => request('commentReplies', { key }) === true,
     commentTranslate: (key, language) => request('commentTranslate', { key, language }) === true,
+    commentPost: async (text, key) => await asyncRequest('commentPost', { text, key }) === true,
+    commentSort: sort => request('commentSort', { sort }) === true,
     openWatchVideo: href => request('openBrowseVideo', { href }) === true,
     openBrowseRoute: href => request('openBrowseRoute', { href }) === true,
     showControls: () => { request('showControls'); },

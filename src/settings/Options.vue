@@ -7,6 +7,8 @@ import type { SettingKey } from '../shared/settings';
 import { usePageAppearance } from '../shared/page-appearance';
 import BindingsPanel from './BindingsPanel.vue';
 import VideoGridSettings from './VideoGridSettings.vue';
+import PlaybackParameterSettings from './PlaybackParameterSettings.vue';
+import HomeFilterSettings from './HomeFilterSettings.vue';
 import { videoGridDefaults } from '../shared/video-grid';
 import DiagnosticsPanel from './DiagnosticsPanel.vue';
 import CategorySettings from './CategorySettings.vue';
@@ -67,6 +69,7 @@ onUnmounted(() => {
 <input class="toggle" id="enabled" :checked="settings.values.enabled" @change="saveSetting('enabled', $event)" type="checkbox" aria-describedby="enabledHelp">
 </div>
 <details class="help"><summary>{{ t("How to use gamepad controls") }}</summary><div class="help-content"><p>{{ t("Turning off gamepad controls restores the YouTube interface.") }}</p><p :data-ytg-hint="t('During playback, press Start to open the quick menu to search, toggle captions, adjust volume, or open all settings.')">{{ t("During playback, press Start to open the quick menu to search, toggle captions, adjust volume, or open all settings.") }}</p></div></details>
+<PlaybackParameterSettings :values="settings.values" :disabled="!settings.ready || settings.saving" @save="settings.saveValues" />
 </section>
 <section id="display" data-category="display" aria-labelledby="displayTitle" :hidden="category !== 'display'">
 <div class="section-heading"><h2 id="displayTitle">{{ t("Display & layout") }}</h2><p>{{ t("Make YouTube easier to use from a distance. Enable either option independently.") }}</p></div>
@@ -87,6 +90,7 @@ onUnmounted(() => {
 </div>
 <details class="help"><summary>{{ t("TV layout and fullscreen explained") }}</summary><div class="help-content" id="fullscreenDetails"><p>{{ t("TV layout changes the YouTube page. Automatic fullscreen expands the browser window containing the current YouTube tab, like pressing F11.") }}</p><p>{{ t("Disconnecting the gamepad, turning off automatic fullscreen, or disabling the extension restores the previous window state. Fullscreen entered manually stays active.") }}</p><p>{{ t("The page-filling video layout is also independent of browser fullscreen.") }}</p></div></details>
 <CategorySettings />
+<HomeFilterSettings :values="settings.values" :disabled="!settings.ready || settings.saving" @save="settings.saveValues" />
 </section>
 <section id="shortcuts" data-category="controller" :hidden="category !== 'controller'" aria-labelledby="shortcutsTitle"><BindingsPanel /></section>
 <section id="gamepad" data-category="controller" aria-labelledby="gamepadTitle" :hidden="category !== 'controller'">

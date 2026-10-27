@@ -2,6 +2,7 @@ import { computed, readonly, ref, shallowRef } from 'vue';
 import type { PlaybackSnapshot } from '../../types/ports';
 
 export interface PlaybackViewState {
+  seekStep: number;
   paused: boolean; currentTime: number; duration: number; volume: number;
   muted: boolean; captionsEnabled: boolean; isLive: boolean; canSeek: boolean;
   controlsVisible: boolean; start: number; end: number; atLiveEdge: boolean;
@@ -18,6 +19,7 @@ export function createPlaybackModel(commands: {
     const video = snapshot.value.video, timeline = video?.timeline;
     const start = timeline?.start ?? 0, end = timeline?.end ?? 0;
     return {
+      seekStep: snapshot.value.seekStep ?? 10,
       paused: video?.paused ?? true, currentTime: preview.value ?? (Number.isFinite(video?.currentTime) ? video!.currentTime : start),
       duration: video?.duration ?? 0, volume: Math.max(0, Math.min(1, video?.volume ?? 0)),
       muted: video?.muted ?? false, captionsEnabled: snapshot.value.captionsEnabled,

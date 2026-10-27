@@ -110,9 +110,15 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
     assert.equal(typography.parentFont, typography.replyFont, 'all comment bodies share the same typography');
     const labels = await detail.locator('.comment-author, .comment-text, .comment-translate, .detail-reply-count').evaluateAll(nodes => nodes.map(node => {
       const style = getComputedStyle(node);
-      return { color: style.color, fontSize: style.fontSize, lineHeight: style.lineHeight, fontWeight: style.fontWeight };
+      return { kind: node.classList.contains('comment-text') ? 'body' : node.classList.contains('comment-author') ? 'author' : 'action',
+        color: style.color, fontSize: style.fontSize, lineHeight: style.lineHeight, fontWeight: style.fontWeight };
     }));
-    for (const label of labels) assert.deepEqual(label, { color: typography.panelColor, fontSize: '14px', lineHeight: '20px', fontWeight: '400' });
+    for (const { kind, ...label } of labels) {
+      const expected = kind === 'body' ? { fontSize: '16px', lineHeight: '24px', fontWeight: '400' }
+        : kind === 'author' ? { fontSize: '13px', lineHeight: '18px', fontWeight: '500' }
+        : { fontSize: '14px', lineHeight: '20px', fontWeight: '400' };
+      assert.deepEqual(label, { color: typography.panelColor, ...expected });
+    }
   }
   await page.evaluate(() => document.documentElement.removeAttribute('dark'));
   mkdirSync(new URL('../output/playwright/', import.meta.url), { recursive: true });

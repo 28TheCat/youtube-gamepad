@@ -2,6 +2,7 @@ import type { Action, FocusTarget, InteractionEvent, Mode, PlaybackSnapshot, Rec
 import type { PlaybackFeedback } from './playback-presentation';
 import { recommendationFocusIds, sameRecommendations } from './playback-presentation';
 import { ui } from './ui-api';
+import { playbackControlIds } from './playback-control-config';
 import { createStickScroller } from '../navigation/stick-scroll';
 
 export interface WatchTarget {
@@ -13,6 +14,8 @@ export interface WatchTarget {
 }
 export interface WatchSurfaceSnapshot {
   canSeek: boolean;
+  player?: WatchTarget;
+  metadata?: WatchTarget;
   controls: readonly WatchTarget[];
   recommendations: readonly WatchTarget[];
   panel: readonly WatchTarget[];
@@ -59,16 +62,26 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
   lifecycle.cleanup(controllerStyle.register(root));
   const cards = () => presentation.cards();
   const available = (node: HTMLElement) => !node.hidden && !(node as HTMLButtonElement).disabled && node.getAttribute('aria-disabled') !== 'true';
-  const controlTargets = () => controls.map((node, index) => ({ id: node.dataset.action || '',
-    region: 'controls', itemKey: node.dataset.action || String(index), index, available: available(node) }));
+  const controlNodes = () => {
+    const fullscreen = document.documentElement.dataset.ytgPlaybackLayout === 'fullscreen';
+    const visible = playbackControlIds(fullscreen);
+    return controls.filter(node => visible.includes(node.dataset.action || ''));
+  };
+  const controlTargets = () => controlNodes().map((node, index) => ({ id: node.dataset.action || '', region: 'controls',
+        itemKey: node.dataset.action || String(index), index, available: available(node) }));
   const panelNodes = () => callbacks.state().panel && callbacks.state().panel !== 'description' ? [close, ...panels.buttons] : [close];
   const panelTargets = () => panelNodes().map((node, index) => ({ id: node.dataset.focusId || 'panel:close',
     region: 'panel', itemKey: node.dataset.focusId || String(index), index, available: available(node) }));
-  const recommendationTargets = () => recommendationTargetsCache;
+  const recommendationTargetMap = new Map<string, WatchTarget>();
+  const recommendationTargets = () => cards().flatMap(node => {
+    const target = node.dataset.focusId ? recommendationTargetMap.get(node.dataset.focusId)
+      : recommendationTargetsCache.find(item => item.itemKey === node.dataset.videoId);
+    return target ? [target] : [];
+  }).map((item, index) => ({ ...item, index }));
   function snapshot(): WatchSurfaceSnapshot {
-    return { canSeek, controls: controlTargets(), recommendations: recommendationTargets(), panel: panelTargets() };
+    return { canSeek, metadata: view.metadata ? { id: 'metadata', region: 'metadata', itemKey: 'metadata', index: 0, available: document.documentElement.dataset.ytgPlaybackLayout !== 'fullscreen' } : undefined, player: view.player ? { id: 'player', region: 'player', itemKey: 'player', index: 0, available: document.documentElement.dataset.ytgPlaybackLayout !== 'fullscreen' } : undefined, controls: controlTargets(), recommendations: recommendationTargets(), panel: panelTargets() };
   }
-  function nodes(region: string) { return region === 'recommendations' ? cards() : region === 'progress' ? [progress] : region === 'panel' ? panelNodes() : controls; }
+  function nodes(region: string) { return region === 'metadata' ? view.metadata ? [view.metadata] : [] : region === 'player' ? view.player ? [view.player] : [] : region === 'recommendations' ? cards() : region === 'progress' ? [progress] : region === 'panel' ? panelNodes() : controlNodes(); }
   function animate(node: HTMLElement, frames: Keyframe[], duration: number, id = 'ytg-feedback') {
     if (!node.animate || !window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) return;
     node.getAnimations().filter(animation => animation.id === id).forEach(animation => animation.cancel());
@@ -82,7 +95,9 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     const node = event.target as HTMLElement;
     const observations = snapshot();
     let target: WatchTarget | undefined;
-    if (controls.includes(node as HTMLButtonElement)) target = observations.controls[controls.indexOf(node as HTMLButtonElement)];
+    if (node === view.metadata) target = observations.metadata;
+    else if (node === view.player) target = observations.player;
+    else if (controls.includes(node as HTMLButtonElement)) target = observations.controls.find(target => target.id === node.dataset.action);
     else if (cards().includes(node as HTMLButtonElement)) target = observations.recommendations[cards().indexOf(node as HTMLButtonElement)];
     else if (panelNodes().includes(node)) target = observations.panel[panelNodes().indexOf(node)];
     else if (node === progress) target = { id: 'progress', region: 'progress', itemKey: 'progress', index: 0, available: true };
@@ -90,6 +105,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
   });
   lifecycle.listen(root, 'click', event => event.stopPropagation());
   lifecycle.listen(root, 'keydown', event => {
+    if ((event.target as HTMLElement).closest?.('textarea,input') && event.key !== 'Escape' && event.key !== 'Tab') return;
     event.stopPropagation();
     const action = ({ ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Escape: 'back' } as Record<string, Action>)[event.key];
     if (action) { event.preventDefault(); callbacks.input(action); }
@@ -97,6 +113,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
   });
   for (const type of ['keydown', 'keyup'] as const) lifecycle.listen(window, type, event => {
     if (host.hidden || !callbacks.controller()?.state.enabled || !event.composedPath?.().includes(host) || ![' ', 'Spacebar', 'Enter'].includes(event.key)) return;
+    if ((event.composedPath?.()[0] as HTMLElement | undefined)?.closest?.('textarea,input')) return;
     event.preventDefault(); event.stopImmediatePropagation();
     if (type === 'keydown' && !event.repeat) callbacks.input('confirm');
   }, true);
@@ -126,6 +143,8 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
         const ids = recommendationFocusIds(recommendations);
         recommendationTargetsCache = recommendations.map((item, index) => ({ id: ids[index],
           region: 'recommendations', itemKey: item.key, index, available: true }));
+        recommendationTargetMap.clear();
+        for (const target of recommendationTargetsCache) recommendationTargetMap.set(target.id, target);
       }
       presentation.page(value, features);
     },
@@ -142,16 +161,28 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       const candidates = nodes(target.region);
       const matches = (node: HTMLElement) => target.region === 'recommendations' ? node.dataset.focusId === target.id || (!node.dataset.focusId && node.dataset.videoId === target.itemKey)
         : target.region === 'controls' ? node.dataset.action === target.id
+        : target.region === 'player' ? node === view.player
+        : target.region === 'metadata' ? node === view.metadata
         : target.region === 'progress' ? node === progress
         : target.id === 'panel:close' ? node === close : node.dataset.focusId === target.id;
       const node = candidates[target.index] && matches(candidates[target.index]) ? candidates[target.index] : candidates.find(matches);
       if (!node || !available(node)) return;
       if (state.panel) node.classList.add('selected');
       node.focus({ preventScroll: true });
+      if (target.region === 'controls') {
+        const toolbar = node.closest<HTMLElement>('.toolbar');
+        if (toolbar && toolbar.scrollWidth > toolbar.clientWidth) {
+          const bounds = toolbar.getBoundingClientRect(), item = node.getBoundingClientRect();
+          const inset = 10;
+          const delta = item.left < bounds.left + inset ? item.left - bounds.left - inset
+            : item.right > bounds.right - inset ? item.right - bounds.right + inset : 0;
+          if (delta) toolbar.scrollBy({ left: delta, behavior: 'instant' });
+        }
+      }
       if (target.region === 'recommendations' || (state.panel && state.panel !== 'description')) node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
     },
     items(region: string): FocusTarget[] {
-      const data = region === 'recommendations' ? recommendationTargets() : region === 'progress' ? [{ id: 'progress', region, itemKey: 'progress', index: 0, available: canSeek }] : region === 'panel' ? panelTargets() : controlTargets();
+      const data = region === 'player' || region === 'metadata' ? [snapshot()[region]].filter((target): target is WatchTarget => !!target) : region === 'recommendations' ? recommendationTargets() : region === 'progress' ? [{ id: 'progress', region, itemKey: 'progress', index: 0, available: canSeek }] : region === 'panel' ? panelTargets() : controlTargets();
       const elements = nodes(region);
       return data.filter(target => target.available && elements[target.index]?.isConnected && available(elements[target.index])).map(({ region, itemKey, index }) => ({ region, itemKey, index }));
     },
@@ -184,12 +215,14 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
         return (action === 'down' && delta > 1 || action === 'up' && delta < -1) ? Math.max(-180, Math.min(180, delta)) : 0;
       }
     },
-    reset() { panels.hide(); canSeek = false; recommendations = []; recommendationTargetsCache = []; presentation.reset(); },
+    cycleTab(direction: number) { return view.cycleTab?.(direction) || false; },
+    reset() { panels.hide(); canSeek = false; recommendations = []; recommendationTargetsCache = []; recommendationTargetMap.clear(); presentation.reset(); },
     destroy() {
       if (destroyed) return; destroyed = true;
       stickScroller.stop();
       unregisterPanels();
       panels.destroy(); presentation.destroy(); host.hidden = true; host.remove(); root.replaceChildren(); recommendations = []; recommendationTargetsCache = [];
+      recommendationTargetMap.clear();
       document.documentElement.classList.remove('ytg-watch-active', 'ytg-recommendations', 'ytg-comments', 'ytg-settings-open');
     }
   };

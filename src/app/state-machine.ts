@@ -86,6 +86,9 @@ export let YTGamepadStateMachine!: StateMachineModule;
         else { watch = { ...watch, adjusting: false }; disposition = 'pass'; }
         break;
       case 'WATCH_RESET': watch = watchInitial(event.playIndex ?? watch.playIndex); break;
+      case 'WATCH_CONTROL_LAYOUT':
+        watch = { ...watch, playIndex: event.playIndex, controlIndex: event.index,
+          ...(watch.row === 'controls' ? { index: event.index } : {}) }; break;
       case 'WATCH_SHOW': {
         const row = event.target === 'recommendations' && event.count ? event.target : 'controls';
         watch = { ...watch, adjusting: false, row, index: row === 'controls' ? watch.controlIndex : clamp(watch.recommendationIndex, event.count) }; break;
@@ -121,12 +124,41 @@ export let YTGamepadStateMachine!: StateMachineModule;
           else disposition = 'blocked';
           break;
         }
+        if (event.windowed && ['up', 'down', 'left', 'right'].includes(action)) {
+          if (watch.row === 'player') {
+            if (action === 'down') watch = { ...watch, row: 'metadata', index: 0 };
+            else if (action === 'right' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
+          } else if (watch.row === 'metadata') {
+            if (action === 'up') watch = { ...watch, row: 'player', index: 0 };
+            else if (action === 'down') watch = { ...watch, row: 'controls', index: event.availableControls?.[0] ?? 0, controlIndex: event.availableControls?.[0] ?? 0 };
+            else if (action === 'right' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
+          } else if (watch.row === 'recommendations') {
+            if (action === 'left') watch = { ...watch, row: 'player', index: 0 };
+            else if (action === 'up' && watch.index > 0) watch = { ...watch, index: watch.index - 1, recommendationIndex: watch.index - 1 };
+            else if (action === 'down' && watch.index + 1 < event.cardCount) watch = { ...watch, index: watch.index + 1, recommendationIndex: watch.index + 1 };
+            else if (action === 'down') effect('loadRecommendations');
+          } else if (watch.row === 'progress') {
+            if (action === 'up') watch = { ...watch, row: 'player', index: 0 };
+            else if (action === 'down') watch = { ...watch, row: 'controls', index: watch.controlIndex };
+            else if (action === 'right' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
+          } else if (action === 'up') watch = { ...watch, row: 'metadata', index: 0 };
+          else if (action === 'right' || action === 'left') {
+            const next = action === 'left' ? [...(event.availableControls || [])].reverse().find(i => i < watch.index) : event.availableControls?.find(i => i > watch.index);
+            if (next !== undefined) watch = { ...watch, index: next, controlIndex: next };
+            else if (action === 'right' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
+          }
+          effect('focus'); break;
+        }
         if (action === 'back') {
-          if (watch.row === 'recommendations' || watch.row === 'progress') {
-            watch = { ...watch, row: 'controls', index: watch.controlIndex }; effect('focus');
-          } else effect('mode', 'playback');
+          if (event.windowed && watch.row === 'metadata') { watch = { ...watch, row: 'player', index: 0 }; effect('focus'); }
+          else if (watch.row === 'recommendations' || watch.row === 'progress') {
+            watch = { ...watch, row: event.windowed ? 'player' : 'controls', index: event.windowed ? 0 : watch.controlIndex }; effect('focus');
+          } else if (event.windowed && watch.row === 'controls') { watch = { ...watch, row: 'player', index: 0 }; effect('focus'); }
+          else effect('mode', 'playback');
         } else if (action === 'confirm') {
-          if (watch.row === 'progress') { watch = { ...watch, adjusting: true }; effect('focus'); }
+          if (watch.row === 'player') effect('activate', 'fullscreen');
+          else if (watch.row === 'metadata') effect('activate', 'description');
+          else if (watch.row === 'progress') { watch = { ...watch, adjusting: true }; effect('focus'); }
           else if (watch.row === 'recommendations') effect('recommendation', event.recommendationKey);
           else effect('activate', event.controlAction);
         } else if (action === 'left' || action === 'right') {

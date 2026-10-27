@@ -3,9 +3,8 @@ import { onBeforeUnmount, ref } from 'vue';
 import VideoThumbnail from './VideoThumbnail.vue';
 import { useCardPreview } from './use-card-preview';
 import { useI18n } from '../shared/use-i18n';
-import ChannelBadge from './ChannelBadge.vue';
+import CardMetadataRow from './CardMetadataRow.vue';
 import ChannelAvatar from './ChannelAvatar.vue';
-import ViewCountIcon from './ViewCountIcon.vue';
 import type { BrowseItem } from '../shared/browse-data';
 const props = defineProps<{ item: BrowseItem; selected: boolean; register: (id: string, node: HTMLAnchorElement | null) => void }>();
 const emit = defineEmits<{ select: [id: string]; open: [id: string] }>();
@@ -39,16 +38,15 @@ onBeforeUnmount(() => press?.cancel());
       </template>
       <slot name="cover-overlay" />
     </VideoThumbnail>
-    <div class="card-copy" :class="{ 'has-channel-avatar': (item.channel || item.channelAvatar) && !item.isPlaylist }">
-      <ChannelAvatar v-if="(item.channel || item.channelAvatar) && !item.isPlaylist" class="card-channel-avatar"
-        :src="item.channelAvatar" :name="item.channel" :size="36" />
-      <div class="card-details">
-        <strong>{{ item.title }}</strong>
-        <div class="card-metadata-row">
-          <span class="channel">{{ item.channel }}<ChannelBadge :badge="item.channelBadge" /></span>
-          <span v-if="item.viewCount || item.publishedTime" class="card-stats"><span v-if="item.viewCount" class="card-view-count"><ViewCountIcon />{{ item.viewCount }}</span>{{ item.viewCount && item.publishedTime ? ' ' : '' }}<span v-if="item.publishedTime">{{ item.publishedTime }}</span></span>
+    <slot name="metadata">
+      <div class="card-copy" :class="{ 'has-channel-avatar': (item.channel || item.channelAvatar) && !item.isPlaylist }">
+        <ChannelAvatar v-if="(item.channel || item.channelAvatar) && !item.isPlaylist" class="card-channel-avatar"
+          :src="item.channelAvatar" :name="item.channel" :size="36" />
+        <div class="card-details">
+          <strong>{{ item.title }}</strong>
+          <CardMetadataRow :item="item" />
         </div>
       </div>
-    </div>
+    </slot>
   </a>
 </template>

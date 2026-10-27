@@ -1,3 +1,4 @@
+import { safeHomeFilterData } from '../shared/home-filter';
 import { PAGE_REQUEST, PAGE_RESPONSE } from './page-protocol';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import type { FeedCategory } from '../sites/youtube-feed';
@@ -64,7 +65,8 @@ export function createFeedClient() {
           let channelAvatar: string | undefined;
           try { if (typeof item.channelAvatar === 'string' && item.channelAvatar.length <= 4096 &&
             new URL(item.channelAvatar).protocol === 'https:') channelAvatar = item.channelAvatar; } catch { /* No avatar. */ }
-          return { id: item.id, title: item.title.slice(0, 2000), channel: item.channel.slice(0, 2000),
+          const filterData = safeHomeFilterData(item.filterData);
+          return { ...(filterData ? { filterData } : {}), id: item.id, title: item.title.slice(0, 2000), channel: item.channel.slice(0, 2000),
           ...(channelAvatar ? { channelAvatar } : {}),
           ...(['verified', 'artist'].includes(item.channelBadge || '') ? { channelBadge: item.channelBadge } : {}),
           ...(typeof item.viewCount === 'string' ? { viewCount: item.viewCount.slice(0, 200) } : {}),

@@ -1,9 +1,37 @@
+import { build } from 'vite';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { browserPage, settingsPage } from './helpers/bundles.mjs';
 import { mainFixture } from './helpers/main-bundle.mjs';
+
+test('settings keep large rows inside a small player and leave windowed recommendations visible', async t => {
+  const page = await browserPage(t);
+  await page.setViewportSize({ width: 640, height: 480 });
+  await page.setContent(`<html class="ytg-watch-layout ytg-watch-active ytg-settings-open" data-ytg-playback-layout="windowed"><body>
+    <div id="movie_player"><div class="ytp-settings-menu" style="position:absolute;width:300px;height:350px;bottom:160px;right:25px">
+    <div class="ytp-panel-menu"><div class="ytp-menuitem" style="height:40px;font-size:13px">Quality</div><div style="height:400px"></div></div></div></div>
+    <div id="ytg-watch" style="position:fixed;inset:56px 0 0;z-index:2147483646"><aside style="position:absolute;right:0;top:0;width:96px;height:200px;background:white">Recommendations</aside></div>
+    <div id="yt-gamepad-overlay" style="--ytg-focus-color:black"></div></body></html>`);
+  await page.addStyleTag({ content: readFileSync(new URL('../src/app/theater.css', import.meta.url), 'utf8') });
+  const geometry = await page.evaluate(() => {
+    const player = document.querySelector('#movie_player').getBoundingClientRect();
+    const menu = document.querySelector('.ytp-settings-menu').getBoundingClientRect();
+    const row = getComputedStyle(document.querySelector('.ytp-menuitem'));
+    return { inside: menu.top >= player.top && menu.bottom <= player.bottom && menu.left >= player.left && menu.right <= player.right,
+      height: row.height, font: row.fontSize,
+      recommendations: getComputedStyle(document.querySelector('#ytg-watch')).visibility,
+      sideHit: document.elementFromPoint(630, 80)?.textContent,
+      menuHit: !!document.elementFromPoint(menu.left + 20, menu.top + 20)?.closest('.ytp-settings-menu') };
+  });
+  assert.equal(geometry.inside, true);
+  assert.equal(geometry.height, '56px');
+  assert.equal(geometry.font, '20px');
+  assert.equal(geometry.recommendations, 'visible');
+  assert.equal(geometry.sideHit, 'Recommendations');
+  assert.equal(geometry.menuHit, true);
+});
 
 for (const layout of ['fullscreen', 'windowed']) test(`${layout} keeps its first media frame geometry through preparation and readiness`, async t => {
   const page = await browserPage(t);
@@ -35,12 +63,32 @@ for (const layout of ['fullscreen', 'windowed']) test(`${layout} keeps its first
   assert.equal(result.before.left, 320, 'native layout reproduces the initial right offset');
   assert.equal(result.firstFrame.left, 0);
   assert.equal(result.firstFrame.top, layout === 'fullscreen' ? 0 : 56);
-  const [width, height] = layout === 'fullscreen' ? [1280, 900] : [844.8, 475.2];
+  const [width, height] = layout === 'fullscreen' ? [1280, 900] : [1088, 612];
   assert.ok(Math.abs(result.firstFrame.width - width) < 0.02);
   assert.ok(Math.abs(result.firstFrame.height - height) < 0.02);
   assert.deepEqual(result.pending, result.firstFrame, 'watch URL handoff keeps the same geometry');
   assert.deepEqual(result.playing, result.firstFrame, 'readiness keeps the first-frame geometry');
   assert.deepEqual(result.canceled, result.before, 'canceling restores native layout');
+});
+
+test('windowed media maximizes its area and shares remaining width with the side panel', async t => {
+  const page = await browserPage(t);
+  await page.setContent('<html class="ytg-watch-layout" data-ytg-playback-layout="windowed"><body><div id="movie_player"></div></body></html>');
+  await page.addStyleTag({ content: readFileSync(new URL('../src/app/theater.css', import.meta.url), 'utf8') });
+  for (const [width, height] of [[1920, 1080], [1280, 900], [960, 720], [640, 480]]) {
+    await page.setViewportSize({ width, height });
+    for (const ratio of [16 / 9, 21 / 9, 4 / 3, 9 / 16]) {
+      const bounds = await page.evaluate(ratio => {
+        document.documentElement.style.setProperty('--ytg-video-ratio', String(ratio));
+        const rect = document.querySelector('#movie_player').getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      }, ratio);
+      const expectedWidth = Math.min(width * .85, (height - 56 - 96) * ratio);
+      assert.ok(Math.abs(bounds.width - expectedWidth) < .1, `maximal video width at ${width}, ratio ${ratio}`);
+      assert.ok(Math.abs(bounds.height - bounds.width / ratio) < .1, 'frame matches media without added letterboxing');
+      assert.ok(bounds.height + 56 + 96 <= height + .1, 'metadata and controls retain their space');
+    }
+  }
 });
 
 test('settings offer only the two gamepad layouts and retain the saved choice', async t => {
@@ -96,7 +144,7 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
   assert.equal(await page.evaluate(() => document.documentElement.classList.contains('ytg-watch-layout')), true);
   assert.equal(await page.locator('.ytp-chrome-bottom').isVisible(), false, 'mouse uses custom gamepad playback controls');
   assert.equal(await page.locator('#below').isVisible(), false);
-  assert.ok(Math.abs((await mediaBounds()).width - 844.8) < 0.02);
+  assert.ok(Math.abs((await mediaBounds()).width - 1088) < 0.02);
   const banner = page.locator('#ytg-browse-top');
   await banner.waitFor();
   const bannerBounds = await banner.boundingBox();
@@ -130,6 +178,21 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
     expected: getComputedStyle(node.getRootNode().host).color
   }));
   assert.equal(descriptionColors.text, descriptionColors.expected, 'windowed buttons use readable page-theme text');
+  const enterFullscreen = page.locator('#ytg-watch [data-action="fullscreen"]');
+  assert.equal(await page.locator('#ytg-watch .transport-group').isVisible(), false);
+  await enterFullscreen.click();
+  await page.waitForFunction(() => document.fullscreenElement === document.documentElement);
+  await effective('fullscreen');
+  assert.equal(await enterFullscreen.isVisible(), false);
+  await page.mouse.move(300, 200);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.ytgPlaybackLayout), 'fullscreen', 'mouse activity preserves explicitly entered fullscreen');
+  const fullBounds = await mediaBounds();
+  assert.equal(fullBounds.width, await page.evaluate(() => innerWidth));
+  assert.equal(fullBounds.height, await page.evaluate(() => innerHeight));
+  await page.evaluate(() => document.exitFullscreen());
+  await effective('windowed');
+  assert.equal(await enterFullscreen.isVisible(), true);
+  assert.equal(await page.locator('#ytg-watch .transport-group').isVisible(), false);
   mkdirSync(new URL('../output/playwright/', import.meta.url), { recursive: true });
   await page.screenshot({ path: fileURLToPath(new URL('../output/playwright/layout-windowed.png', import.meta.url)) });
 
@@ -151,7 +214,7 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
   await effective('windowed');
   await banner.waitFor();
   assert.equal(await page.evaluate(() => window.YTGamepadInput.mode), 'gamepad');
-  assert.ok(Math.abs((await mediaBounds()).width - 844.8) < 0.02, 'saved windowed layout also applies to gamepad input');
+  assert.ok(Math.abs((await mediaBounds()).width - 1088) < 0.02, 'saved windowed layout also applies to gamepad input');
   await page.evaluate(() => { history.pushState({}, '', '/watch?v=second'); document.dispatchEvent(new Event('yt-navigate-finish')); });
   await effective('windowed');
   await page.locator('#ytg-watch').waitFor();
@@ -163,7 +226,7 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
   await page.mouse.wheel(0, 1);
   await page.waitForFunction(() => window.YTGamepadInput.mode === 'mouse');
   await effective('windowed');
-  assert.ok(Math.abs((await mediaBounds()).width - 844.8) < 0.02);
+  assert.ok(Math.abs((await mediaBounds()).width - 1088) < 0.02);
   assert.equal(await page.evaluate(() => window.nativeSizeClicks), 0, 'custom layouts never toggle the removed native theater layout');
   await page.evaluate(() => window.postMessage({ source: 'yt-gamepad-settings', values: { enabled: false } }, location.origin));
   await page.waitForFunction(() => !document.documentElement.classList.contains('ytg-watch-layout'));
@@ -172,4 +235,47 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
   assert.equal(await page.locator('#below').isVisible(), true);
   assert.equal(await page.locator('.ytp-chrome-bottom').isVisible(), true);
   assert.deepEqual(await mediaBounds(), { width: 960, height: 540 });
+});
+
+
+for (const layout of ['windowed', 'fullscreen']) test(`${layout} transition covers native details and releases on destination frame or playing`, async t => {
+  const page = await browserPage(t);
+  await page.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<html><body><div id="movie_player"><video></video></div><div id="below">Native details</div></body></html>' }));
+  await page.goto('https://www.youtube.com/watch?v=old');
+  await page.addStyleTag({ content: readFileSync(new URL('../src/app/theater.css', import.meta.url), 'utf8') });
+  const result = await build({ configFile: false, publicDir: false, logLevel: 'silent',
+    build: { write: false, minify: false, lib: { entry: fileURLToPath(new URL('../src/ui/watch-transition.ts', import.meta.url)), formats: ['iife'], name: 'WatchTransitionFixture' } } });
+  const source = (Array.isArray(result) ? result[0] : result).output.find(item => item.type === 'chunk').code;
+  await page.addScriptTag({ content: source + ';window.makeTransition = WatchTransitionFixture.createWatchTransition;' });
+  const geometry = await page.evaluate(layout => {
+    document.documentElement.classList.add('ytg-watch-layout');
+    document.documentElement.dataset.ytgPlaybackLayout = layout;
+    const media = document.querySelector('video');
+    for (const [name, value] of Object.entries({ readyState: 2, videoWidth: 640, videoHeight: 360, paused: false }))
+      Object.defineProperty(media, name, { configurable: true, value });
+    media.requestVideoFrameCallback = fn => { window.destinationFrame = fn; return 1; };
+    media.cancelVideoFrameCallback = () => { window.destinationFrame = undefined; };
+    window.playerIdentity = 'old';
+    window.transition = window.makeTransition(() => window.playerIdentity);
+    window.transition.sync(true, '/watch?v=old', false);
+    window.transition.sync(true, '/watch?v=new', true);
+    const mask = document.querySelector('#ytg-watch-transition').getBoundingClientRect();
+    const mediaCover = document.querySelector('#ytg-watch-transition :is(img,canvas):not([hidden])').getBoundingClientRect();
+    const player = document.querySelector('#movie_player').getBoundingClientRect();
+    history.pushState({}, '', '/watch?v=new'); window.playerIdentity = 'new';
+    return { mask: [mask.width, mask.height], media: [mediaCover.x, mediaCover.y, mediaCover.width, mediaCover.height], player: [player.x, player.y, player.width, player.height], viewport: [innerWidth, innerHeight] };
+  }, layout);
+  assert.deepEqual(geometry.mask, geometry.viewport);
+  for (let i = 0; i < 4; i++) assert.ok(Math.abs(geometry.media[i] - geometry.player[i]) < 1);
+  await page.waitForFunction(() => !!window.destinationFrame);
+  assert.equal(await page.locator('#ytg-watch-transition').count(), 1);
+  await page.evaluate(() => window.destinationFrame());
+  assert.equal(await page.locator('#ytg-watch-transition').count(), 0);
+  await page.evaluate(() => {
+    window.transition.sync(true, '/watch?v=third', true);
+    history.pushState({}, '', '/watch?v=third'); window.playerIdentity = undefined;
+    document.querySelector('video').dispatchEvent(new Event('playing', { bubbles: true }));
+  });
+  assert.equal(await page.locator('#ytg-watch-transition').count(), 0, 'playing releases cover without waiting on metadata');
+  await page.evaluate(() => window.transition.destroy());
 });

@@ -9,6 +9,7 @@ export const useBrowseStore = defineStore('browse', () => {
   const categories = shallowRef<FeedCategory[]>([]);
   const category = shallowRef('');
   const loading = shallowRef(false);
+  const refreshing = shallowRef(false), refreshFailed = shallowRef(false);
   const error = shallowRef('');
   let itemIds = new Set<string>();
   function apply(next: BrowseSnapshot) {
@@ -29,5 +30,5 @@ export const useBrowseStore = defineStore('browse', () => {
     if (itemIds.has(id)) activeItemId.value = id;
   }
   return { snapshot: readonly(snapshot), activeItemId: readonly(activeItemId), apply, select,
-    categories, category, loading, error };
+    categories, category, loading, refreshing, refreshFailed, error };
 });

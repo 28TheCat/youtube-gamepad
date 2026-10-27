@@ -1,10 +1,10 @@
-import { legacyModuleSource } from '../scripts/test-source.mjs';
+import { moduleSource } from '../scripts/test-source.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
-const source = ['src/ui/ui-api.ts', 'src/shared/actions.ts', 'src/input/bindings.ts', 'src/app/content.ts'].map(file => legacyModuleSource(file)).join('\n');
+const source = moduleSource('src/app/content.ts');
 function setup() {
   const listeners = new Map(), intervals = new Set(), messages = [], storageListeners = new Set(), runtimeListeners = new Set();
   let observerCallback, disconnects = 0, themeWrites = 0, delayedSettings;

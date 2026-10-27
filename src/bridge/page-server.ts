@@ -3,7 +3,7 @@ import { createSidebarService } from '../sites/youtube-sidebar';
 import { sidebarSnapshot } from '../shared/sidebar-data';
 import { createWatchDataService } from '../sites/youtube-watch-data';
 import type { YouTubePlayer, DisposerHost } from '../../types/core';
-import { PAGE_REQUEST, PAGE_RESPONSE, PAGE_HISTORY, parsePageMessage, videoDetails, watchInfoSnapshot, accountSnapshot } from './page-protocol';
+import { PAGE_REQUEST, PAGE_RESPONSE, PAGE_HISTORY, parsePageMessage, videoDetails, watchInfoSnapshot, accountSnapshot, playbackQualities } from './page-protocol';
 import { createYouTubeFeedService } from '../sites/youtube-feed';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import { createWatchNextService } from '../sites/youtube-next';
@@ -11,6 +11,7 @@ import { createCommentsService } from '../sites/youtube-comments';
 import { commentLanguage } from '../shared/comment-language';
 import { sidebarBrowseEndpoint } from '../shared/explore-pages';
 import { createWatchInfoService } from '../sites/youtube-watch-info';
+import { createShortsService } from '../sites/youtube-shorts';
 
 export function startPageServer() {
   const key = Symbol.for('yt-gamepad.page.dispose');
@@ -27,6 +28,8 @@ export function startPageServer() {
   const watchData = createWatchDataService();
   const next = createWatchNextService(watchData);
   const comments = createCommentsService();
+  const shorts = createShortsService();
+  cleanups.push(shorts.destroy);
   const watchInfo = createWatchInfoService(watchData);
   cleanups.push(watchData.destroy);
   cleanups.push(watchInfo.destroy);
@@ -37,11 +40,58 @@ export function startPageServer() {
     if (destroyed || serving) return;
     const request = parsePageMessage((event as CustomEvent).detail);
     if (!request || typeof request.id !== 'string' || request.id.length > 100 ||
-        !['readSidebar', 'readAccount', 'ping', 'readPlayerVideoId', 'readVideoDetails', 'readWatchInfo', 'watchAction', 'watchPlaylists', 'watchPlaylistToggle', 'showControls', 'hideControls', 'readBrowseCategories', 'requestBrowse', 'cancelBrowse', 'openBrowseVideo', 'openBrowseRoute', 'readWatchNext', 'moreWatchNext', 'readComments', 'moreComments', 'commentReplies', 'commentTranslate'].includes(request.operation as string)) return;
+        !['shortsRecommendations', 'playShorts', 'readShortsSettings', 'shortsSetting', 'readSidebar', 'readAccount', 'ping', 'readPlayerVideoId', 'readVideoDetails', 'readWatchInfo', 'watchAction', 'watchPlaylists', 'watchPlaylistToggle', 'showControls', 'hideControls', 'readBrowseCategories', 'requestBrowse', 'cancelBrowse', 'openBrowseVideo', 'openBrowseRoute', 'readWatchNext', 'moreWatchNext', 'readComments', 'moreComments', 'commentReplies', 'commentTranslate', 'commentPost', 'commentSort'].includes(request.operation as string)) return;
     const reply = (ok: boolean, value?: unknown) => {
       if (!destroyed) document.dispatchEvent(new CustomEvent(PAGE_RESPONSE, { detail: JSON.stringify({ version: 1,
         id: request.id, operation: request.operation, ok, value }) }));
     };
+    if (request.operation === 'shortsRecommendations' || request.operation === 'playShorts') {
+      if (!parseShortLink(location.pathname) || typeof request.videoId !== 'string' || !/^[\w-]{1,100}$/.test(request.videoId)) { reply(false); return; }
+      if (request.operation === 'shortsRecommendations') {
+        void shorts.read(request.videoId, request.refresh === true).then(value => reply(true, value), () => reply(false)); return;
+      }
+      try {
+        const player = document.querySelector<YouTubePlayer>('[data-ytg-shorts-media],ytd-shorts #shorts-player,ytd-shorts .html5-video-player');
+        if (typeof player?.loadVideoById !== 'function') { reply(false); return; }
+        player.loadVideoById(request.videoId);
+        history.replaceState(history.state, '', `/shorts/${encodeURIComponent(request.videoId)}`);
+        reply(true, true);
+      } catch { reply(false); }
+      return;
+    }
+    if (request.operation === 'readShortsSettings' || request.operation === 'shortsSetting') {
+      try {
+        const target = parseShortLink(location.pathname);
+        const reel = document.querySelector('ytd-reel-video-renderer[is-active],ytd-reel-video-renderer[active]');
+        const player = reel?.querySelector<YouTubePlayer>('.html5-video-player,#shorts-player');
+        const videoId = player?.getVideoData?.()?.video_id || player?.getPlayerResponse?.()?.videoDetails?.videoId;
+        if (!target || !player || videoId !== target.videoId) { reply(false); return; }
+        const available = player.getAvailableQualityLevels?.() || [];
+        const qualities = playbackQualities.filter(value => available.includes(value) && value !== 'auto');
+        if (qualities.length && (player.setPlaybackQualityRange || player.setPlaybackQuality)) qualities.unshift('auto');
+        else qualities.length = 0;
+        const captionButton = player.querySelector<HTMLButtonElement>('.ytp-subtitles-button');
+        const tracks = player.getOption?.('captions', 'tracklist');
+        const nativeCaptions = !!captionButton && !captionButton.disabled && captionButton.getAttribute('aria-disabled') !== 'true' && getComputedStyle(captionButton).display !== 'none';
+        const captionsAvailable = !!player.toggleSubtitles && Array.isArray(tracks) && tracks.length > 0 || nativeCaptions;
+        if (request.operation === 'readShortsSettings') {
+          reply(true, { videoId, qualities, quality: player.getPlaybackQuality?.() || '', captionsAvailable,
+            captionsEnabled: player.isSubtitlesOn ? player.isSubtitlesOn() === true : captionButton?.getAttribute('aria-pressed') === 'true' }); return;
+        }
+        if (request.videoId !== videoId) { reply(false); return; }
+        if (request.action === 'captions' && captionsAvailable) {
+          if (player.toggleSubtitles) player.toggleSubtitles(); else captionButton!.click();
+          reply(true, true); return;
+        }
+        if (request.action === 'quality' && typeof request.quality === 'string' && qualities.includes(request.quality as typeof playbackQualities[number])) {
+          if (player.setPlaybackQualityRange) player.setPlaybackQualityRange(request.quality);
+          else player.setPlaybackQuality?.(request.quality);
+          reply(true, true); return;
+        }
+        reply(false);
+      } catch { reply(false); }
+      return;
+    }
     if (request.operation === 'readSidebar') {
       void sidebar.read().then(value => reply(true, sidebarSnapshot(value)), () => reply(false)); return;
     }
@@ -69,6 +119,15 @@ export function startPageServer() {
       if (typeof request.key !== 'string' || request.key.length > 200) return;
       reply(true, comments.replies(request.key)); return;
     }
+    if (request.operation === 'commentPost') {
+      if (typeof request.text !== 'string' || !request.text.trim() || request.text.length > 4000 ||
+          request.key !== undefined && (typeof request.key !== 'string' || !request.key || request.key.length > 200)) { reply(false); return; }
+      void comments.post(request.text, request.key as string | undefined).then(value => reply(true, value), () => reply(false)); return;
+    }
+    if (request.operation === 'commentSort') {
+      if (request.sort !== 'TOP_COMMENTS' && request.sort !== 'NEWEST_FIRST') { reply(false); return; }
+      reply(true, comments.changeSort(request.sort)); return;
+    }
     if (request.operation === 'commentTranslate') {
       if (typeof request.key !== 'string' || !request.key || request.key.length > 200 || !commentLanguage(request.language)) return;
       reply(true, comments.translate(request.key, request.language as string)); return;
@@ -87,16 +146,19 @@ export function startPageServer() {
       if (short && short.href === request.href) {
         try {
           const app = document.querySelector('ytd-app') as (HTMLElement & { navigate_?: (endpoint: object) => void }) | null;
-          if (location.pathname.startsWith('/shorts/')) {
-            if (typeof app?.navigate_ !== 'function') { reply(false); return; }
+          if (typeof app?.navigate_ === 'function') {
             app.navigate_({ commandMetadata: { webCommandMetadata: { url: short.href, webPageType: 'WEB_PAGE_TYPE_SHORTS' } },
               reelWatchEndpoint: { videoId: short.videoId } });
             reply(true, true); return;
           }
+          if (location.pathname.startsWith('/shorts/')) { reply(false); return; }
           // Shorts must start the native reel pipeline, including from our feed.
           location.assign(short.href);
           reply(true, true);
-        } catch { reply(false); }
+        } catch {
+          if (location.pathname.startsWith('/shorts/')) { reply(false); return; }
+          try { location.assign(short.href); reply(true, true); } catch { reply(false); }
+        }
         return;
       }
       const target = parseWatchLink(request.href);
@@ -121,7 +183,10 @@ export function startPageServer() {
     serving = true;
     let value: unknown, ok = true;
     try {
-      const player = request.operation === 'ping' ? null : document.querySelector<YouTubePlayer>('#movie_player');
+      const player = request.operation === 'ping' ? null : document.querySelector<YouTubePlayer>(
+        request.operation === 'readPlayerVideoId' && location.pathname.startsWith('/shorts/')
+          ? '[data-ytg-shorts-media],ytd-reel-video-renderer[is-active] .html5-video-player,ytd-reel-video-renderer[active] .html5-video-player,ytd-shorts #shorts-player'
+          : '#movie_player');
       switch (request.operation) {
         case 'ping': value = true; break;
         case 'readPlayerVideoId': {

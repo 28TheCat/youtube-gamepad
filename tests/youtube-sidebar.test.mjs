@@ -88,3 +88,31 @@ test('destroy aborts pending guide requests and refuses new requests', async () 
   await assert.rejects(pending, /cancelled/); await assert.rejects(s.service.read(), /destroyed/);
   assert.equal(s.calls[0].signal.aborted, true);
 });
+test('guide subscription IDs are exposed only as bounded channel identities',async()=>{
+ const f=fixture(()=>{const data=guideData();data.items[3].guideSubscriptionsSectionRenderer.items[0].guideEntryRenderer.navigationEndpoint.browseEndpoint.browseId='UCsubscriber';return data;});
+ const result=await f.service.read();assert.deepEqual(Array.from(result.subscribedChannelIds),['UCsubscriber']);assert.equal(result.personal.some(item=>item.href==='/channel/UCsubscriber'),false);
+});
+
+test('subscribed people include names and safe avatars in guide order without duplicate or unsafe identities', async () => {
+  const f = fixture(() => {
+    const data = guideData();
+    const items = data.items[3].guideSubscriptionsSectionRenderer.items;
+    const entry = items[0].guideEntryRenderer;
+    entry.navigationEndpoint.browseEndpoint.browseId = 'UCsubscriber';
+    entry.thumbnail = { thumbnails: [{ url: 'https://yt3.ggpht.com/avatar', width: 40, height: 40 }] };
+    items.push(structuredClone(items[0]));
+    const unsafe = structuredClone(items[0]);
+    unsafe.guideEntryRenderer.navigationEndpoint.browseEndpoint.browseId = 'UCsecond';
+    unsafe.guideEntryRenderer.thumbnail.thumbnails[0].url = 'javascript:alert(1)';
+    items.push(unsafe);
+    return data;
+  });
+  const value = await f.service.read();
+  assert.equal(value.subscriptions.length, 2);
+  assert.equal(value.subscriptions[0].label, 'Subscribed creator');
+  assert.equal(value.subscriptions[0].href, '/channel/UCsubscriber/videos');
+  assert.equal(value.subscriptions[0].avatar, 'https://yt3.ggpht.com/avatar');
+  assert.equal(value.subscriptions[1].id, 'UCsecond');
+  assert.equal(value.subscriptions[1].avatar, undefined);
+  f.service.destroy();
+});

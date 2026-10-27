@@ -4,6 +4,8 @@ import LoadStatus from '../ui/LoadStatus.vue';
 import { useI18n } from '../shared/use-i18n';
 const { t } = useI18n();
 import VideoGridSettings from './VideoGridSettings.vue';
+import PlaybackParameterSettings from './PlaybackParameterSettings.vue';
+import HomeFilterSettings from './HomeFilterSettings.vue';
 import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { createInlineSettingsModel, categories, physicalNames, positions, adjustments } from './inline-settings-model';
 import CategorySettings from './CategorySettings.vue';
@@ -49,6 +51,7 @@ onBeforeUnmount(model.dispose);
       <button type="button" data-setting="enabled" :disabled="state.saving" :aria-pressed="state.values.enabled"
         @click="model.toggle('enabled')">{{ t("Enable gamepad controls ·") }} {{ state.values.enabled ? t('On') : t('Off') }}</button>
       <p>{{ t("Turning controls off closes this menu. Use the extension toolbar button to turn them on again.") }}</p>
+      <PlaybackParameterSettings :values="state.values" :disabled="state.saving" gamepad @save="model.savePlayback" />
     </template>
     <template v-if="state.category === 'display'">
       <button type="button" data-setting="theater" :disabled="state.saving" :aria-pressed="state.values.theater"
@@ -64,6 +67,7 @@ onBeforeUnmount(model.dispose);
       </div>
       <p>{{ t('Choose the gamepad playback layout. Mouse and keyboard use the windowed gamepad interface. Browser fullscreen is separate.') }}</p>
       <CategorySettings />
+      <HomeFilterSettings :values="state.values" :disabled="state.saving" gamepad @save="model.saveHomeFilter" />
       <VideoGridSettings :values="state.values" :disabled="state.saving" gamepad @save="(next, id) => model.saveGrid(next, id)" @reset="model.resetGrid" />
     </template>
     <template v-if="state.category === 'controller' && !state.bindingAction && !state.bindingKey">

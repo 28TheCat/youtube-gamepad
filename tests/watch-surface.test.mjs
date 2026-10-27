@@ -16,6 +16,121 @@ const result = await build({ configFile: false, publicDir: false, logLevel: 'sil
 const code = (Array.isArray(result) ? result[0] : result).output.find(item => item.type === 'chunk').code;
 const styles = readFileSync(new URL('../src/ui/watch.css', import.meta.url), 'utf8');
 
+test('collection tabs expose only their visible playable entries to controller focus', async t => {
+  const page = await browserPage(t);
+  await page.setContent('<html data-ytg-playback-layout="windowed"><body></body></html>');
+  await page.addStyleTag({ content: readFileSync(new URL('../src/ui/theme.css', import.meta.url), 'utf8') });
+  await page.evaluate(code);
+  await page.evaluate(styles => {
+    const api = WatchSurfaceFixture, scope = api.YTGamepadRuntime.scope('collection-focus');
+    const state = { row: 'recommendations', index: 0, panel: '', adjusting: false };
+    const controllerStyle = { register: () => () => {}, badge() {}, hint() {}, bind() {} };
+    window.surface = api.createWatchSurface({ controllerStyle,
+      createView: port => api.createVueWatchView({ ...port, styles: { watch: styles } }),
+      createPanels: port => api.YTGamepadWatchPanels.create(port)
+    }, { state: () => state, controller: () => ({ state: { enabled: true } }),
+      activate() {}, seek() {}, activity() {}, input() {}, focus() {}, send() { return { effects: [] }; }
+    }, scope);
+    surface.sync(true, 'controls');
+    const queue = [
+      { key: 'first', label: 'First episode', channel: 'Creator', thumbnail: '', queue: true },
+      { key: 'current', label: 'Current episode', channel: 'Creator', thumbnail: '', queue: true, selected: true },
+      { key: 'last', label: 'Last episode', channel: 'Creator', thumbnail: '', queue: true }
+    ];
+    surface.page({ title: 'Current episode', channel: 'Creator', description: '', queue,
+      recommendations: [queue[0], queue[2], { key: 'related', label: 'Related video', channel: '', thumbnail: '' }] }, {});
+  }, styles);
+  assert.deepEqual(await page.evaluate(() => surface.snapshot().recommendations.map(item => item.itemKey)), ['first', 'last']);
+  await page.locator('#ytg-watch').getByRole('tab', { name: 'Recommendations', exact: true }).click();
+  assert.deepEqual(await page.evaluate(() => surface.snapshot().recommendations.map(item => item.itemKey)), ['related']);
+  await page.evaluate(() => surface.focus(surface.snapshot().recommendations[0], false, 'controls'));
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement.dataset.videoId), 'related');
+  await page.evaluate(() => surface.cycleTab(-1));
+  assert.deepEqual(await page.evaluate(() => surface.snapshot().recommendations.map(item => [item.itemKey, item.index])), [['first', 0], ['last', 1]]);
+  await page.evaluate(() => surface.focus(surface.snapshot().recommendations[1], false, 'controls'));
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement.dataset.videoId), 'last');
+});
+
+for (const width of [767, 1280]) test(`windowed controller controls remain reachable at ${width}px`, async t => {
+  const page = await browserPage(t);
+  await page.setViewportSize({ width, height: 720 });
+  await page.setContent('<html class="ytg-gamepad-input" data-ytg-playback-layout="windowed"><body></body></html>');
+  await page.addStyleTag({ content: readFileSync(new URL('../src/ui/theme.css', import.meta.url), 'utf8') });
+  await page.evaluate(code);
+  await page.evaluate(styles => {
+    const api = WatchSurfaceFixture, scope = api.YTGamepadRuntime.scope('controller-strip');
+    const state = { row: 'controls', index: 0, panel: '', adjusting: false };
+    const controllerStyle = { register: () => () => {}, badge() {}, hint(node, text) { node.textContent = text; }, bind() {} };
+    window.surface = api.createWatchSurface({ controllerStyle,
+      createView: port => api.createVueWatchView({ ...port, styles: { watch: styles } }),
+      createPanels: port => api.YTGamepadWatchPanels.create(port)
+    }, { state: () => state, controller: () => ({ state: { enabled: true } }),
+      activate() {}, seek() {}, activity() {}, input() {}, focus() {}, send() { return { effects: [] }; }
+    }, scope);
+    surface.sync(true, 'controls');
+    surface.page({ title: 'Video', channel: 'Creator', description: '', recommendations: [] }, {});
+    surface.playback({ video: { paused: true, currentTime: 10, duration: 100, volume: .5, muted: false,
+      timeline: { canSeek: true, start: 0, end: 100, ranges: [] } } });
+  }, styles);
+  const result = await page.evaluate(() => {
+    const root = document.querySelector('#ytg-watch').shadowRoot, toolbar = root.querySelector('.toolbar');
+    const targets = surface.snapshot().controls.filter(target => target.available);
+    const visits = [...targets, ...targets.toReversed()].map(target => {
+      surface.focus(target, false, 'controls');
+      const node = root.activeElement, box = node.getBoundingClientRect(), strip = toolbar.getBoundingClientRect();
+      return { id: node.dataset.action, expected: target.id, width: box.width, height: box.height,
+        visible: box.left >= strip.left && box.right <= strip.right };
+    });
+    return { visits, overflow: toolbar.scrollWidth > toolbar.clientWidth,
+      hintVisible: getComputedStyle(root.querySelector('.hint')).display !== 'none', pageScroll: window.scrollY };
+  });
+  assert.equal(result.overflow, true);
+  for (const visit of result.visits) {
+    assert.equal(visit.id, visit.expected);
+    assert.ok(visit.width >= 48 && visit.height >= 48, visit.id + ' has a large target');
+    assert.equal(visit.visible, true, visit.id + ' scrolls fully into view');
+  }
+  assert.equal(result.hintVisible, true);
+  assert.equal(result.pageScroll, 0);
+  const appearances = await page.evaluate(() => {
+    const root = document.querySelector('#ytg-watch').shadowRoot;
+    const ids = ['fullscreen', 'like', 'dislike', 'comments', 'save', 'mute', 'captions', 'settings'];
+    return ids.map(id => {
+      const target = surface.snapshot().controls.find(item => item.id === id);
+      surface.focus(target, false, 'controls');
+      const node = root.querySelector(`[data-action="${id}"]`), style = getComputedStyle(node), icon = getComputedStyle(node.querySelector('svg'));
+      return { id, width: style.width, height: style.height, radius: style.borderRadius, background: style.backgroundColor,
+        color: style.color, outline: style.outlineWidth, outlineOffset: style.outlineOffset, iconWidth: icon.width, scale: style.scale };
+    });
+  });
+  const { id: firstId, ...reference } = appearances[0];
+  assert.equal(reference.width, '48px'); assert.equal(reference.height, '48px'); assert.equal(reference.radius, '12px');
+  for (const { id, ...appearance } of appearances) assert.deepEqual(appearance, reference, `${id} shares the controller button appearance`);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.evaluate(() => {
+    surface.focus(surface.snapshot().controls.find(item => item.id === 'channel'), false, 'controls');
+  });
+  const normalAppearances = await page.evaluate(() => {
+    const root = document.querySelector('#ytg-watch').shadowRoot;
+    return ['fullscreen', 'like', 'dislike', 'comments', 'save', 'mute', 'captions', 'settings'].map(id => {
+      const style = getComputedStyle(root.querySelector(`[data-action="${id}"]`));
+      return { width: style.width, height: style.height, radius: style.borderRadius, background: style.backgroundColor, color: style.color };
+    });
+  });
+  for (const appearance of normalAppearances) assert.deepEqual(appearance, normalAppearances[0], 'unselected controller icons share one appearance');
+  await page.evaluate(() => surface.focus(surface.snapshot().controls.find(item => item.id === 'fullscreen'), false, 'controls'));
+  mkdirSync('output/playwright', { recursive: true });
+  await page.locator('#ytg-watch .toolbar').screenshot({ path: `output/playwright/controller-toolbar-${width}.png` });
+  await page.evaluate(() => {
+    const root = document.querySelector('#ytg-watch').shadowRoot;
+    root.querySelectorAll('.selected').forEach(node => node.classList.remove('selected'));
+    root.activeElement?.blur();
+    document.documentElement.classList.remove('ytg-gamepad-input');
+    document.documentElement.dataset.ytgInputMode = 'mouse';
+  });
+  assert.equal(await page.locator('#ytg-watch [data-action=like]').evaluate(node => getComputedStyle(node).borderRadius), '50%', 'mouse buttons retain their original appearance');
+});
+
 for (const layout of ['windowed', 'fullscreen']) for (const dark of [false, true]) {
   test(`long descriptions stay readable with a visible close button (${layout}, ${dark ? 'dark' : 'light'})`, async t => {
     const page = await browserPage(t);
@@ -96,7 +211,8 @@ test('watch surface exposes data and restores recommendation identity after reor
   }, styles);
   const initial = await page.evaluate(() => surface.snapshot());
   assert.equal(initial.canSeek, false);
-  assert.equal(initial.controls.find(target => target.id === 'seekForward').available, false);
+  assert.equal(initial.controls.some(target => ['seekBack', 'playPause', 'seekForward'].includes(target.id)), false, 'windowed navigation omits the hidden transport controls');
+  assert.equal(initial.controls.find(target => target.id === 'fullscreen').available, true);
   assert.equal(initial.controls.find(target => target.id === 'goLive').available, false);
   assert.deepEqual(Object.keys(initial.recommendations[0]).sort(), ['available', 'id', 'index', 'itemKey', 'region']);
   await page.evaluate(() => { setPlayback(true); setPage(['a', 'b']); surface.focus(originalTarget, false, 'controls'); });

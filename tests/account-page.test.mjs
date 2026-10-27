@@ -45,6 +45,8 @@ test('API profile and account list render without a native avatar or menu, trap 
   assert.equal(await page.evaluate(() => window.__testUi.openPanel('account')), true);
   const panel = page.locator('#ytg-account-page');
   await panel.locator('.account-list-item').first().waitFor();
+  assert.equal(await panel.locator('[data-account-close] svg').getAttribute('data-icon'), 'mingcute:left-line');
+  assert.equal(await panel.locator('.account-chevron[data-icon="mingcute:right-line"]').count(), 3);
   assert.equal(await panel.locator('.account-profile h2').textContent(), 'Example Creator');
   assert.equal(await panel.locator('.account-profile p').textContent(), '@example');
   assert.equal(await panel.locator('.account-list-item').count(), 2);
@@ -95,6 +97,7 @@ test('API account errors offer a retry and a late response cannot reopen a close
 test('signed-out account view provides official sign-in navigation without reading native controls', { timeout: 45000 }, async t => {
   const { page, calls } = await fixture(t, { signedIn: false });
   await page.locator('.client-account').click();
+  assert.equal(await page.locator('.account-avatar-fallback').getAttribute('data-icon'), 'mingcute:person-line');
   await page.locator('#ytg-account-page').getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.waitForURL('**/signin?next=%2F');
   assert.equal(calls.length, 0);

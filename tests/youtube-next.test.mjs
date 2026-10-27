@@ -49,12 +49,14 @@ test('recommendation snapshots retain explicit owner verification badges', () =>
 test('next parses only related results and queue; preserves repeated queue positions and ignores ads', () => {
   const { parseWatchNext } = load();
   const raw = response([compact('current'), compact('related'), compact('related'), { adSlotRenderer: { content: compact('advert') } }, continuation('related-page')]);
+  raw.contents.twoColumnWatchNextResults.playlist.playlist.title = 'My collection';
   raw.comments = compact('comment-video');
   const result = parseWatchNext(raw, 'current');
   assert.deepEqual(Array.from(result.recommendations, item => item.label), ['related']);
   assert.equal(result.recommendations[0].duration, '3:00');
   assert.deepEqual(Array.from(result.queue, item => item.href), ['/watch?v=current&list=PLtest&index=1', '/watch?v=same&list=PLtest&index=2', '/watch?v=same&list=PLtest&index=3']);
   assert.equal(result.queue[0].selected, true);
+  assert.equal(result.playlistTitle, 'My collection');
   assert.equal(result.queueContinuation, 'queue-page');
   assert.equal(result.recommendationContinuation, 'related-page');
 });

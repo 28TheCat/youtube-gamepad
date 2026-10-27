@@ -64,3 +64,7 @@ Author: Kenney (https://kenney.nl). Source: https://kenney.nl/assets/input-promp
 Author: nicefrog. Source: https://opengameart.org/content/generic-gamepad-template . License: CC0 1.0; see `licenses/nicefrog-gamepad-LICENSE.txt`.
 
 `assets/controller/layout.svg` is the original SVG downloaded from https://opengameart.org/sites/default/files/controller.svg . `assets/controller/template.json` records its source and SHA-256 hash. Geometry remains unchanged. CSS scales it and adjusts its appearance on the binding overview. Hotspots align with the template's symmetric stick layout. The author describes the artwork as referencing a Logitech F310; it is a generic illustration, not manufacturer-provided artwork.
+
+## YouTube brand icon
+
+`assets/brand/youtube-icon.svg` contains the original icon group extracted from Google's official SVG at https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg . Original paths, proportions and red/white colors are preserved; the wordmark is omitted and the viewBox fits the icon. It is bundled locally for the YouTube home button. YouTube trademarks remain the property of Google LLC. Brand guidance: https://developers.google.com/youtube/terms/branding-guidelines .

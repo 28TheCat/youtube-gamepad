@@ -14,6 +14,7 @@ function load(file, context = {}) {
   vm.runInNewContext(source, { exports, Headers, Request, Response, URL, URLSearchParams, structuredClone, require: name => name === 'youtubei.js/web' ? YouTubeJs : name === './youtube-request' ? load('sites/youtube-request', context) : modules[name], ...context });
   return exports;
 }
+modules['../shared/home-filter'] = load('shared/home-filter');
 modules['../shared/browse-categories'] = load('shared/browse-categories');
 modules['../shared/watch-link'] = load('shared/watch-link');
 modules['../shared/playlist-colors'] = load('shared/playlist-colors');
@@ -21,9 +22,31 @@ modules['../shared/explore-pages'] = load('shared/explore-pages');
 modules['./youtube-parser'] = load('sites/youtube-parser');
 modules['./youtube-channel-badge'] = load('sites/youtube-channel-badge');
 modules['./youtube-search'] = load('sites/youtube-search');
+modules['./youtube-session'] = load('sites/youtube-session');
 modules['./youtube-channel'] = load('sites/youtube-channel');
 const { parseYouTubeJsBrowse } = modules['./youtube-search'];
 const { listEndpoint } = modules['./youtube-parser'];
+
+test('channel parser sessions reject unexpected library requests before reaching fetch', async t => {
+  let actions;
+  const fetch = t.mock.method(globalThis, 'fetch', async () => { throw Error('Unexpected global fetch'); });
+  const library = { ...YouTubeJs, YT: { ...YouTubeJs.YT, Channel: class extends YouTubeJs.YT.Channel {
+    constructor(channelActions, ...args) {
+      actions = channelActions;
+      super(channelActions, ...args);
+    }
+  } } };
+  const { parseChannelPage } = load('sites/youtube-channel', {
+    require: name => name === 'youtubei.js/web' ? library : modules[name]
+  });
+  parseChannelPage({ contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: {
+    title: 'Videos', selected: true, endpoint: { browseEndpoint: { browseId: 'UCcreator' } },
+    content: { richGridRenderer: { contents: [] } }
+  } }] } } }, { client: { clientName: 'WEB', clientVersion: 'test' } });
+  assert.ok(actions, 'channel controls must receive the parser session');
+  await assert.rejects(actions.execute('/browse', { browseId: 'UCcreator' }), /Unexpected channel request/);
+  assert.equal(fetch.mock.callCount(), 0);
+});
 
 test('attributed metadata defaults command ranges without losing text or channel links', t => {
   const warnings = t.mock.method(console, 'warn', () => {});

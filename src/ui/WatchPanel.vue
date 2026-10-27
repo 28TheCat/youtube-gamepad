@@ -1,16 +1,23 @@
 <script setup lang="ts">
 import { useI18n } from '../shared/use-i18n';
 import CommentThread from './CommentThread.vue';
+import CommentActions from './CommentActions.vue';
+import SubscriptionOptions from './SubscriptionOptions.vue';
+import { ref } from 'vue';
+const commentActions = ref<InstanceType<typeof CommentActions>>();
+const reply = (key: string) => commentActions.value?.reply(key);
 import LoadStatus from './LoadStatus.vue';
 const { t } = useI18n();
 import type { Directive } from 'vue';
-import type { CommentSnapshot, ControllerStyle, SavedPlaylistSnapshot } from '../../types/ports';
+import type { CommentSnapshot, CommentsStatus, ControllerStyle, SavedPlaylistSnapshot } from '../../types/ports';
 defineProps<{
   panel: 'description' | 'comments' | 'playlists' | 'subscription'; text: string; records: readonly CommentSnapshot[];
   unavailable: boolean; controllerStyle: ControllerStyle; thread?: CommentSnapshot; replyLimit?: number;
   openThread: (key: string) => void; replies: () => void; load: () => void;
   translate?: (key: string) => void;
-  commentsStatus?: { loading: boolean; failed: boolean; hasMore: boolean };
+  commentsStatus?: CommentsStatus; commentRoute?: string;
+  postComment?: (text: string, key?: string) => Promise<boolean>;
+  sortComments?: (sort: 'TOP_COMMENTS' | 'NEWEST_FIRST') => boolean;
   notificationPreference?: import('../../types/ports').NotificationPreference; subscriptionLoading?: boolean; subscriptionFailed?: boolean;
   subscriptionAction?: (action: import('../../types/ports').WatchAction) => void;
   playlists?: readonly SavedPlaylistSnapshot[]; playlistLoading?: boolean; playlistFailed?: boolean;
@@ -25,17 +32,11 @@ const vHint: Directive<HTMLElement, [ControllerStyle, string]> = {
 </script>
 
 <template>
+  <CommentActions v-if="panel === 'comments'" ref="commentActions" :records="records" :status="commentsStatus" :route="commentRoute || ''"
+    :post="postComment" :change-sort="sortComments" />
   <div v-if="panel === 'description'" data-vue-description>{{ text || t('No description available') }}</div>
-  <div v-else-if="panel === 'subscription'" data-vue-subscription>
-    <div role="group" :aria-label="t('Notifications')">
-      <button v-for="[preference, action, label] in [['ALL', 'notificationsAll', 'All'], ['PERSONALIZED', 'notificationsPersonalized', 'Personalized'], ['NONE', 'notificationsNone', 'None']] as const" :key="action"
-        class="control subscription-option" :data-focus-id="action" :aria-pressed="notificationPreference === preference" :disabled="subscriptionLoading"
-        @click="subscriptionAction?.(action)"><span class="subscription-check" aria-hidden="true">{{ notificationPreference === preference ? '✓' : '' }}</span>{{ t(label) }}</button>
-    </div>
-    <button class="control subscription-option unsubscribe-option" data-focus-id="unsubscribe" :disabled="subscriptionLoading" @click="subscriptionAction?.('unsubscribe')">{{ t('Unsubscribe') }}</button>
-    <LoadStatus :loading="subscriptionLoading" :failed="subscriptionFailed"
-      :loading-message="t('Saving…')" :error-message="t('Could not update subscription. Try again.')" />
-  </div>
+  <SubscriptionOptions v-else-if="panel === 'subscription'" :preference="notificationPreference"
+    :loading="subscriptionLoading" :failed="subscriptionFailed" @action="subscriptionAction?.($event)" />
   <div v-else-if="panel === 'playlists'" data-vue-playlists>
     <LoadStatus :loading="playlistLoading" :failed="playlistFailed" :empty="!playlists?.length" error-role="status"
       :loading-message="t('Loading…')" :error-message="t('Could not update playlists. Try again.')"
@@ -46,7 +47,7 @@ const vHint: Directive<HTMLElement, [ControllerStyle, string]> = {
       @click="savePlaylist?.(item.key)">{{ item.selected ? '✓ ' : '+ ' }}{{ item.title }}</button>
   </div>
   <div v-else-if="thread" data-vue-comments data-comment-detail>
-    <CommentThread :key="thread.key" class="comment detail-parent" :item="thread" :translate="translate" :controller-style="controllerStyle" />
+    <CommentThread :key="thread.key" class="comment detail-parent" :item="thread" :reply="reply" :translate="translate" :controller-style="controllerStyle" />
     <div class="detail-children">
       <div class="detail-branch reply-summary">
         <span class="reply-threadline" aria-hidden="true"><span class="reply-connection"></span><span v-if="thread.replies.length" class="reply-continuation"></span></span>
@@ -71,7 +72,7 @@ const vHint: Directive<HTMLElement, [ControllerStyle, string]> = {
   </div>
   <div v-else data-vue-comments>
     <CommentThread v-for="item in records" :key="item.key" class="comment" :item="item"
-      :open-thread="openThread" :translate="translate" :controller-style="controllerStyle" />
+      :open-thread="openThread" :reply="reply" :translate="translate" :controller-style="controllerStyle" />
     <LoadStatus :loading="commentsStatus?.loading" :failed="commentsStatus?.failed"
       :empty="!records.length || !!commentsStatus && !commentsStatus.hasMore" error-role="status"
       :loading-message="t('Loading comments…')" :error-message="t('Could not load comments. Retry to continue.')"

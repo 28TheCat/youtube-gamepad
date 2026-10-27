@@ -3,7 +3,7 @@ import type { TimelineSnapshot } from '../../types/ports';
 /** Shared by immediate seeks and held-button previews. */
 export let YTGamepadSeeking = {
   step(distance: number, initial = 10) {
-    return distance <= 30 ? initial : distance <= 60 ? 15 : distance <= 300 ? 30 : 60;
+    return distance <= 30 ? initial : Math.max(initial, distance <= 60 ? 15 : distance <= 300 ? 30 : 60);
   },
   target(timeline: TimelineSnapshot, seconds: number): number | null {
     const { start, end, canSeek, ranges } = timeline;

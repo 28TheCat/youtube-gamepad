@@ -10,21 +10,25 @@ function setup() {
   const commands = [], listeners = new Map(), frames = [], intervals = new Map();
   let intervalId = 0;
   let overlay = null, watchPort, menuPort;
-  const node = () => ({ isConnected: true, style: {}, dataset: {}, attributes: {},
+  const node = () => ({ isConnected: true, style: {
+    getPropertyValue(key) { return this[key] || ''; },
+    setProperty(key, value) { this[key] = value; },
+    removeProperty(key) { const previous = this[key] || ''; delete this[key]; return previous; }
+  }, dataset: {}, attributes: {},
     classList: { toggle() {}, remove() {}, add() {}, contains: () => false },
     contains: () => false, closest: () => null,
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }),
     getAttribute(name) { return this.attributes[name] ?? null; }, setAttribute(name, value) { this.attributes[name] = value; }, removeAttribute(name) { delete this.attributes[name]; }, focus() {}, scrollIntoView() {},
-    append() {}, replaceChildren(...children) { this.children = children; }, attachShadow: () => ({ append() {} }) });
+    remove() {}, append() {}, replaceChildren(...children) { this.children = children; }, attachShadow: () => ({ append() {} }) });
   const addEventListener = (name, callback) => {
     if (!listeners.has(name)) listeners.set(name, []);
     listeners.get(name).push(callback);
   };
-  const video = { paused: false, ended: false, currentTime: 20, duration: 100,
+  const video = { readyState: 2, videoWidth: 640, videoHeight: 360, paused: false, ended: false, currentTime: 20, duration: 100,
     pause() { this.paused = true; }, play() { this.paused = false; return Promise.resolve(); } };
   const document = { body: node(), documentElement: node(), createElement: node, addEventListener,
     contains: () => true,
-    querySelector: selector => selector.startsWith('video') ? video : selector === '#movie_player'
+    querySelector: selector => (selector.startsWith('video') || selector === '#movie_player video') ? video : selector === '#movie_player'
       ? { isConnected: true, contains: value => value === video, querySelector: () => ({ isConnected: true, click() {} }) } : null,
     querySelectorAll: selector => selector.startsWith('[role=') && overlay ? [overlay] : [] };
   const menu = { opened: false, state: {}, connect(port) { menuPort = port; }, close() { this.opened = false; },
@@ -50,11 +54,11 @@ function setup() {
     },
     handleInput(action) { return this.handle(action) ? 'handled' : 'blocked'; } };
   const window = { addEventListener, postMessage() {}, YTGamepadMenu: menu, YTGamepadWatch: watch,
-    YTGamepadInput: { configure() {}, connected: true } };
+    YTGamepadInput: { configure() {}, connected: true, mode: 'gamepad' } };
   const location = { pathname: '/watch', search: '?v=current', origin: 'https://www.youtube.com', assign(path) { commands.push('navigate:' + path); } };
   const context = { window, document, location, URL, URLSearchParams, history: { back() {}, go() {} },
     getComputedStyle: () => ({ visibility: 'visible', display: 'block', opacity: '1' }),
-    MutationObserver: class { observe() {} disconnect() {} }, requestAnimationFrame(callback) { frames.push(callback); return frames.length; }, setTimeout, clearTimeout,
+    MutationObserver: class { observe() {} disconnect() {} }, cancelAnimationFrame() {}, requestAnimationFrame(callback) { frames.push(callback); return frames.length; }, setTimeout, clearTimeout,
     setInterval(callback, delay) { const id = ++intervalId; intervals.set(id, { callback, delay }); return id; },
     clearInterval(id) { intervals.delete(id); } };
   for (const file of ['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/navigation/core.ts', 'src/sites/youtube.ts', 'src/app/coordinator.ts']) {
@@ -208,7 +212,8 @@ test('injected UI action ports obey navigation locks and disabled settings', () 
 test('view commands share one lock before media, recommendation, settings or mode changes', () => {
   const s = setup();
   const commands = [['media', 'playPause'], ['seek', 50], ['recommendation', 'next'],
-    ['settings'], ['backSettings'], ['channel'], ['comments', true], ['replies', 'comment'], ['mode', 'controls']];
+    ['commentPost', { text: 'Draft' }], ['commentSort', 'NEWEST_FIRST'],
+    ['fullscreen'], ['settings'], ['backSettings'], ['channel'], ['comments', true], ['replies', 'comment'], ['mode', 'controls']];
   s.event('yt-navigate-start');
   for (const [type, value] of commands) assert.equal(s.watchPort.request(type, value), false, type);
   assert.equal(s.video.paused, false); assert.equal(s.video.currentTime, 20);
@@ -252,4 +257,15 @@ test('assembled modules retain injected collaborators when global dependency rea
   assert.equal(s.watchPort.readRoute().isWatch, true);
   assert.equal(s.watchPort.request('seek', 45), true);
   assert.equal(s.video.currentTime, 45);
+});
+
+
+test('windowed playback hands directions to page focus before any seek shortcut', () => {
+  const s = setup();
+  s.event('yt-gamepad-local-settings', { detail: { playbackLayout: 'windowed' } });
+  const original = s.video.currentTime;
+  assert.equal(s.act('right'), 'handled');
+  assert.equal(s.video.currentTime, original);
+  assert.equal(s.watch.state.mode, 'controls');
+  assert.ok(s.commands.includes('watch:right'));
 });

@@ -6,13 +6,19 @@ import type { Capability, ModuleFactory, NavigationPolicy, SearchTarget, SiteDep
 import type { NavigationConfig, InteractiveElement } from '../../types/core';
 type Mutable<T> = {-readonly [K in keyof T]: T[K]};
 
-import { YTGamepadActions } from '../shared/actions.ts';
 import { YTGamepadSeeking } from '../playback/seek';
+import { playbackParameterDefaults, normalizePlaybackParameters } from '../shared/playback-settings';
 export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFactory<SiteDependencies,SitePort>;
 (() => {
   /** @param {import('../../types/ports.js').SiteDependencies} dependencies */
   function create({ runtime, diagnostics, focusManager, pageAccess = undefined }: import('../../types/ports.js').SiteDependencies) {
   const lifecycle = runtime.scope('site');
+  let playbackParameters = { ...playbackParameterDefaults };
+  function configurePlayback(values: Partial<typeof playbackParameters>) {
+    const next = normalizePlaybackParameters(values);
+    if (next.seekStep !== playbackParameters.seekStep) seekRun = undefined;
+    playbackParameters = next;
+  }
   const getVideo = () => document.querySelector<HTMLVideoElement>('video.html5-main-video') || document.querySelector<HTMLVideoElement>('video');
   let speedSession: { video: HTMLVideoElement; rate: number; applied: number; route: string; source: string } | undefined;
   let speedInterrupted = false;
@@ -120,7 +126,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       const distance = seekRun?.video === video && seekRun.route === route && seekRun.action === action && time - seekRun.time < 600
         ? seekRun.distance : 0;
       // Keep the familiar single-tap step; accelerate only a continuous run.
-      const step = YTGamepadSeeking.step(distance, YTGamepadActions.get(action)!.parameter!.default);
+      const step = YTGamepadSeeking.step(distance, playbackParameters.seekStep);
       const before = video.currentTime;
       const ok = seekTo(before + (action === 'seekBack' ? -step : step));
       seekRun = ok ? { video, route, action, time, distance: distance + Math.abs(video.currentTime - before) } : undefined;
@@ -131,7 +137,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       return timeline.isLive && timeline.canSeek && seekTo(timeline.end);
     }
     else if (action === 'volumeUp' || action === 'volumeDown') {
-      const step = YTGamepadActions.get(action)!.parameter!.default / 100;
+      const step = playbackParameters.volumeStep / 100;
       video.volume = Math.min(1, Math.max(0, video.volume + (action === 'volumeUp' ? step : -step)));
     }
     else return false;
@@ -266,8 +272,16 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
   /** @returns {import('../../types/ports.js').PlaybackSnapshot} */
   function readPlayback() {
     const video = getVideo(), caption = optionalFeature('captions', () => document.querySelector<HTMLElement>('.ytp-subtitles-button'), () => null);
+    const ratio = video && video.videoWidth > 0 && video.videoHeight > 0
+      ? String(video.videoWidth / video.videoHeight) : '';
+    const rootStyle = document.documentElement.style;
+    if (rootStyle.getPropertyValue('--ytg-video-ratio') !== ratio) {
+      if (ratio) rootStyle.setProperty('--ytg-video-ratio', ratio);
+      else rootStyle.removeProperty('--ytg-video-ratio');
+    }
     return {
       video: video ? { currentTime: video.currentTime, duration: video.duration, paused: video.paused, ended: video.ended, volume: video.volume, muted: video.muted, timeline: readTimeline(video) } : null,
+      seekStep: playbackParameters.seekStep,
       captionsEnabled: optionalFeature('captions', () => caption?.getAttribute('aria-pressed') === 'true', () => false),
       settingsOpen: optionalFeature('settings', settingsOpen, () => false)
     };
@@ -336,6 +350,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       const next = optionalFeature('recommendations', () => pageAccess.readWatchNext!(), () => undefined);
       if (next?.route === route.key) {
         page.queue = next.queue;
+        page.playlistTitle = next.playlistTitle;
         // Queue entries retain playlist positions and are shown before related videos.
         page.recommendations = [...next.queue.filter(item => !item.selected), ...next.recommendations];
         for (const item of page.recommendations) if (item.href) nextDestinations.set(item.key, item.href);
@@ -637,10 +652,12 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
         (!inert || focusManager?.isSuspendedScope(inert));
     });
   }
-  YTGamepadSite = { destroy: lifecycle.destroy, temporarySpeed, hasNativeLayer, perform, showNativeControls, isProgress: el => el?.matches?.(progressSelector) === true, createNavigationConfig,
+  YTGamepadSite = { configurePlayback, destroy: lifecycle.destroy, temporarySpeed, hasNativeLayer, perform, showNativeControls, isProgress: el => el?.matches?.(progressSelector) === true, createNavigationConfig,
     inspectWatchCapabilities, inspectOptionalCapabilities, readWatchFeatures: () => ({ ...watchFeatures }), restoreNativeInterface,
     readRoute, readPlayback, readWatchPage, readComments,
     readCommentsStatus: () => pageAccess?.readComments?.(),
+    postComment: (text, key) => pageAccess?.commentPost?.(text, key) || Promise.resolve(false),
+    sortComments: sort => pageAccess?.commentSort?.(sort) === true,
     openRecommendation, loadRecommendations, openChannel, performWatchAction, expandReplies, translateComment, loadComments,
     listPlaylists: () => pageAccess?.watchPlaylists?.() || Promise.resolve(undefined),
     togglePlaylist: (key: string) => pageAccess?.watchPlaylistToggle?.(key) || Promise.resolve(false),

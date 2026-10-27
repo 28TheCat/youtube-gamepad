@@ -40,6 +40,7 @@ export interface NavigationReads {
 export interface RowMemory { column: number | null }
 export interface YouTubeVideoDetails { videoId?: string; isLive?: boolean; title?: string; author?: string; shortDescription?: string; channelId?: string; viewCount?: string }
 export interface YouTubePlayer extends HTMLElement {
+  loadVideoById?(videoId: string): void;
   getVideoData?(): { video_id?: unknown };
   getPlayerResponse?(): { videoDetails?: { videoId?: unknown } };
   showControls?(): void; hideControls?(): void;
@@ -49,6 +50,10 @@ export interface YouTubePlayer extends HTMLElement {
   unloadModule?(module: string): void;
   isSubtitlesOn?(): boolean;
   toggleSubtitles?(): void;
+  getAvailableQualityLevels?(): string[];
+  getPlaybackQuality?(): string;
+  setPlaybackQualityRange?(quality: string): void;
+  setPlaybackQuality?(quality: string): void;
 }
 export interface RuntimeScope extends Scope {}
 export type DisposerHost = Window & { [key: symbol]: (() => void) | undefined };

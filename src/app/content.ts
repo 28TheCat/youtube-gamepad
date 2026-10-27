@@ -1,4 +1,6 @@
+import { homeFilterDefaults, normalizeHomeFilter } from '../shared/home-filter';
 import { videoGridDefaults, normalizeVideoGrid } from '../shared/video-grid';
+import { playbackParameterDefaults, normalizePlaybackParameters } from '../shared/playback-settings';
 import { normalizePlaybackLayout } from '../shared/playback-layout';
 import { ui } from '../ui/ui-api';
 import type { Dispose, Settings } from '../../types/ports';
@@ -77,7 +79,7 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
       catch (other) { return Promise.reject(other); }
     }
   }
-  const defaults = { playbackLayout: 'fullscreen' as const, ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, deadzone: 0.35, repeatDelay: 150, repeatInterval: 80, bindings: {}, bindingLayouts: null, shortcutLayouts: {} };
+  const defaults = { ...homeFilterDefaults, ...playbackParameterDefaults, playbackLayout: 'fullscreen' as const, ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, deadzone: 0.35, repeatDelay: 150, repeatInterval: 80, bindings: {}, bindingLayouts: null, shortcutLayouts: {} };
   let appliedSettings: Settings | undefined;
   let themeRevision = 0;
   // Production settings stay inside the isolated module graph.
@@ -85,7 +87,7 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
     if (lifecycle.destroyed) return;
     applyLanguage(raw?.uiLanguage);
     const { bindingLayouts: _layouts, uiLanguage: _language, ...initialValues } = defaults;
-    const values: Settings = initialValues;
+    const values: Settings = { ...initialValues, ...normalizePlaybackParameters(raw), ...normalizeHomeFilter(raw) };
     for (const key of ['enabled', 'theater', 'rightHandMode'] as const) if (typeof raw?.[key] === 'boolean') values[key] = raw[key];
     for (const [key, min, max] of [['deadzone', .15, .75], ['repeatDelay', 150, 1000], ['repeatInterval', 80, 500]] as const) {
       if (typeof raw?.[key] === 'number' && Number.isFinite(raw[key])) values[key] = Math.min(max, Math.max(min, raw[key]));

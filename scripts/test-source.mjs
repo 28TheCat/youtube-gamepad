@@ -2,7 +2,7 @@ import { watchPanelRendererSource } from '../tests/helpers/watch-panel-renderer.
 import { readFileSync, readdirSync } from 'node:fs';
 import ts from 'typescript-vue';
 import { searchRendererSource } from '../tests/helpers/search-renderer.mjs';
-import { dependencies } from './module-graph.mjs';
+import { runtimeImports, resolveModule } from './module-graph.mjs';
 // Compatibility belongs only to old VM fixtures. Production uses ESM imports.
 const aliases = new Set();
 const compiled = new Map();
@@ -65,18 +65,52 @@ export function legacyModuleSource(file) {
   }
   return source;
 }
+// Only renderer substitutions and injected collaborators are fixture-owned.
+// Ordinary runtime dependencies always come from source imports.
+const fixtureImports = {
+  'src/search/mount-search.ts': [],
+  'src/ui/mount-watch-panel.ts': [],
+  'src/ui/watch-view.ts': ['../shared/actions']
+};
+// These optional factories are supplied by each policy scenario. Importing
+// their real definitions would make the coordinator instantiate them instead.
+const injectedCoordinatorFactories = new Set(['src/input/gamepad.ts', 'src/ui/menu.ts', 'src/playback/watch.ts', 'src/app/browse.ts']);
+const fixtureComposition = {
+  'src/app/coordinator.ts': ['src/navigation/core.ts', 'src/sites/youtube.ts'],
+  'src/navigation/core.ts': ['src/shared/runtime.ts', 'src/input/controller-style.ts', 'src/app/state-machine.ts', 'src/navigation/navigation.ts', 'src/navigation/focus.ts'],
+  'src/sites/youtube.ts': ['src/shared/runtime.ts', 'src/navigation/focus.ts'],
+  'src/input/gamepad.ts': ['src/shared/runtime.ts', 'src/input/controller-style.ts'],
+  'src/search/search.ts': ['src/input/controller-style.ts', 'src/search/keyboard.ts', 'src/search/pinyin.ts', 'src/app/state-machine.ts'],
+  'src/ui/menu.ts': ['src/shared/runtime.ts', 'src/ui/styles.ts', 'src/search/search.ts', 'src/navigation/focus.ts', 'src/app/state-machine.ts', 'src/input/controller-style.ts'],
+  'src/ui/watch-view.ts': ['src/input/controller-style.ts', 'src/ui/styles.ts'],
+  'src/ui/watch-panels.ts': ['src/input/controller-style.ts'],
+  'src/playback/watch.ts': ['src/shared/runtime.ts', 'src/app/state-machine.ts', 'src/ui/watch-view.ts', 'src/ui/watch-panels.ts', 'src/navigation/focus.ts', 'src/ui/watch-surface.ts'],
+  'src/app/browse.ts': ['src/shared/runtime.ts']
+};
 // Load the same prerequisites as the extension. VM test doubles still supply
 // only the collaborators the original scenario uses.
 export function moduleSource(file) {
-  const seen = new Set(), files = [];
+  const seen = new Set(), files = [], assembled = new Set([file]);
   function visit(name) {
     if (seen.has(name)) return;
     seen.add(name);
-    for (const dependency of dependencies[name] || []) visit(dependency);
+    const fixture = fixtureImports[name];
+    const edges = fixture ?? runtimeImports(name);
+    for (const specifier of edges) {
+      // Vue/CSS renderers are supplied by the legacy fixture, and i18n is
+      // scoped into consumers below to avoid shared-global declaration clashes.
+      if (specifier === 'vue' || specifier.endsWith('.vue') || specifier.includes('.css') || specifier.endsWith('/i18n')) continue;
+      if (name === 'src/app/content.ts' && specifier.includes('inline-settings')) continue;
+      const dependency = resolveModule(name, specifier);
+      if (name === 'src/app/coordinator.ts' && injectedCoordinatorFactories.has(dependency)) continue;
+      if (!dependency) throw new Error(`Unsupported VM runtime dependency: ${specifier} in ${name}`);
+      visit(dependency);
+    }
+    for (const dependency of fixtureComposition[name] || []) { assembled.add(dependency); visit(dependency); }
     files.push(name);
   }
   visit(file);
-  return files.map(name => legacyModuleSource(name) + '\n' + (fixtureAssembly[name] || '')).join('\n');
+  return files.map(name => legacyModuleSource(name) + '\n' + (assembled.has(name) ? fixtureAssembly[name] || '' : '')).join('\n');
 }
 
 // Small VM scenarios assemble only their requested modules. Production assembly

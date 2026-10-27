@@ -1,4 +1,5 @@
-import { Innertube, Session, YTNodes } from 'youtubei.js/web';
+import { Innertube, YTNodes } from 'youtubei.js/web';
+import { createYouTubeSession } from './youtube-session';
 import { defaultSidebar, sidebarHref, sidebarSnapshot, type SidebarSnapshot, type SidebarEntry } from '../shared/sidebar-data';
 import { resolveExplorePage } from '../shared/explore-pages';
 import { createYouTubeHeaders, requestYouTube } from './youtube-request';
@@ -22,8 +23,7 @@ export function createSidebarService() {
     if (pending) return pending;
     if (cached && Date.now() - loadedAt < 60000) return structuredClone(cached);
     const signal = controller.signal;
-    const session = new Session(structuredClone({ ...context, user: context.user || {} }), '', 'v1', 0,
-      undefined, undefined, undefined, async () => { throw Error('Unexpected sidebar request'); });
+    const session = createYouTubeSession(context, async () => { throw Error('Unexpected sidebar request'); });
     session.actions.execute = (async (endpoint: string) => {
       if (endpoint.replace(/^\//, '') !== 'guide') throw Error('Unexpected sidebar endpoint');
       const headers = await createYouTubeHeaders(context, sid);
@@ -51,7 +51,18 @@ export function createSidebarService() {
         return entries;
       }
       for (const section of guide.contents || []) {
-        if (section.type === YTNodes.GuideSubscriptionsSection.type) continue;
+        if (section.type === YTNodes.GuideSubscriptionsSection.type) {
+          const channels = flatten(section.items);
+          const ids = channels.map(entry => entry.endpoint.payload.browseId).filter((id: unknown): id is string => typeof id === 'string' && /^UC[\w-]{1,100}$/.test(id));
+          if (ids.length) result.subscribedChannelIds = [...new Set([...(result.subscribedChannelIds || []), ...ids])];
+          for (const entry of channels) {
+            const id = entry.endpoint.payload.browseId;
+            const label = entry.title.toString().trim();
+            if (typeof id !== 'string' || !/^UC[\w-]{1,100}$/.test(id) || !label) continue;
+            (result.subscriptions ||= []).push({ id, label, href: `/channel/${id}/videos`, avatar: entry.thumbnails?.[0]?.url });
+          }
+          continue;
+        }
         const entries = flatten(section.items);
         const exploreSection = entries.some(entry => {
           const href = sidebarHref(entry.endpoint.metadata.url || entry.endpoint.payload.url);

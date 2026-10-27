@@ -1,6 +1,8 @@
+import { homeFilterDefaults, normalizeHomeFilter, type HomeFilterSettings } from '../shared/home-filter';
 import { videoGridDefaults, normalizeVideoGrid, type VideoGridSettings } from '../shared/video-grid';
 import { normalizePlaybackLayout, type PlaybackLayout } from '../shared/playback-layout';
 import { nextTick, reactive } from 'vue';
+import { playbackParameterDefaults, playbackParameters, normalizePlaybackParameters, type PlaybackParameters } from '../shared/playback-settings';
 import { YTGamepadBindings as schema } from '../input/bindings.ts';
 import { YTGamepadActions } from '../shared/actions';
 import { positionsOnPad } from './bindings';
@@ -11,7 +13,7 @@ import { t, applyLanguage, languageDefault, normalizeLanguage, type UILanguage }
 type Layout = 'watch' | 'browse';
 type Category = '' | 'general' | 'display' | 'controller' | 'help';
 type Bindings = Record<string, number>;
-interface Settings extends VideoGridSettings {
+interface Settings extends VideoGridSettings, PlaybackParameters, HomeFilterSettings {
   playbackLayout: PlaybackLayout;
   uiLanguage: UILanguage;
   enabled: boolean;
@@ -41,6 +43,7 @@ export const adjustments = [
   { key: 'repeatInterval', label: 'Repeat interval', min: 80, max: 500, step: 10, suffix: ' ms' }
 ] as const;
 const defaults = {
+  ...playbackParameterDefaults, ...homeFilterDefaults,
   playbackLayout: 'fullscreen' as const,
   ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, autoFullscreen: null, deadzone: .35,
   repeatDelay: 150, repeatInterval: 80, bindings: {}, bindingLayouts: null, shortcutLayouts: null
@@ -80,7 +83,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
   }
   function apply(stored: Record<string, unknown>) {
     const values: Settings = {
-      ...defaults, ...normalizeVideoGrid(stored),
+      ...defaults, ...normalizeVideoGrid(stored), ...normalizePlaybackParameters(stored), ...normalizeHomeFilter(stored),
       uiLanguage: normalizeLanguage(stored.uiLanguage),
       bindings: schema.normalize(stored.bindings),
       bindingLayouts: schema.normalizeLayouts(stored.bindingLayouts, stored.bindings),
@@ -266,7 +269,15 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     setPlaybackLayout: (layout: Settings['playbackLayout']) => save({ playbackLayout: layout }, `playback-${layout}`),
     setLanguage: (language: UILanguage) => save({ uiLanguage: normalizeLanguage(language) }, `language-${language}`),
     clearDiagnostics, exportDiagnostics,
+    saveHomeFilter: (next: Partial<HomeFilterSettings>, id: string) => {
+      const values = normalizeHomeFilter({ ...state.values, ...next });
+      return save(Object.fromEntries(Object.keys(next).filter(key => key in homeFilterDefaults).map(key => [key, values[key as keyof HomeFilterSettings]])), id);
+    },
     saveGrid: (next: Partial<VideoGridSettings>, id: string) => save(next, id),
+    savePlayback: (next: Partial<PlaybackParameters>, id: string) => {
+      const values = normalizePlaybackParameters({ ...state.values, ...next });
+      return save(Object.fromEntries(playbackParameters.filter(({ key }) => key in next).map(({ key }) => [key, values[key]])), id);
+    },
     resetGrid: () => save(Object.fromEntries(Object.entries(videoGridDefaults).filter(([key]) => key.startsWith("gridColumns"))), "resetVideoGrid"),
     reset: () => {
       const shortcutLayouts = schema.normalizeShortcuts(state.values?.shortcutLayouts);

@@ -1,5 +1,6 @@
 // Minimal presenter for VM policy tests; extension tests exercise WatchPanel.vue.
 export const watchPanelRendererSource = `
+function backCommentComposer() { return false; }
 function mountWatchPanel(container, style, actions) {
   let disposed = false, buttons = [];
   const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };

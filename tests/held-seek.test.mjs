@@ -113,3 +113,19 @@ test('mouse or keyboard media requests retain immediate seeking', () => {
   const s = setup(); s.coordinator.request('media', 'seekForward');
   assert.deepEqual(s.writes, [110]); assert.deepEqual(s.previews, []);
 });
+
+test('saved playback steps apply to held previews, immediate seeks and volume without reload', () => {
+  const s = setup();
+  const configure = values => s.events['yt-gamepad-local-settings']({ detail: values });
+  configure({ seekStep: 20, volumeStep: 12 });
+  s.press(); assert.equal(s.previews.at(-1).delta, 20);
+  s.release(); assert.deepEqual(s.writes, [120]);
+  s.coordinator.request('media', 'seekBack'); assert.equal(s.video.currentTime, 100);
+  s.video.volume = .5; s.coordinator.request('media', 'volumeUp'); assert.equal(s.video.volume, .62);
+  s.press(); configure({ seekStep: 90 }); s.release();
+  assert.equal(s.video.currentTime, 100, 'changing the step cancels an uncommitted preview');
+  s.press(); s.repeat(); assert.equal(s.previews.at(-1).delta, 180, 'large configured steps do not decelerate when held');
+  s.release(); assert.equal(s.video.currentTime, 280);
+  configure({ seekStep: 10, volumeStep: 5 });
+  s.coordinator.request('media', 'seekBack'); assert.equal(s.video.currentTime, 270);
+});

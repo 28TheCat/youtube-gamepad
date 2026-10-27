@@ -38,10 +38,47 @@ async function installMedia(context, page, rejectPlay = false) {
   await cdp.detach();
 }
 
+async function installShortsContext(context) {
+  await context.addInitScript(() => {
+    window.ytcfg ||= { get: key => key === 'INNERTUBE_CONTEXT'
+      ? { client: { clientName: 'WEB', clientVersion: 'shorts-fixture' } } : undefined };
+  });
+}
+
+async function installShortsAPI(context, ids, autoPlayer = true) {
+  await context.route('https://www.youtube.com/youtubei/v1/reel/**', route => route.fulfill({ json: route.request().url().includes('reel_item_watch')
+    ? { playerResponse: { playabilityStatus: { status: 'OK' } } }
+    : { entries: ids.map(videoId => ({ reelWatchEndpoint: { videoId } })) } }));
+  if (autoPlayer) await context.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const video = document.querySelector('#active'); if (!video) return;
+      let player = video.closest('.html5-video-player');
+      if (!player) { player = document.createElement('div'); player.id = 'shorts-player'; player.className = 'html5-video-player'; video.replaceWith(player); player.append(video); }
+      let current = location.pathname.split('/')[2]; window.apiLoads = [];
+      player.getVideoData = () => ({ video_id: current });
+      player.loadVideoById = id => { current = id; window.apiLoads.push(id); video.dataset.paused = 'false'; };
+    });
+  });
+}
+
+async function pressPad(page, button) {
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.evaluate(button => new Promise((resolve, reject) => {
+    const neutral = () => document.documentElement.setAttribute('data-test-pad', JSON.stringify({ connected: true }));
+    const cleanup = () => { clearTimeout(timer); window.removeEventListener('yt-gamepad-action', received, true); neutral(); };
+    const received = () => { cleanup(); resolve(); };
+    const timer = setTimeout(() => { cleanup(); reject(new Error(`Gamepad button ${button} was not sampled`)); }, 5000);
+    // Release on the real input event, before a slow driver round trip can become a held/repeated press.
+    window.addEventListener('yt-gamepad-action', received, true);
+    document.documentElement.setAttribute('data-test-pad', JSON.stringify({ connected: true, button }));
+  }), button);
+}
+
 test('actual gamepad input controls the active Short, switches reels, respects dialogs and returns to the feed', { timeout: 45000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, uiLanguage: 'zh-CN' }));
   await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: fixture }));
+  await installShortsAPI(context, ['following']);
   const page = await context.newPage();
   await page.goto('https://www.youtube.com/feed/subscriptions');
   await page.goto('https://www.youtube.com/shorts/JnICtQ9VHJ8');
@@ -50,7 +87,7 @@ test('actual gamepad input controls the active Short, switches reels, respects d
   await installMedia(context, page);
   const pad = await virtualPad(context, page);
   await page.bringToFront(); await pad({ connected: true }); await page.waitForTimeout(150);
-  const press = async button => { await pad({ connected: true, button }); await page.waitForTimeout(120); await pad({ connected: true }); await page.waitForTimeout(120); };
+  const press = button => pressPad(page, button);
   await press(0);
   assert.equal(await page.locator('#active').getAttribute('data-paused'), 'true');
   assert.equal(await page.locator('#inactive').getAttribute('data-paused'), 'false');
@@ -80,11 +117,11 @@ test('actual gamepad input controls the active Short, switches reels, respects d
   await press(13);
   await page.waitForURL('**/shorts/following');
   await press(0);
-  assert.equal(await page.locator('#next').getAttribute('data-paused'), 'true');
-  assert.equal(await page.locator('#active').getAttribute('data-paused'), 'false');
+  assert.equal(await page.locator('#active').getAttribute('data-paused'), 'true');
+  assert.deepEqual(await page.evaluate(() => window.switches), [], 'playback uses the API rather than native reel controls');
   await page.waitForTimeout(200);
   await press(12);
-  await page.waitForURL('**/shorts/current');
+  await page.waitForURL('**/shorts/JnICtQ9VHJ8');
   mkdirSync('output/playwright', { recursive: true });
   await page.screenshot({ path: 'output/playwright/shorts-gamepad.png' });
   await press(1);
@@ -139,7 +176,7 @@ test('Shorts use saved watch bindings and hide their toolbar when disabled or le
   const bar = page.locator('#ytg-shorts-controls'); await bar.waitFor();
   await installMedia(context, page);
   const pad = await virtualPad(context, page); await page.bringToFront(); await pad({ connected: true }); await page.waitForTimeout(150);
-  await pad({ connected: true, button: 0 }); await page.waitForTimeout(150); await pad({ connected: true });
+  await pressPad(page, 0);
   assert.equal(await page.locator('#active').getAttribute('data-paused'), 'true', 'watch playPause binding runs on Shorts');
   await worker.evaluate(() => chrome.storage.local.set({ enabled: false }));
   await bar.waitFor({ state: 'hidden' });
@@ -168,12 +205,18 @@ test('Shorts use a gamepad action rail and consume one wheel gesture per video',
     if (path.startsWith('/youtubei/v1/')) return route.fulfill({ json: path.endsWith('/player') ? watchPlayer(route.request().postDataJSON().videoId) : path.endsWith('/next') ? watchNext() : {} });
     return route.fulfill({ contentType: 'text/html', body: fixture.replace(/window\.ytcfg=\{get:key=>key==='INNERTUBE_CONTEXT'\?\{client:\{clientVersion:'test'\}\}:undefined\};/, '') });
   });
+  await installShortsAPI(context, ['following']);
   const page = await context.newPage();
   await page.goto('https://www.youtube.com/feed/subscriptions');
   await page.goto('https://www.youtube.com/shorts/JnICtQ9VHJ8');
   const controls = page.locator('#ytg-shorts-controls'); await controls.waitFor(); await installMedia(context, page);
   await controls.locator('[data-shorts-action=like]:enabled').waitFor();
   assert.equal(await controls.locator('.rail .media-action').count(), 4);
+  const centers = await controls.locator('.rail button svg').evaluateAll(icons => icons.map(icon => {
+    const rect = icon.getBoundingClientRect(); return rect.left + rect.width / 2;
+  }));
+  assert.equal(centers.length, 5);
+  assert.ok(Math.max(...centers) - Math.min(...centers) < 1, 'Shorts action icons and More share one vertical centerline');
   const mute = controls.locator('.rail [data-shorts-action=mute]');
   await mute.click();
   await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('[data-shorts-action=mute]').getAttribute('aria-pressed') === 'true');
@@ -182,7 +225,7 @@ test('Shorts use a gamepad action rail and consume one wheel gesture per video',
   await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('[data-shorts-action=mute]').getAttribute('aria-pressed') === 'false');
   await controls.locator('[data-shorts-action=playPause]').focus();
   const pad = await virtualPad(context, page); await page.bringToFront(); await pad({ connected: true }); await page.waitForTimeout(150);
-  const press = async button => { await pad({ connected: true, button }); await page.waitForTimeout(100); await pad({ connected: true }); await page.waitForTimeout(100); };
+  const press = button => pressPad(page, button);
   const focusedAction = () => page.evaluate(() => document.querySelector('#ytg-shorts-controls').shadowRoot.activeElement?.dataset.shortsAction);
   await press(15); assert.equal(await focusedAction(), 'like', 'right enters the action rail');
   await press(13); assert.equal(await focusedAction(), 'comments', 'vertical input selects an action in the rail');
@@ -196,10 +239,11 @@ test('Shorts use a gamepad action rail and consume one wheel gesture per video',
   await press(5); assert.equal(await page.locator('#active').getAttribute('data-position'), '15', 'the shoulder button seeks without entering the rail');
   await page.evaluate(() => { for (let i = 0; i < 5; i++) window.dispatchEvent(new WheelEvent('wheel', { deltaY: 400, cancelable: true })); });
   await page.waitForURL('**/shorts/following');
-  assert.deepEqual(await page.evaluate(() => window.switches), ['down'], 'a wheel burst only changes one video');
+  assert.deepEqual(await page.evaluate(() => window.apiLoads), ['following'], 'a wheel burst only changes one video');
+  assert.deepEqual(await page.evaluate(() => window.switches), [], 'wheel switching never clicks native controls');
   await page.waitForTimeout(220);
   await page.evaluate(() => window.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, cancelable: true })));
-  await page.waitForURL('**/shorts/current');
+  await page.waitForURL('**/shorts/JnICtQ9VHJ8');
   await press(9); await controls.locator('.drawer').waitFor();
   assert.equal(await controls.getByRole('button', { name: 'Use YouTube controls', exact: true }).count(), 0, 'More has no native-player escape');
   await press(1); await press(1); await page.waitForURL('**/feed/subscriptions');
@@ -219,8 +263,17 @@ test('opening a list card loads and controls native Shorts media without visitin
       ? shortsFixture.replace(/<script>[\s\S]*?<\/script>/, '')
       : '<html><body><ytd-app></ytd-app><script>window.ytcfg={get:key=>key==="INNERTUBE_CONTEXT"?{client:{clientVersion:"test"}}:undefined}</script></body></html>' });
   });
+  await installShortsAPI(context, ['second']);
   const page = await context.newPage();
   await page.goto('https://www.youtube.com/feed/subscriptions');
+  await page.evaluate(html => {
+    document.querySelector('ytd-app').navigate_ = endpoint => {
+      document.dispatchEvent(new Event('yt-navigate-start'));
+      document.querySelector('ytd-app').innerHTML = new DOMParser().parseFromString(html, 'text/html').querySelector('ytd-app').innerHTML;
+      history.pushState({}, '', endpoint.commandMetadata.webCommandMetadata.url);
+      document.dispatchEvent(new Event('yt-navigate-finish'));
+    };
+  }, shortsFixture.replace(/<script>[\s\S]*?<\/script>/, ''));
   await page.locator('[data-browse-id="short:first"]').click();
   await page.waitForURL('**/shorts/first');
   const player = page.locator('#ytg-shorts-controls'); await player.waitFor();
@@ -232,7 +285,7 @@ test('opening a list card loads and controls native Shorts media without visitin
     video.srcObject = canvas.captureStream(15); video.muted = true; await video.play();
     await new Promise(resolve => video.requestVideoFrameCallback(resolve));
   });
-  assert.deepEqual(paths, ['/feed/subscriptions', '/shorts/first']);
+  assert.deepEqual(paths, ['/feed/subscriptions'], 'opening Shorts uses the native router without replacing the document');
   assert.equal(await player.locator('.count').textContent(), '1 / 2');
   assert.equal(await page.locator('video').evaluate(video => video.videoHeight), 640);
   assert.equal(await page.locator('video').isVisible(), true);
@@ -249,6 +302,11 @@ test('native list Shorts retain their queue across refresh, gamepad switching an
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false }));
   await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: shortsFixture }));
+  await context.addInitScript(() => {
+    window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT'
+      ? { client: { clientName: 'WEB', clientVersion: 'shorts-fixture' }, user: {} } : undefined };
+  });
+  await installShortsAPI(context, ['second']);
   const page = await context.newPage();
   await page.goto('https://www.youtube.com/feed/subscriptions');
   await page.evaluate(() => sessionStorage.setItem('ytg-shorts-queue-v1', JSON.stringify({ ids: ['first', 'second'], currentId: 'first', returnTo: '/feed/subscriptions' })));
@@ -261,9 +319,21 @@ test('native list Shorts retain their queue across refresh, gamepad switching an
   assert.equal(await page.locator('html').getAttribute('data-ytg-playback-layout'), null, 'Shorts keeps its own layout instead of a regular-video layout');
   assert.equal(await player.locator('.title').textContent(), 'Shorts', 'missing API metadata never falls back to page titles');
   assert.equal(await player.locator('.author').textContent(), 'YouTube');
+  // Controls mount before the asynchronous recommendation sequence finishes.
+  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls')?.shadowRoot?.querySelector('.count')?.textContent === '1 / 2');
   assert.equal(await player.locator('.count').textContent(), '1 / 2');
   assert.equal(await player.locator('[data-shorts-action=up]').isDisabled(), true);
   await page.reload(); await player.waitFor(); await installMedia(context, page);
+  await page.bringToFront();
+  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls')?.shadowRoot?.querySelector('.play')?.getAttribute('aria-pressed') === 'true');
+  await page.evaluate(() => {
+    document.querySelector('ytd-app').navigate_ = endpoint => {
+      document.dispatchEvent(new Event('yt-navigate-start'));
+      history.pushState({}, '', endpoint.commandMetadata.webCommandMetadata.url);
+      document.dispatchEvent(new Event('yt-navigate-finish'));
+    };
+  });
+  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls')?.shadowRoot?.querySelector('.count')?.textContent === '1 / 2');
   assert.equal(await player.locator('.count').textContent(), '1 / 2', 'a refresh preserves list ownership on the native Shorts route');
   const refreshedPad = await virtualPad(context, page); await refreshedPad({ connected: true }); await page.waitForTimeout(150);
   const refreshedPress = async button => { await refreshedPad({ connected: true, button }); await page.waitForTimeout(120); await refreshedPad({ connected: true }); await page.waitForTimeout(120); };
@@ -272,6 +342,7 @@ test('native list Shorts retain their queue across refresh, gamepad switching an
   await refreshedPress(5); assert.equal(await page.locator('#active').getAttribute('data-position'), '15');
   await refreshedPad({ connected: true, button: 13 }); await page.waitForURL('**/shorts/second');
   await player.waitFor(); await installMedia(context, page);
+  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls')?.shadowRoot?.querySelector('.count')?.textContent === '2 / 2');
   assert.equal(await player.locator('.count').textContent(), '2 / 2');
   assert.equal(await player.locator('[data-shorts-action=down]').isDisabled(), true);
   const secondPad = await virtualPad(context, page); await secondPad({ connected: true }); await page.waitForTimeout(150);
@@ -362,7 +433,7 @@ test('Shorts drawers use real comments, reactions and playlists and isolate dire
       const style = getComputedStyle(node);
       return { fontSize: style.fontSize, lineHeight: style.lineHeight, fontWeight: style.fontWeight, color: style.color };
     });
-    assert.deepEqual(typography, { fontSize: '14px', lineHeight: '20px', fontWeight: '400', color: 'rgb(246, 246, 246)' });
+    assert.deepEqual(typography, { ...(selector === '.comment-author' ? { fontSize: '13px', lineHeight: '18px', fontWeight: '500' } : { fontSize: '16px', lineHeight: '24px', fontWeight: '400' }), color: 'rgb(15, 15, 15)' });
   }
   await page.waitForTimeout(250);
   const after = await page.locator('#shorts-player').boundingBox();
@@ -372,7 +443,7 @@ test('Shorts drawers use real comments, reactions and playlists and isolate dire
   assert.ok(after.x < before.x, 'opening comments shifts the video left');
   assert.ok(after.x + after.width <= drawer.x, 'the drawer does not cover the video');
   const pad = await virtualPad(context, page); await page.bringToFront(); await pad({ connected: true }); await page.waitForTimeout(100);
-  const press = async button => { await pad({ connected: true, button }); await page.waitForTimeout(90); await pad({ connected: true }); await page.waitForTimeout(90); };
+  const press = button => pressPad(page, button);
   await player.locator('[data-focus-id="replies:short-comment"]').click();
   await player.locator('[data-comment-detail] .detail-replies .comment-text').filter({ hasText: 'A reply on this Short.' }).waitFor();
   assert.equal(await player.locator('.reply-connection').last().evaluate(node => getComputedStyle(node).borderBottomLeftRadius), '16px');
@@ -403,8 +474,192 @@ test('Shorts drawers use real comments, reactions and playlists and isolate dire
   assert.deepEqual(errors, []);
 });
 
+test('Shorts playback parameters update live and clamp progress and volume', { timeout: 45000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, shortsSeekStep: 8, volumeStep: 12, repeatDelay: 1000 }));
+  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: shortsFixture }));
+  const page = await context.newPage(); await page.goto('https://www.youtube.com/shorts/first');
+  await page.locator('#ytg-shorts-controls').waitFor(); await installMedia(context, page);
+  const pad = await virtualPad(context, page); await page.bringToFront(); await pad({ connected: true }); await page.waitForTimeout(150);
+  const press = button => pressPad(page, button);
+  await page.locator('#active').evaluate(video => { video.volume = .5; });
+  await press(5); assert.equal(await page.locator('#active').getAttribute('data-position'), '18');
+  await press(7); assert.equal(await page.locator('#active').evaluate(video => video.volume), .62);
+  await worker.evaluate(() => chrome.storage.local.set({ shortsSeekStep: 30, volumeStep: 25 }));
+  await page.waitForTimeout(200);
+  await press(5); assert.equal(await page.locator('#active').getAttribute('data-position'), '30');
+  await press(4); assert.equal(await page.locator('#active').getAttribute('data-position'), '0');
+  await press(7); await press(7); assert.equal(await page.locator('#active').evaluate(video => video.volume), 1);
+});
+
+test('Shorts More offers captions, available quality and subscription management with gamepad back', { timeout: 45000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, uiLanguage: 'en' }));
+  await context.addCookies([{ name: 'SAPISID', value: 'shorts-fixture', domain: 'www.youtube.com', path: '/', secure: true }]);
+  await context.addInitScript(() => {
+    window.ytcfg = { get: key => ({ INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: 'shorts-fixture' }, user: {} }, LOGGED_IN: true })[key] };
+  });
+  const calls = [];
+  let rejectSubscription = false, rejectPreference = false;
+  await context.route('https://www.youtube.com/**', async route => {
+    const request = route.request(), path = new URL(request.url()).pathname;
+    if (!path.startsWith('/youtubei/v1/')) return route.fulfill({ contentType: 'text/html', body: shortsFixture });
+    const data = request.postDataJSON(); calls.push({ path, data });
+    if (rejectSubscription && path.endsWith('/subscribe')) return route.fulfill({ status: 500, json: { error: {} } });
+    if (rejectPreference && path.endsWith('/modify_channel_preference')) return route.fulfill({ status: 500, json: { error: {} } });
+    return route.fulfill({ json: path.endsWith('/player') ? watchPlayer(data.videoId) : path.endsWith('/next') ? watchNext() : { success: true } });
+  });
+  const page = await context.newPage(); await page.goto('https://www.youtube.com/shorts/first');
+  const controls = page.locator('#ytg-shorts-controls'); await controls.waitFor(); await installMedia(context, page);
+  await controls.locator('.title').filter({ hasText: 'Title first' }).waitFor();
+  await page.evaluate(() => {
+    const player = document.querySelector('#shorts-player');
+    window.shortSettings = { videoId: 'first', quality: 'hd1080', captions: false, tracks: true, changes: [] };
+    player.getVideoData = () => ({ video_id: window.shortSettings.videoId });
+    player.getAvailableQualityLevels = () => ['hd1080', 'hd720', 'medium', 'unknown'];
+    player.getPlaybackQuality = () => window.shortSettings.quality;
+    player.setPlaybackQualityRange = value => { window.shortSettings.quality = value; window.shortSettings.changes.push(value); };
+    player.getOption = () => window.shortSettings.tracks ? [{ languageCode: 'en' }] : [];
+    player.isSubtitlesOn = () => window.shortSettings.captions;
+    player.toggleSubtitles = () => { window.shortSettings.captions = !window.shortSettings.captions; };
+  });
+  const pad = await virtualPad(context, page); await page.bringToFront(); await pad({ connected: true }); await page.waitForTimeout(150);
+  const press = button => pressPad(page, button);
+  await controls.locator('[data-shorts-action=more]').click();
+  const captions = controls.locator('[data-shorts-action=captions]'); await captions.click();
+  assert.equal(await captions.getAttribute('aria-pressed'), 'true');
+  await captions.click(); assert.equal(await captions.getAttribute('aria-pressed'), 'false');
+  await page.evaluate(() => { window.shortSettings.tracks = false; });
+  await captions.click(); await controls.getByRole('status').filter({ hasText: 'No captions available' }).waitFor();
+  assert.equal(await page.evaluate(() => window.shortSettings.captions), false);
+  await controls.locator('[data-shorts-action=quality]').click();
+  assert.equal(await controls.locator('.drawer').getByRole('button', { name: '1080p', exact: true }).getAttribute('aria-pressed'), 'true');
+  const hd = controls.locator('.drawer').getByRole('button', { name: '720p', exact: true });
+  await hd.focus(); await press(0);
+  assert.equal(await page.evaluate(() => window.shortSettings.quality), 'hd720');
+  await press(1);
+  assert.equal(await controls.getAttribute('data-panel'), 'actions');
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-shorts-controls').shadowRoot.activeElement?.dataset.shortsAction), 'quality');
+  const subscribe = controls.locator('[data-shorts-action=subscribe]');
+  rejectSubscription = true; await subscribe.click();
+  await controls.getByRole('status').filter({ hasText: 'Could not update subscription' }).waitFor();
+  assert.equal(await subscribe.getAttribute('aria-label'), 'Subscribe');
+  rejectSubscription = false; await subscribe.click();
+  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('[data-shorts-action=subscribe]')?.getAttribute('aria-label') === 'Subscribed, manage subscription');
+  await subscribe.click();
+  assert.equal(await controls.locator('[data-vue-subscription] button').count(), 4);
+  const preferences = () => controls.locator('[data-vue-subscription] [aria-pressed]').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-pressed')));
+  const originalPreferences = await preferences();
+  rejectPreference = true;
+  await controls.locator('[data-focus-id=notificationsNone]').click();
+  await controls.locator('[data-vue-subscription]').getByRole('alert').waitFor();
+  assert.deepEqual(await preferences(), originalPreferences, 'failed writes preserve the known notification preference');
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-shorts-controls').shadowRoot.activeElement?.dataset.focusId), 'notificationsNone');
+  rejectPreference = false;
+  await controls.getByRole('button', { name: 'All notifications', exact: true }).focus(); await press(0);
+  await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('[data-key=notificationsAll]')?.getAttribute('aria-pressed') === 'true');
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-shorts-controls').shadowRoot.activeElement?.dataset.key), 'notificationsAll', 'the selected notification keeps gamepad focus after the asynchronous update');
+  await controls.getByRole('button', { name: 'Unsubscribe', exact: true }).click();
+  await controls.locator('[data-shorts-action=subscribe]').waitFor();
+  assert.equal(await controls.getAttribute('data-panel'), 'actions');
+  assert.equal(await subscribe.getAttribute('aria-label'), 'Subscribe');
+  assert.ok(calls.some(call => call.path.endsWith('/unsubscribe')));
+  assert.ok(calls.some(call => call.path.endsWith('/modify_channel_preference')));
+  await page.evaluate(() => { window.shortSettings.videoId = 'previous'; });
+  await controls.locator('[data-shorts-action=quality]').click();
+  await controls.locator('.drawer-message').filter({ hasText: 'Player settings are currently unavailable' }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.shortSettings.changes), ['hd720']);
+  await press(1); await press(1);
+  assert.equal(await controls.locator('.drawer').isVisible(), false);
+  assert.match(page.url(), /\/shorts\/first$/);
+});
+
+for (const mode of ['down', 'up', 'reduced-motion', 'failed-thumbnail']) {
+test(`Shorts keep their stage and last frame until the replacement reel is ready (${mode})`, { timeout: 45000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await installShortsContext(context);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false }));
+  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: shortsFixture.replace(/<script>[\s\S]*?<\/script>/, '') }));
+  await context.route('https://i.ytimg.com/**', route => mode === 'failed-thumbnail' ? route.abort() : route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="180" height="320"><rect width="180" height="320" fill="#e78b44"/></svg>' }));
+  await installShortsAPI(context, mode === 'up' ? ['first'] : ['second'], false);
+  const page = await context.newPage(); await page.goto(`https://www.youtube.com/shorts/${mode === 'up' ? 'second' : 'first'}`);
+  await page.emulateMedia({ reducedMotion: mode === 'reduced-motion' ? 'reduce' : 'no-preference' });
+  const player = page.locator('#ytg-shorts-controls'); await player.waitFor();
+  await page.evaluate(async mode => {
+    window.originalStage = document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('.stage');
+    const canvas = document.createElement('canvas'); canvas.width = 180; canvas.height = 320;
+    const ctx = canvas.getContext('2d');
+    const paint = () => { ctx.fillStyle = '#174e66'; ctx.fillRect(0, 0, 180, 320); requestAnimationFrame(paint); }; paint();
+    window.shortStream = canvas.captureStream(15);
+    const video = document.querySelector('video'); video.srcObject = window.shortStream; await video.play();
+    document.querySelector('#shorts-player').loadVideoById = target => {
+      if (mode === 'up' && target === 'first') return;
+      const old = document.querySelector('ytd-reel-video-renderer');
+      const replacement = old.cloneNode(true); replacement.querySelector('video').removeAttribute('data-ytg-shorts-media');
+      old.replaceWith(replacement);
+    };
+  }, mode);
+  await player.locator('.count').filter({ hasText: '1 / 2' }).waitFor({ state: 'attached' });
+  await page.waitForFunction(() => document.querySelector('video').loop && document.querySelector('video').videoWidth > 0);
+  if (mode === 'up') {
+    // Previous means a Short actually visited through the API, not a stale saved feed queue.
+    await player.locator('[data-shorts-action=down]').click(); await page.waitForURL('**/shorts/first');
+    await player.locator('.preview').waitFor({ state: 'hidden' });
+    await page.evaluate(() => document.querySelector('video').play());
+  }
+  await player.locator(`[data-shorts-action=${mode === 'up' ? 'up' : 'down'}]`).click(); await page.waitForURL('**/shorts/second');
+  await player.locator('.preview canvas').waitFor({ state: 'visible' });
+  await page.waitForTimeout(400);
+  assert.equal(await player.locator('.preview canvas').isVisible(), true, 'route completion alone must not discard the last frame');
+  assert.equal(await player.locator('.preview canvas').evaluate(canvas => canvas.width), 180);
+  if (mode !== 'failed-thumbnail') {
+    await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('.preview img').getAnimations().length > 0);
+    const movement = await player.locator('.preview').evaluate(preview => {
+      const img = preview.querySelector('img'), canvas = preview.querySelector('canvas');
+      for (const item of [img, canvas]) for (const animation of item.getAnimations()) { animation.pause(); animation.currentTime = Number(animation.effect.getTiming().duration) / 2; }
+      return { incoming: new DOMMatrixReadOnly(getComputedStyle(img).transform).m42, outgoing: new DOMMatrixReadOnly(getComputedStyle(canvas).transform).m42,
+        duration: img.getAnimations()[0].effect.getTiming().duration };
+    });
+    if (mode === 'reduced-motion') assert.equal(movement.duration, 0, 'system motion preference skips the slide');
+    else {
+      assert.ok(mode === 'up' ? movement.incoming < 0 && movement.outgoing > 0 : movement.incoming > 0 && movement.outgoing < 0, JSON.stringify(movement));
+      const stage = await player.locator('.stage').boundingBox();
+      assert.equal(await player.locator('.preview').evaluate(el => getComputedStyle(el).overflow), 'hidden');
+      assert.ok(stage.height > 0);
+    }
+    await player.locator('.preview').evaluate(preview => { for (const item of preview.querySelectorAll('img,canvas')) for (const animation of item.getAnimations()) animation.finish(); });
+  } else {
+    assert.equal(await player.locator('.preview canvas').evaluate(canvas => canvas.getAnimations().length), 0, 'failed previews leave the outgoing frame in place');
+  }
+  assert.equal(await page.evaluate(() => window.originalStage === document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('.stage')), true);
+  if (mode === 'down') {
+    const session = await context.newCDPSession(page), worlds = [];
+    session.on('Runtime.executionContextCreated', ({ context }) => worlds.push(context.id));
+    await session.send('Runtime.enable');
+    for (const contextId of worlds) await session.send('Runtime.evaluate', { contextId, expression: `
+      const candidate = document.querySelector('video');
+      candidate.requestVideoFrameCallback = callback => {
+        window.addEventListener('test-video-presented', () => callback(performance.now(), {}), { once: true }); return 789;
+      };
+      candidate.cancelVideoFrameCallback = () => {};
+    ` });
+    await session.detach();
+  }
+  await page.evaluate(async () => { const video = document.querySelector('video'); video.srcObject = window.shortStream; await video.play(); });
+  if (mode === 'down') {
+    await page.waitForTimeout(400);
+    assert.equal(await player.locator('.preview').isVisible(), true, 'decoded data alone cannot reveal a video before its frame is presented');
+    await page.evaluate(() => window.dispatchEvent(new Event('test-video-presented')));
+  }
+  await player.locator('.preview').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#shorts-player').getAttribute('data-ytg-shorts-media'), '');
+  assert.equal(await page.locator('video').evaluate(video => video.loop), true);
+});
+}
+
 test('rapid list directions select the latest native Short and Back returns to its source', { timeout: 45000 }, async t => {
   const { context, worker } = await launchExtension(t);
+  await installShortsContext(context);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false }));
   const loads = [];
   await context.route('https://www.youtube.com/**', route => {
@@ -412,11 +667,13 @@ test('rapid list directions select the latest native Short and Back returns to i
     if (route.request().isNavigationRequest() && path.startsWith('/shorts/')) loads.push(path);
     return route.fulfill({ contentType: 'text/html', body: shortsFixture });
   });
+  await installShortsAPI(context, ['second', 'third', 'fourth']);
   const page = await context.newPage();
   await page.goto('https://www.youtube.com/feed/subscriptions');
   await page.evaluate(() => sessionStorage.setItem('ytg-shorts-queue-v1', JSON.stringify({ ids: ['first', 'second', 'third', 'fourth'], currentId: 'first', returnTo: '/feed/subscriptions' })));
   await page.goto('https://www.youtube.com/shorts/first');
   const player = page.locator('#ytg-shorts-controls'); await player.waitFor(); await installMedia(context, page);
+  await player.locator('.count').filter({ hasText: '1 / 4' }).waitFor({ state: 'attached' });
   await page.evaluate(() => {
     window.originalShortsControls = document.querySelector('#ytg-shorts-controls');
     window.shortEndpoints = [];
@@ -444,7 +701,7 @@ test('rapid list directions select the latest native Short and Back returns to i
   await player.locator('.preview').waitFor({ state: 'hidden' });
   assert.deepEqual(loads, ['/shorts/first'], 'switching preserves the document instead of reloading the native interface');
   assert.equal(await page.evaluate(() => window.originalShortsControls === document.querySelector('#ytg-shorts-controls')), true);
-  assert.deepEqual(await page.evaluate(() => window.shortEndpoints.map(endpoint => endpoint.reelWatchEndpoint.videoId)), ['third']);
+  assert.deepEqual(await page.evaluate(() => window.apiLoads), ['third']);
   assert.equal(await player.locator('.count').textContent(), '3 / 4');
   await player.getByRole('button', { name: 'Back to feed', exact: true }).click();
   await page.waitForURL('**/feed/subscriptions');

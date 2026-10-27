@@ -1,4 +1,5 @@
-import { Innertube, Session, Parser } from 'youtubei.js/web';
+import { Innertube, Parser } from 'youtubei.js/web';
+import { createYouTubeSession } from './youtube-session';
 import { createYouTubeHeaders, requestYouTube } from './youtube-request';
 
 export interface AccountProfile {
@@ -29,8 +30,7 @@ export function createAccountService() {
     if (pending) return pending;
     if (cached && Date.now() - loadedAt < (refresh ? 2000 : 60000)) return Promise.resolve(structuredClone(cached));
     const signal = controller.signal;
-    const session = new Session(structuredClone({ ...context, user: context.user || {} }), '', 'v1', 0,
-      undefined, undefined, undefined, async () => { throw Error('Unexpected account request'); });
+    const session = createYouTubeSession(context, async () => { throw Error('Unexpected account request'); });
     session.logged_in = true;
     session.actions.execute = (async (endpoint: string, args: Record<string, any>) => {
       if (endpoint.replace(/^\//, '') !== 'account/accounts_list') throw Error('Unexpected account endpoint');

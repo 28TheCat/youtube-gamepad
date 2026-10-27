@@ -1,3 +1,4 @@
+import type { HomeFilterSettings } from '../src/shared/home-filter';
 /** Shared source contracts. Snapshots contain data; DOM handles stay in ports.
  * The Window declarations at the bottom support legacy test fixtures only. */
 export type Mode = 'browse' | 'playback' | 'controls';
@@ -23,6 +24,7 @@ export interface VideoSnapshot {
   readonly volume?: number; readonly muted?: boolean;
 }
 export interface PlaybackSnapshot {
+  readonly seekStep?: number;
   readonly video: VideoSnapshot | null;
   readonly captionsEnabled: boolean; readonly settingsOpen: boolean;
 }
@@ -37,6 +39,7 @@ export interface RecommendationSnapshot {
 export interface WatchPageSnapshot extends RouteSnapshot {
   readonly channelBadge?: 'verified' | 'artist';
   readonly queue?: readonly RecommendationSnapshot[];
+  readonly playlistTitle?: string;
   readonly title: string; readonly channel: string; readonly description: string;
   readonly recommendations: readonly RecommendationSnapshot[];
   // Optional because the existing degraded read returns a minimal page snapshot.
@@ -51,6 +54,7 @@ export interface CommentReplySnapshot {
   readonly translation?: { readonly language: string; readonly text?: string; readonly loading: boolean; readonly failed: boolean };
 }
 export interface CommentSnapshot extends CommentReplySnapshot {
+  readonly canReply?: boolean;
   readonly replyCount?: number;
   readonly hasReplies: boolean; readonly repliesLabel: string;
   readonly replies: readonly CommentReplySnapshot[];
@@ -59,12 +63,16 @@ export type WatchFeatures = Readonly<Partial<Record<'metadata' | 'recommendation
   | 'channel' | 'captions' | 'settings' | 'subscribe' | 'like' | 'dislike' | 'save' | 'nativeLayers', Capability>>>;
 export interface AdaptationSnapshot { readonly status: 'inactive' | 'waiting' | 'ready' | 'fallback'; readonly reason: string; readonly route?: string }
 export interface CoordinatorSnapshot { readonly mode: Mode; readonly enabled: boolean; readonly surfaceReady: boolean; readonly navigating: boolean }
-export interface Settings { playbackLayout?: 'fullscreen' | 'windowed'; rightHandMode?: boolean; enabled: boolean; theater: boolean; deadzone: number; repeatDelay: number; repeatInterval: number; bindings?: Record<string, number>; bindingLayouts?: Record<string, Record<string, number>>; shortcutLayouts?: Record<string, Record<string, string>> }
+export interface Settings extends Partial<HomeFilterSettings> { seekStep?: number; shortsSeekStep?: number; volumeStep?: number; playbackLayout?: 'fullscreen' | 'windowed'; rightHandMode?: boolean; enabled: boolean; theater: boolean; deadzone: number; repeatDelay: number; repeatInterval: number; bindings?: Record<string, number>; bindingLayouts?: Record<string, Record<string, number>>; shortcutLayouts?: Record<string, Record<string, string>> }
 export type SearchTarget = HTMLInputElement | null;
 export type OperationResult = boolean | void;
 export type RecommendationResult = 'opened' | 'blocked' | 'missing';
+export interface CommentsStatus {
+  route?: string; loading: boolean; failed: boolean; hasMore: boolean;
+  interaction?: { signedIn: boolean; canPost: boolean; sort: 'TOP_COMMENTS' | 'NEWEST_FIRST'; sortAvailable: boolean; posting: boolean };
+}
 export interface WatchDataPort {
-  readCommentsStatus?(): { loading: boolean; failed: boolean; hasMore: boolean } | undefined;
+  readCommentsStatus?(): CommentsStatus | undefined;
   readRoute(): RouteSnapshot;
   readWatchPage(): WatchPageSnapshot;
   readPlayback(): PlaybackSnapshot;
@@ -72,6 +80,9 @@ export interface WatchDataPort {
   readWatchFeatures?(): WatchFeatures;
 }
 export interface WatchRequest {
+  (type: 'commentPost', value: { text: string; key?: string }): OperationResult | Promise<OperationResult>;
+  (type: 'commentSort', value: 'TOP_COMMENTS' | 'NEWEST_FIRST'): OperationResult;
+  (type: 'fullscreen'): OperationResult | Promise<OperationResult>;
   (type: 'moreRecommendations'): OperationResult;
   (type: 'mode', value: Mode): OperationResult;
   (type: 'media', value: Action): OperationResult | Promise<OperationResult>;
@@ -117,7 +128,7 @@ export interface AppSnapshot {
   readonly adaptation?: AdaptationSnapshot;
 }
 export interface WatchSnapshot {
-  readonly row: 'controls' | 'progress' | 'recommendations'; readonly index: number;
+  readonly row: 'player' | 'metadata' | 'controls' | 'progress' | 'recommendations'; readonly index: number;
   readonly controlIndex: number; readonly recommendationIndex: number; readonly adjusting: boolean;
   readonly panel: '' | 'description' | 'comments' | 'playlists' | 'subscription'; readonly panelIndex: number; readonly playIndex: number;
 }
@@ -146,12 +157,13 @@ export type InteractionEvent = RouteEvent
   | { type: 'BASE_INPUT'; route: string; action: Action }
   | { type: 'NATIVE_CONTROLS_INPUT'; route: string; action: Action; progress: boolean }
   | { type: 'WATCH_RESET'; playIndex?: number }
+  | { type: 'WATCH_CONTROL_LAYOUT'; playIndex: number; index: number }
   | { type: 'WATCH_SHOW'; target: 'controls' | 'recommendations'; count: number }
   | { type: 'WATCH_FOCUS'; region: WatchSnapshot['row'] | 'panel'; index?: number }
   | { type: 'WATCH_PANEL'; panel: WatchSnapshot['panel'] }
   | { type: 'WATCH_PANEL_COUNT'; count: number }
   | { type: 'WATCH_EMPTY' }
-  | { type: 'WATCH_INPUT'; action: Action; scrollDelta?: number; commentCount: number; recommendationKey?: string; controlAction?: string; cardColumns?: number; cardCount: number; controlCount: number; availableControls?: number[]; canSeek?: boolean }
+  | { type: 'WATCH_INPUT'; action: Action; windowed?: boolean; scrollDelta?: number; commentCount: number; recommendationKey?: string; controlAction?: string; cardColumns?: number; cardCount: number; controlCount: number; availableControls?: number[]; canSeek?: boolean }
   | { type: 'MENU_OPEN' | 'MENU_CLOSE' | 'MENU_SHIFT' | 'MENU_MAIN' | 'MENU_BACK' }
   | { type: 'MENU_SEARCH'; selected: number }
   | { type: 'MENU_SET_LANGUAGE'; value: MenuSnapshot['language'] }
@@ -252,6 +264,7 @@ export interface NavigationPolicy {
   onSettingsClosed(): void; pageBack(): void; readonly navigating: boolean; readonly mode: Mode;
 }
 export interface SitePort extends WatchDataPort, SearchDataPort {
+  configurePlayback?(values: Partial<import('../src/shared/playback-settings').PlaybackParameters>): void;
   temporarySpeed(held: boolean): number | false;
   hasNativeLayer(): boolean; perform(action: Action): OperationResult | Promise<OperationResult>;
   performWatchAction(action: WatchAction): OperationResult | Promise<OperationResult>;
@@ -266,6 +279,8 @@ export interface SitePort extends WatchDataPort, SearchDataPort {
   openChannel(beforeNavigate: () => void): boolean;
   expandReplies(key: string): boolean; loadComments(start?: boolean): OperationResult;
   translateComment(key: string): boolean;
+  postComment?(text: string, key?: string): Promise<boolean>;
+  sortComments?(sort: 'TOP_COMMENTS' | 'NEWEST_FIRST'): boolean;
   loadRecommendations(): OperationResult;
   settingsOpen(): boolean; openSettings(): boolean; backSettings(menu?: HTMLElement | null): boolean;
   seekTo(time: number): boolean; observePage(onChange: () => void): Dispose;
@@ -359,8 +374,9 @@ export interface WatchPanels {
 }
 export type WatchView = Record<'host' | 'surface' | 'recommendations' | 'dialog' | 'sheet' | 'panelTitle'
   | 'description' | 'close' | 'status', HTMLElement> & {
-    controls: HTMLButtonElement[]; progress: HTMLButtonElement;
+    controls: HTMLButtonElement[]; progress: HTMLButtonElement; player?: HTMLButtonElement; metadata?: HTMLElement;
     root: ShadowRoot; make: MakeNode;
+    cycleTab?(direction: number): boolean;
     updateHint(row: WatchSnapshot['row'], adjusting: boolean, canSeek?: boolean): void;
     presentation: import('../src/ui/playback-presentation').PlaybackPresenter;
   };

@@ -22,7 +22,9 @@ export function startEarly() {
   // Native playback can render before the extension finishes mounting. Keep
   // it visible and interactive instead of turning that wait into a blank page.
   const playbackPage = location.pathname === '/watch' || location.pathname.startsWith('/shorts/');
-  loadingStyle.textContent = playbackPage ? '' : 'html > body { opacity: 0 !important; pointer-events: none !important; transition: none !important; }';
+  loadingStyle.textContent = location.pathname.startsWith('/shorts/')
+    ? 'html,html > body { background: #fff !important; color-scheme: light !important; } html[dark],html[dark] > body,html[data-ytg-boot-theme="dark"],html[data-ytg-boot-theme="dark"] > body { background: #0f0f0f !important; color-scheme: dark !important; } html > body { visibility: hidden !important; }'
+    : playbackPage ? 'html > body { visibility: hidden !important; } #movie_player, #movie_player * { visibility: visible !important; } #movie_player .ytp-chrome-top, #movie_player .ytp-chrome-bottom { visibility: hidden !important; }' : 'html > body { opacity: 0 !important; pointer-events: none !important; transition: none !important; }';
   const system = matchMedia('(prefers-color-scheme: dark)');
   let savedTheme: string | undefined;
   const attach = () => {

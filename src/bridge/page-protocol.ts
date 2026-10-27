@@ -13,8 +13,12 @@ export const PAGE_HISTORY = 'ytg-page-history-v1';
 export const PAGE_WATCH_NEXT = 'ytg-watch-next-updated-v1';
 export const PAGE_COMMENTS = 'ytg-comments-updated-v1';
 export const PAGE_WATCH_INFO = 'ytg-watch-info-updated-v1';
-export type PageOperation = 'readSidebar' | 'readAccount' | 'ping' | 'readPlayerVideoId' | 'readVideoDetails' | 'readWatchInfo' | 'watchAction' | 'watchPlaylists' | 'watchPlaylistToggle' | 'showControls' | 'hideControls' | 'readWatchNext' | 'moreWatchNext' | 'openBrowseVideo' | 'openBrowseRoute' | 'readComments' | 'moreComments' | 'commentReplies' | 'commentTranslate';
+export type PageOperation = 'shortsRecommendations' | 'playShorts' | 'readShortsSettings' | 'shortsSetting' | 'readSidebar' | 'readAccount' | 'ping' | 'readPlayerVideoId' | 'readVideoDetails' | 'readWatchInfo' | 'watchAction' | 'watchPlaylists' | 'watchPlaylistToggle' | 'showControls' | 'hideControls' | 'readWatchNext' | 'moreWatchNext' | 'openBrowseVideo' | 'openBrowseRoute' | 'readComments' | 'moreComments' | 'commentReplies' | 'commentTranslate' | 'commentPost' | 'commentSort';
 export interface PageAccess {
+  shortsRecommendations?(videoId: string, reset?: boolean): Promise<{ ids: string[]; hasMore: boolean } | undefined>;
+  playShorts?(videoId: string): boolean;
+  readShortsSettings?(): ShortsSettings | undefined;
+  shortsSetting?(videoId: string, action: 'captions' | 'quality', quality?: string): boolean;
   readSidebar?(): Promise<SidebarSnapshot | undefined>;
   readAccount?(refresh?: boolean): Promise<AccountSnapshot | undefined>;
   destroy?(): void;
@@ -36,6 +40,20 @@ export interface PageAccess {
   moreComments?(start?: boolean): boolean;
   commentReplies?(key: string): boolean;
   commentTranslate?(key: string, language: string): boolean;
+  commentPost?(text: string, key?: string): Promise<boolean>;
+  commentSort?(sort: 'TOP_COMMENTS' | 'NEWEST_FIRST'): boolean;
+}
+
+export const playbackQualities = ['auto', 'highres', 'hd2880', 'hd2160', 'hd1440', 'hd1080', 'hd720', 'large', 'medium', 'small', 'tiny'] as const;
+export interface ShortsSettings { videoId: string; captionsAvailable: boolean; captionsEnabled: boolean; qualities: string[]; quality: string }
+export function shortsSettingsSnapshot(raw: unknown): ShortsSettings | undefined {
+  if (!raw || typeof raw !== 'object') return;
+  const value = raw as ShortsSettings;
+  if (typeof value.videoId !== 'string' || !/^[\w-]{1,100}$/.test(value.videoId) || !Array.isArray(value.qualities)) return;
+  const allowed = new Set<string>(playbackQualities);
+  return { videoId: value.videoId, captionsAvailable: value.captionsAvailable === true, captionsEnabled: value.captionsEnabled === true,
+    qualities: [...new Set(value.qualities.filter(item => typeof item === 'string' && allowed.has(item)))].slice(0, 11),
+    quality: allowed.has(value.quality) ? value.quality : '' };
 }
 
 export function watchInfoSnapshot(raw: unknown): WatchInfoSnapshot | undefined {
@@ -90,9 +108,13 @@ export function commentsSnapshot(raw: unknown): CommentsSnapshot | undefined {
     replyBudget -= replies.length;
     return [{ key: item.key, author: item.author.slice(0, 200), text: item.text.slice(0, 4000), ...avatar(item.avatar), ...translationEntry(item), ...translation(item.translation),
       ...(Number.isSafeInteger(item.replyCount) && item.replyCount! >= 0 ? { replyCount: item.replyCount } : {}),
-      hasReplies: item.hasReplies === true, repliesLabel: typeof item.repliesLabel === 'string' ? item.repliesLabel.slice(0, 100) : '', replies }];
+      ...(item.canReply === true ? { canReply: true } : {}), hasReplies: item.hasReplies === true, repliesLabel: typeof item.repliesLabel === 'string' ? item.repliesLabel.slice(0, 100) : '', replies }];
   });
-  return { route: value.route, items, loading: value.loading === true, failed: value.failed === true, hasMore: value.hasMore === true };
+  const interaction = value.interaction;
+  return { ...(interaction && typeof interaction === 'object' ? { interaction: {
+    signedIn: interaction.signedIn === true, canPost: interaction.canPost === true, posting: interaction.posting === true,
+    sort: interaction.sort === 'NEWEST_FIRST' ? 'NEWEST_FIRST' as const : 'TOP_COMMENTS' as const, sortAvailable: interaction.sortAvailable === true
+  } } : {}), route: value.route, items, loading: value.loading === true, failed: value.failed === true, hasMore: value.hasMore === true };
 }
 
 export function watchNextSnapshot(raw: unknown): WatchNextSnapshot | undefined {
@@ -113,7 +135,8 @@ export function watchNextSnapshot(raw: unknown): WatchNextSnapshot | undefined {
         ? { watchedPercent: Math.min(100, item.watchedPercent) } : {}),
       duration: typeof item.duration === 'string' ? item.duration.slice(0, 40) : '', isPlaylist: item.isPlaylist === true, queue: item.queue === true, selected: item.selected === true }];
   });
-  return { route: value.route, recommendations: items(value.recommendations), queue: items(value.queue), loading: value.loading === true, failed: value.failed === true };
+  return { route: value.route, recommendations: items(value.recommendations), queue: items(value.queue), loading: value.loading === true, failed: value.failed === true,
+    ...(typeof value.playlistTitle === 'string' ? { playlistTitle: value.playlistTitle.slice(0, 2000) } : {}) };
 }
 
 // All data crossing the page boundary is untrusted, including private API output.

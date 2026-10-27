@@ -1,6 +1,14 @@
 import type { BrowseItem } from './browse-data';
 
 export interface FeedRow { id: string; items: readonly BrowseItem[]; shorts: boolean }
+export function appendFeedSkeletons(items: readonly BrowseItem[], columns: number, loading: boolean): readonly BrowseItem[] {
+  if (!loading) return items;
+  const normalCount = items.filter(item => !item.id.startsWith('short:')).length;
+  const count = columns * 2 + (columns - normalCount % columns) % columns;
+  return [...items, ...Array.from({ length: count }, (_, index) => ({
+    id: `skeleton:${items.length + index}`, title: '', channel: '', href: '', thumbnail: ''
+  }))];
+}
 export function feedRows(items: readonly BrowseItem[], columns: number): FeedRow[] {
   columns = Math.max(1, Math.floor(columns));
   const rows: FeedRow[] = [], shorts = items.filter(item => item.id.startsWith('short:'));
@@ -26,12 +34,65 @@ export function feedRows(items: readonly BrowseItem[], columns: number): FeedRow
   }
   flush(); if (shortsPending) addShorts(); return rows;
 }
-export function rowGeometry(rows: readonly FeedRow[], normalHeight: number, shortsHeight: number, gap: number) {
+// Measurements belong to the row's contents and layout, not its array index.
+// Keep a few recent feeds for back navigation; discarded rows cannot accumulate.
+export function createRowHeightCache() {
+  type Measurement = { signature: string; height: number };
+  const contexts = new Map<string, Map<string, Measurement>>();
+  const signatures = new WeakMap<FeedRow, string>();
+  let current = new Map<string, Measurement>();
+  let currentContext = '', currentRows: readonly FeedRow[] | undefined;
+  function signature(row: FeedRow) {
+    let value = signatures.get(row);
+    if (value === undefined) {
+      value = JSON.stringify([row.shorts, row.items.map(item => [item.id, item.title, item.channel,
+        !!item.channelAvatar, item.channelBadge, item.isPlaylist, item.viewCount, item.publishedTime])]);
+      signatures.set(row, value);
+    }
+    return value;
+  }
+  return {
+    signature,
+    use(context: string, rows: readonly FeedRow[]) {
+      if (context === currentContext && rows === currentRows) return;
+      currentContext = context; currentRows = rows;
+      current = contexts.get(context) || new Map();
+      contexts.delete(context); contexts.set(context, current);
+      if (contexts.size > 4) contexts.delete(contexts.keys().next().value!);
+      const valid = new Map(rows.map(row => [row.id, signature(row)]));
+      for (const [id, value] of current) if (valid.get(id) !== value.signature) current.delete(id);
+    },
+    read(row: FeedRow) {
+      const value = current.get(row.id);
+      return value?.signature === signature(row) ? value.height : undefined;
+    },
+    measure(row: FeedRow, height: number) {
+      if (!Number.isFinite(height) || height <= 0) return false;
+      const previous = current.get(row.id), key = signature(row);
+      if (previous?.signature === key && Math.abs(previous.height - height) <= .5) return false;
+      current.delete(row.id); current.set(row.id, { signature: key, height });
+      if (current.size > 5000) current.delete(current.keys().next().value!);
+      return true;
+    },
+    clear() { contexts.clear(); current.clear(); currentRows = undefined; currentContext = ''; }
+  };
+}
+export function rowGeometry(rows: readonly FeedRow[], normalHeight: number, shortsHeight: number, gap: number,
+  measuredHeight?: (row: FeedRow) => number | undefined) {
   let total = 0;
-  const offsets = rows.map(row => {
-    const offset = total; total += (row.shorts ? shortsHeight : normalHeight) + gap; return offset;
+  const heights = rows.map(row => measuredHeight?.(row) ?? (row.shorts ? shortsHeight : normalHeight));
+  const offsets = heights.map(height => {
+    const offset = total; total += height + gap; return offset;
   });
-  return { offsets, total: Math.max(0, total - (rows.length ? gap : 0)) };
+  return { offsets, heights, total: Math.max(0, total - (rows.length ? gap : 0)) };
+}
+export function rowAtOffset(offsets: readonly number[], top: number) {
+  let low = 0, high = offsets.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (offsets[mid] <= top) low = mid + 1; else high = mid;
+  }
+  return Math.max(0, low - 1);
 }
 export function windowIndexes(offsets: readonly number[], top: number, height: number, pinned = -1): number[] {
   if (!offsets.length) return [];

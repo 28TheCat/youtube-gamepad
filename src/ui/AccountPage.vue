@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from '../shared/use-i18n';
 import LoadStatus from './LoadStatus.vue';
+import InterfaceIcon from './InterfaceIcon.vue';
 import type { AccountSnapshot } from '../sites/youtube-account';
 const props = defineProps<{ snapshot?: AccountSnapshot; loading: boolean; failed: boolean;
   retry: () => void; refresh: () => void; focus: (node: HTMLElement) => void }>();
@@ -43,14 +44,14 @@ onBeforeUnmount(() => { disposed = true; document.documentElement.classList.remo
   <section id="ytg-account-page" ref="root" role="dialog" aria-modal="true" aria-labelledby="ytg-account-title" @keydown="keydown">
     <div class="account-layout">
       <header class="account-toolbar">
-        <button data-account-close type="button" :aria-label="t('Close')" @click="close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6M8 12h13" /></svg><span>{{ t('Back') }}</span></button>
+        <button data-account-close type="button" :aria-label="t('Close')" @click="close"><InterfaceIcon name="left" /><span>{{ t('Back') }}</span></button>
         <span class="account-brand">YouTube <span>Gamepad</span></span>
       </header>
       <div class="account-heading"><span class="account-eyebrow">{{ t('Account') }}</span><h1 id="ytg-account-title">{{ t('Your account') }}</h1><p>{{ t('Manage your profile and YouTube preferences.') }}</p></div>
       <div class="account-columns">
         <aside class="account-profile">
           <img v-if="avatar && !imageFailed" :src="avatar" alt="" @error="imageFailed = true" />
-          <svg v-else class="account-avatar-fallback" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 22v-2a8 8 0 0 1 16 0v2"/></svg>
+          <InterfaceIcon v-else name="person" class="account-avatar-fallback" />
           <h2>{{ profile?.name || t('Account') }}</h2><p v-if="profile?.handle">{{ profile.handle }}</p>
           <span class="account-profile-note">{{ t('YouTube account') }}</span>
         </aside>
@@ -69,7 +70,7 @@ onBeforeUnmount(() => { disposed = true; document.documentElement.classList.remo
             </div>
             <div class="account-group">
               <button v-for="item in links" :key="item.href" type="button" data-account-action @click="navigate(item.href)">
-                <span>{{ t(item.label) }}</span><svg class="account-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
+                <span>{{ t(item.label) }}</span><InterfaceIcon name="right" class="account-chevron" />
               </button>
             </div>
           </template>

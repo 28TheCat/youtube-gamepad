@@ -1,5 +1,46 @@
 # YouTube Gamepad 发布前检查报告
 
+## 当前工作区专项复核（2026-10-27）
+
+以下结果来自本次工作区构建的 `dist/`，不是下方 2026-10-05 候选 ZIP 的重签收。历史失败只描述当时快照；本次仅复核四项关联场景，没有重跑完整自动化或实体手柄验收。
+
+构建命令：`npm run build:extension`，通过。浏览器：Playwright Chromium 151.0.7922.34，加载实际扩展并使用模拟手柄；联网项访问真实 YouTube。
+
+| 原报告场景 | 本次结果 | 证据与边界 |
+| --- | --- | --- |
+| 自定义快捷键跨扩展环境同步 | 通过 | `custom controller shortcuts cross extension worlds and survive reload`；包含修改绑定、提示同步及刷新持久化 |
+| 切换标签后的隐藏状态 | 未通过，失败位置已变化 | `virtual controller traverses both worlds: fullscreen, hidden tab, disconnect and reconnect`；已通过隐藏状态等待和选择未移动检查，在 `tests/extension-e2e.test.mjs:265` 检查输入模式时实际为 `gamepad`、预期 `mouse`。单独复测仍失败；其后的断连重连检查未执行，尚需排查产品行为与测试预期 |
+| Escape 退出浏览器全屏 | 通过 | `trusted Escape exits browser fullscreen without navigating or disconnecting the controller`；本项通过不等同于全部全屏生命周期均通过 |
+| 联网设置同步 | 未通过 | `live YouTube retains storage bridge after refresh and stays inactive without a controller`；仍在 `tests/youtube-live.test.mjs:28` 等待 `liveSettings.enabled === false` 超时，尚未进入刷新断言。不能仅凭此断定存储写入失败，需区分设置传播与测试观测通道 |
+
+复现命令：
+
+```powershell
+node --test --test-concurrency=1 --test-name-pattern="custom controller shortcuts|virtual controller traverses|trusted Escape" tests/extension-e2e.test.mjs
+node --test --test-name-pattern="virtual controller traverses" tests/extension-e2e.test.mjs
+node --test --test-name-pattern="live YouTube retains" tests/youtube-live.test.mjs
+```
+
+本地日志：`output/playwright/docs-recheck-extension-2026-10-27.txt`、`output/playwright/docs-recheck-visibility-2026-10-27.txt`、`output/playwright/docs-recheck-live-2026-10-27.txt`。前三项合计 2 通过、1 失败；联网项 1 失败；隐藏状态单独复测为同一失败，不计作新增场景。
+
+本次没有核验公开隐私政策、支持入口、商店素材或发布包完整性；这些项目继续保留下方历史状态，不作为当前事实或通过证据。
+
+## 播放参数与短视频入口复核（2026-10-27）
+
+本节对应随后新增的播放参数设置及短视频字幕、清晰度、订阅入口，验证对象是当前工作区构建的 `dist/`。
+
+- 播放参数相关的桥接、安全校验、设置模型、播放模型、单次及长按快进、音量：76 项通过。日志：`output/playwright/playback-parameters-targeted-2026-10-27.txt`。
+- 实际扩展及 Vue 界面专项：5 项通过，覆盖完整设置保存／范围校验／刷新、页面内设置与完整设置同步及手柄焦点、动态快进秒数标签、短视频参数实时更新与边界限制，以及短视频字幕／清晰度／订阅／通知／逐层返回。浏览器为 Chromium 151.0.7922.34，媒体及接口使用测试夹具，未代替真实网站或实体手柄签收。
+- 全量 `npm test`：591 项，584 通过、7 失败。失败分布在 `tests/browse.test.mjs`（2 项）、`tests/card-visibility.test.mjs`（1 项）、`tests/client-home.test.mjs`（1 项）和 `tests/fallback.test.mjs`（3 项）。本次未判定其原因或是否为既有问题；不能将专项通过视为全量通过。完整日志：`output/playwright/playback-parameters-unit-2026-10-27.txt`。
+
+界面专项复现命令：
+
+```powershell
+node --test --test-concurrency=1 --test-name-pattern="playback parameter|Shorts More|shared action buttons" tests/inline-settings-vue.test.mjs tests/settings-pages.test.mjs tests/shorts-extension.test.mjs tests/playback-vue.test.mjs
+```
+
+## 历史候选包检查（2026-10-05）
+
 检查日期：2026-10-05（Asia/Shanghai）  
 开发者：28TheCat  
 候选版本：0.2.1  

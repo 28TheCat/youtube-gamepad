@@ -220,3 +220,80 @@ test('stale feed failure cannot restore native mode over a newer route', async (
   f.state.requests[0].reject(new Error('old')); await pending;
   assert.equal(f.state.unavailable, 0);
 });
+const {homeFilterDefaults}=await importSettingsModel('src/shared/home-filter.ts');
+function filteredFixture({route='/',settings={},request}={}){
+ const values={...homeFilterDefaults,...settings},store={categories:[{id:'all',selected:true}],category:'',loading:false,error:''};let changes=0;
+ const controller=createBrowseFeedController({store,feed:{categories:()=>store.categories,cancel(){},request},getRoute:()=>route,isVisible:()=>true,isRestoring:()=>false,getFilters:()=>values,changed(){changes++},loadingChanged(){},afterRender:async()=>{},canResetFocus:()=>false,resetFocus(){}});
+ return{controller,store,values,get changes(){return changes}};
+}
+test('fully filtered pages stop at the extra-page budget and explicit loading can continue',async()=>{
+ let calls=0;const f=filteredFixture({settings:{homeMinViews:100,homeAutoPages:2},request:async()=>({items:[{...item('hidden'+(++calls)),filterData:{views:1}}],nextPage:'page'+calls})});
+ await f.controller.changeCategory('all');assert.equal(calls,3);assert.equal(f.controller.snapshot.items.length,0);assert.equal(f.controller.snapshot.canLoadMore,true);assert.equal(f.controller.snapshot.autoLoadBlocked,true);
+ await f.controller.changeCategory('all',true);assert.equal(calls,3);
+ await f.controller.changeCategory('all',true,true);assert.equal(calls,6);
+ f.values.homeMinViews=0;f.controller.refilter();assert.equal(f.controller.snapshot.items.length,6,'relaxing rules restores cached items without a request');assert.equal(calls,6);
+});
+test('automatic page budgets also bound partially retained batches, while history is untouched',async()=>{
+ let calls=0;const request=async()=>({items:[{...item('kept'+(++calls)),filterData:{views:1000}}],nextPage:'page'+calls});
+ const f=filteredFixture({settings:{homeMinViews:100,homeAutoPages:1},request});
+ await f.controller.changeCategory('all');await f.controller.changeCategory('all',true);await f.controller.changeCategory('all',true);assert.equal(calls,2);assert.equal(f.controller.snapshot.items.length,2);assert.equal(f.controller.snapshot.autoLoadBlocked,true);
+ const h=filteredFixture({route:'/feed/history',settings:{homeMinViews:999999},request});await h.controller.changeCategory('all');assert.equal(h.controller.snapshot.items.length,1);assert.equal(h.controller.snapshot.filteredCount,undefined);
+});
+test('repeated continuation tokens stop safely and stale filter requests do not cross routes',async()=>{
+ let calls=0;const f=filteredFixture({settings:{homeMinViews:100},request:async()=>{calls++;return{items:[{...item('a'),filterData:{views:1}}],nextPage:'same'}}});await f.controller.changeCategory('all');assert.equal(calls,2);assert.equal(f.controller.snapshot.canLoadMore,false);
+});
+
+
+test('explicit Home refresh replaces cached recommendations and resets pagination and category', async () => {
+  const f = fixture();
+  await f.load('all', ['old'], 'old-next');
+  await f.load('music', ['music']);
+  const pending = f.controller.refreshHome();
+  assert.equal(f.state.requests.length, 3);
+  assert.equal(f.state.requests.at(-1).id, 'all');
+  assert.equal(f.state.requests.at(-1).page, undefined);
+  const duplicate = f.controller.refreshHome();
+  assert.equal(f.state.requests.length, 3);
+  f.state.requests.at(-1).resolve({ items: [item('fresh')], nextPage: 'fresh-next' });
+  await pending; await duplicate;
+  assert.deepEqual(f.controller.snapshot.items.map(x => x.id), ['fresh']);
+  const more = f.controller.changeCategory('all', true);
+  assert.equal(f.state.requests.at(-1).page, 'fresh-next');
+  f.state.requests.at(-1).resolve({ items: [item('additional')] }); await more;
+});
+
+test('Home refresh retains the previous batch until replacement and keeps it usable after failure', async () => {
+  const f = fixture();
+  await f.load('all', ['old'], 'old-next');
+  const old = f.controller.snapshot;
+  const pending = f.controller.refreshHome();
+  assert.strictEqual(f.controller.snapshot, old);
+  assert.equal(f.store.refreshing, true);
+  f.state.requests.at(-1).reject(new Error('offline')); await pending;
+  assert.strictEqual(f.controller.snapshot, old);
+  assert.equal(f.store.refreshing, false);
+  assert.equal(f.store.refreshFailed, true);
+  assert.equal(f.state.unavailable, 0);
+  const retry = f.controller.changeCategory('all');
+  assert.equal(f.store.refreshing, true);
+  assert.equal(f.state.requests.length, 3, 'retry must fetch a replacement rather than reuse the old cache');
+  assert.equal(f.state.requests.at(-1).page, undefined);
+  f.state.requests.at(-1).resolve({ items: [item('fresh')], nextPage: 'fresh-next' }); await retry;
+  assert.deepEqual(f.controller.snapshot.items.map(item => item.id), ['fresh']);
+  assert.equal(f.store.refreshing, false);
+  assert.equal(f.store.refreshFailed, false);
+  assert.equal(f.controller.captureReturnState(0).nextPage, 'fresh-next');
+});
+
+test('Home activation from another route invalidates home cache while ordinary back keeps it', async () => {
+  const f = fixture();
+  await f.load('all', ['old']);
+  f.controller.reset(); f.state.route = '/feed/subscriptions';
+  f.store.categories = [{ id: 'all' }]; await f.load('all', ['subscriptions']);
+  f.controller.refreshHome();
+  assert.equal(f.state.requests.length, 2);
+  f.controller.reset(); f.state.route = '/'; f.store.categories = [{ id: 'all' }];
+  const pending = f.controller.changeCategory('all');
+  assert.equal(f.state.requests.length, 3);
+  f.state.requests.at(-1).resolve({ items: [item('fresh')] }); await pending;
+});

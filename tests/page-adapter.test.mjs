@@ -3,60 +3,56 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript-vue';
+import { moduleGraph, resolveModule } from '../scripts/module-graph.mjs';
 
-test('production MAIN runtime graph contains only page adapters and their data helpers', () => {
-  const allowed = new Set(['entries/main', 'bridge/page-server', 'bridge/page-protocol', 'sites/youtube-feed', 'sites/youtube-next', 'sites/youtube-parser', 'sites/youtube-search', 'shared/browse-categories', 'shared/watch-link', 'shared/explore-pages', 'shared/playlist-colors']);
-  const visited = new Set();
-  allowed.add('sites/youtube-account');
-  allowed.add('sites/youtube-sidebar');
-  allowed.add('shared/sidebar-data');
-  allowed.add('sites/youtube-watch-data');
-  allowed.add('sites/youtube-comments');
-  allowed.add('sites/native-comment-translation');
-  allowed.add('sites/youtube-channel');
-  allowed.add('sites/youtube-watch-info');
-  allowed.add('sites/youtube-request');
-  // Pure YouTube badge parsing shared by search and watch metadata adapters.
-  // SVG rendering stays in ISOLATED; this helper returns only a badge kind.
-  allowed.add('sites/youtube-channel-badge');
-  allowed.add('shared/comment-language');
-function visit(file) {
-    if (visited.has(file)) return;
-    assert.ok(allowed.has(file), `Application dependency leaked into MAIN: ${file}`);
-    visited.add(file);
-    const source = ts.transpileModule(readFileSync(new URL(`../src/${file}.ts`, import.meta.url), 'utf8'), {
-      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext }
-    }).outputText;
-    const ast = ts.createSourceFile(file, source, ts.ScriptTarget.ES2022, true);
-    for (const statement of ast.statements) {
-      if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) continue;
-      if (!statement.moduleSpecifier) continue;
-      const name = statement.moduleSpecifier.text;
-      if (file === 'sites/youtube-watch-info' && name === 'youtubei.js/web') continue;
-      if (file === 'sites/youtube-account' && name === 'youtubei.js/web') continue;
-      if (file === 'sites/youtube-sidebar' && name === 'youtubei.js/web') continue;
-      if (file === 'sites/youtube-channel' && name === 'youtubei.js/web') continue;
-      if (file === 'sites/youtube-comments' && name === 'youtubei.js/web') continue;
-      if (file === 'sites/youtube-request' && name === 'youtubei.js/web') continue;
-      if (file === 'sites/youtube-parser' && name === 'youtubei.js/web') continue;
-      assert.ok(name.startsWith('.'), `External runtime imported by MAIN: ${name}`);
-      const url = new URL(name.replace(/\.ts$/, '') + '.ts', new URL(`../src/${file}.ts`, import.meta.url));
-      const base = new URL('../src/', import.meta.url);
-      visit(url.pathname.slice(base.pathname.length).replace(/\.ts$/, ''));
+function assertMainBoundary(graph) {
+  for (const [file, imports] of graph) {
+    assert.ok(/^src\/(?:sites|shared)\//.test(file) ||
+      ['src/entries/main.ts', 'src/bridge/page-server.ts', 'src/bridge/page-protocol.ts'].includes(file),
+      `Application dependency leaked into MAIN: ${file}`);
+    for (const name of imports) {
+      if (!name.startsWith('.')) {
+        assert.ok(file.startsWith('src/sites/') && name === 'youtubei.js/web', `External runtime imported by MAIN: ${name} in ${file}`);
+      } else {
+        assert.ok(resolveModule(file, name)?.endsWith('.ts'), `Non-data module imported by MAIN: ${name}`);
+      }
+    }
+    if (file.startsWith('src/shared/')) {
+      const ast = ts.createSourceFile(file, readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'), ts.ScriptTarget.ES2022, true);
+      function checkShared(node) {
+        if (ts.isIdentifier(node)) assert.ok(!['window', 'document', 'chrome', 'globalThis', 'localStorage', 'sessionStorage'].includes(node.text),
+          `Browser state imported by MAIN shared helper: ${file} (${node.text})`);
+        ts.forEachChild(node, checkShared);
+      }
+      checkShared(ast);
     }
   }
-  visit('entries/main');
-  assert.deepEqual(visited, allowed);
+}
+
+test('production MAIN runtime graph contains only page adapters and pure shared helpers', () => {
+  assertMainBoundary(moduleGraph(['src/entries/main.ts']));
 });
 
-function load(file, context, modules = {}) {
+test('MAIN boundary rejects UI, application state, browser helpers and external runtime leaks', () => {
+  for (const file of ['src/ui/menu.ts', 'src/app/state-machine.ts', 'src/shared/page-dom.ts'])
+    assert.throws(() => assertMainBoundary(new Map([[file, []]])), /Application dependency|Browser state/);
+  assert.throws(() => assertMainBoundary(new Map([['src/sites/youtube-session.ts', ['vue']]])), /External runtime/);
+  assert.throws(() => assertMainBoundary(new Map([['src/shared/home-filter.ts', ['../ui/VideoCard.vue']]])), /Non-data module/);
+});
+
+function load(file, context, modules = {}, cache = new Map()) {
+  const path = `src/${file}.ts`;
+  if (cache.has(path)) return cache.get(path);
   const exports = {};
-  const source = ts.transpileModule(readFileSync(new URL(`../src/${file}.ts`, import.meta.url), 'utf8'), {
+  cache.set(path, exports);
+  const source = ts.transpileModule(readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
   }).outputText;
   vm.runInNewContext(source, { ...context, exports, require: name => {
-    assert.ok(name in modules, `Unexpected runtime dependency: ${name}`);
-    return modules[name];
+    if (Object.hasOwn(modules, name)) return modules[name];
+    const target = resolveModule(path, name);
+    assert.ok(target?.startsWith('src/') && target.endsWith('.ts'), `Unexpected runtime dependency: ${name}`);
+    return load(target.slice(4, -3), context, {}, cache);
   } });
   return exports;
 }
@@ -73,6 +69,7 @@ function fixture() {
   const sidebarData = load('shared/sidebar-data', context, { './explore-pages': load('shared/explore-pages', context) });
   const modules = { './page-protocol': protocol, '../shared/watch-link': load('shared/watch-link', context), '../shared/sidebar-data': sidebarData, '../shared/comment-language': languages };
   const server = load('bridge/page-server', context, { ...modules,
+    '../sites/youtube-shorts': { createShortsService: () => ({ read: async () => ({ ids: ['second'], hasMore: true }), destroy() {} }) },
     '../sites/youtube-sidebar': { createSidebarService: () => ({ read: async () => sidebarData.defaultSidebar(), destroy() {} }) },
     '../sites/youtube-account': { createAccountService: () => ({ read: async () => ({ signedIn: false, accounts: [] }), destroy() {} }) },
     '../sites/youtube-watch-data': { createWatchDataService: () => ({ routeChanged() {}, destroy() {} }) },
@@ -85,6 +82,29 @@ function fixture() {
   const client = load('bridge/page-client', context, modules).createPageClient();
   return { document, window, context, protocol, server, client, setPlayer: value => { player = value; }, setDetails: value => { details = value; } };
 }
+
+test('Shorts settings bridge bounds qualities, targets the current video and rejects stale commands', () => {
+  const f = fixture(), dispose = f.server.startPageServer();
+  f.context.location.pathname = '/shorts/current';
+  let videoId = 'current', captions = false, quality = 'hd1080';
+  const player = { getVideoData: () => ({ video_id: videoId }),
+    getAvailableQualityLevels: () => ['hd1080', 'hd720', 'private-quality'], getPlaybackQuality: () => quality,
+    setPlaybackQualityRange: value => { quality = value; }, getOption: () => [{ languageCode: 'en', private: 'hidden' }],
+    isSubtitlesOn: () => captions, toggleSubtitles: () => { captions = !captions; }, querySelector: () => null };
+  f.document.querySelector = () => ({ querySelector: () => player });
+  assert.deepEqual(JSON.parse(JSON.stringify(f.client.readShortsSettings())), {
+    videoId: 'current', captionsAvailable: true, captionsEnabled: false, qualities: ['auto', 'hd1080', 'hd720'], quality: 'hd1080'
+  });
+  assert.equal(f.client.shortsSetting('current', 'captions'), true); assert.equal(captions, true);
+  assert.equal(f.client.shortsSetting('current', 'quality', 'hd720'), true); assert.equal(quality, 'hd720');
+  assert.equal(f.client.shortsSetting('current', 'quality', 'private-quality'), false);
+  assert.equal(f.client.shortsSetting('old', 'captions'), false); assert.equal(captions, true);
+  videoId = 'old';
+  assert.equal(f.client.readShortsSettings(), undefined);
+  assert.equal(f.client.shortsSetting('current', 'quality', 'hd1080'), false);
+  f.context.location.pathname = '/watch'; assert.equal(f.client.readShortsSettings(), undefined);
+  dispose();
+});
 
 test('sidebar bridge returns API snapshots and filters unsafe links and private fields', async () => {
   const f = fixture(); f.server.startPageServer();
@@ -308,6 +328,53 @@ test('Shorts navigation loads the canonical page and rejects unsafe or noncanoni
   dispose();
 });
 
+test('Shorts route failures never fall back to document navigation while switching videos', () => {
+  const f = fixture(), destinations = [], endpoints = [];
+  f.context.location.pathname = '/shorts/first';
+  f.context.location.assign = href => destinations.push(href);
+  f.setPlayer({ navigate_: endpoint => endpoints.push(endpoint) });
+  const dispose = f.server.startPageServer();
+  assert.equal(f.client.openWatchVideo('/shorts/second'), true);
+  assert.equal(endpoints[0].reelWatchEndpoint.videoId, 'second');
+  f.setPlayer({ navigate_() { throw new Error('Router unavailable'); } });
+  assert.equal(f.client.openWatchVideo('/shorts/third'), false);
+  f.setPlayer({});
+  assert.equal(f.client.openWatchVideo('/shorts/third'), false);
+  assert.deepEqual(destinations, []);
+  dispose();
+});
+
+test('Shorts readiness reads the active native player identity even while it still points to the old video', () => {
+  const f = fixture();
+  f.context.location.pathname = '/shorts/second';
+  let videoId = 'first';
+  f.document.querySelector = selector => selector.includes('ytd-reel-video-renderer[is-active]') ? { getVideoData: () => ({ video_id: videoId }) } : null;
+  const dispose = f.server.startPageServer();
+  assert.equal(f.client.readPlayerVideoId(), 'first');
+  videoId = 'second';
+  assert.equal(f.client.readPlayerVideoId(), 'second');
+  dispose();
+});
+
+test('Shorts API playback reuses the player and updates history only after a successful load', async () => {
+  const f = fixture(), loads = [], routes = [];
+  f.context.location.pathname = '/shorts/first';
+  f.context.history.replaceState = (_state, _title, href) => routes.push(href);
+  f.setPlayer({ loadVideoById: id => loads.push(id) });
+  const dispose = f.server.startPageServer();
+  assert.equal(f.client.playShorts('second'), true);
+  assert.deepEqual(loads, ['second']);
+  assert.deepEqual(routes, ['/shorts/second']);
+  assert.deepEqual(JSON.parse(JSON.stringify(await f.client.shortsRecommendations('first'))), { ids: ['second'], hasMore: true });
+  f.setPlayer({ loadVideoById() { throw new Error('Unavailable'); } });
+  assert.equal(f.client.playShorts('third'), false);
+  assert.equal(f.client.playShorts('../watch'), false);
+  assert.deepEqual(routes, ['/shorts/second']);
+  f.context.location.pathname = '/watch';
+  assert.equal(f.client.playShorts('third'), false);
+  dispose();
+});
+
 test('watch next bridge exposes cached data and pagination without player access', () => {
   const f = fixture();
   const dispose = f.server.startPageServer();
@@ -324,6 +391,7 @@ test('watch next bridge exposes cached data and pagination without player access
 test('feed bridge retains validated playlist links without confusing the playlist with its first video', async () => {
   const f = fixture();
   const client = load('bridge/feed-client', f.context, {
+    '../shared/home-filter': load('shared/home-filter', f.context),
     '../shared/playlist-colors': load('shared/playlist-colors', f.context),
     './page-protocol': f.protocol, '../shared/watch-link': load('shared/watch-link', f.context)
   }).createFeedClient();

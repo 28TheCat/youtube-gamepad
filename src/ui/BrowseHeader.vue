@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import InterfaceIcon from './InterfaceIcon.vue';
+import youtubeIcon from '../../assets/brand/youtube-icon.svg?inline';
 import BrowseModeSwitch from './BrowseModeSwitch.vue';
 import AccountPage from './AccountPage.vue';
 import type { mountBrowseMode } from './browse-mode';
-const props = defineProps<{ browseMode: ReturnType<typeof mountBrowseMode>; refreshNavigation?: () => void; focusAccount?: (node: HTMLElement) => void }>();
+const props = defineProps<{ browseMode: ReturnType<typeof mountBrowseMode>; refreshHome?: () => void; refreshNavigation?: () => void; focusAccount?: (node: HTMLElement) => void }>();
 import { useI18n } from '../shared/use-i18n';
 import { createPageClient } from '../bridge/page-client';
 import { ui } from './ui-api';
 import type { AccountSnapshot } from '../sites/youtube-account';
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { useBrowseStore } from '../app/browse-store';
+const store = useBrowseStore();
 const { t } = useI18n();
 const account = ref<AccountSnapshot>();
 const accountLoading = ref(false), accountFailed = ref(false);
@@ -43,7 +46,7 @@ function closeAccount(restore = true) {
 }
 const routeChanged = () => closeAccount(false);
 watch(accountAvatar, () => { avatarFailed.value = false; });
-const home = () => { if (!page.openBrowseRoute?.('/')) location.assign('/'); };
+const home = () => { props.refreshHome?.(); if (location.pathname === '/' && props.refreshHome) return; if (!page.openBrowseRoute?.('/')) location.assign('/'); };
 const releases: (() => void)[] = [];
 onMounted(() => {
   releases.push(ui.registerPanel('account', { isOpen: () => accountOpen.value,
@@ -72,8 +75,9 @@ onBeforeUnmount(() => {
 
 <template>
   <header id="ytg-browse-top">
+    <div v-if="store.refreshing" class="home-loading-line" aria-hidden="true"></div>
     <button class="client-brand" type="button" :aria-label="t('首页')" @click="home">
-      <svg viewBox="0 0 32 24" aria-hidden="true"><rect y="1" width="32" height="22" rx="7"/><path d="m13 7 9 5-9 5z"/></svg>
+      <img class="youtube-brand-icon" :src="youtubeIcon" alt="" width="32" height="22" />
       <span>YouTube <small>Gamepad</small></span>
     </button>
     <div id="ytg-client-search"></div>

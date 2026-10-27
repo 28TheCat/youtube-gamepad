@@ -78,6 +78,18 @@ test('inline playback layout saves, follows external changes and preserves value
   s.model.dispose();
 });
 
+test('inline playback parameters normalize external values and retain saved values on failure', async () => {
+  const s = await setup();
+  await s.model.savePlayback({ seekStep: 20, shortsSeekStep: 8, volumeStep: 12 }, 'volumeStep-+');
+  assert.equal(s.model.state.values.seekStep, 20); assert.equal(s.model.state.values.volumeStep, 12);
+  s.change({ seekStep: 999, volumeStep: 0 });
+  assert.equal(s.model.state.values.seekStep, 120); assert.equal(s.model.state.values.volumeStep, 1);
+  s.failWrites(); await s.model.savePlayback({ volumeStep: 6 }, 'volumeStep-+');
+  assert.equal(s.model.state.values.volumeStep, 1);
+  assert.match(s.message.textContent, /Could not save settings/);
+  s.model.dispose();
+});
+
 test('failed inline saves leave values intact, announce failure and retain the active action', async () => {
   const s = await setup();
   s.model.open('display'); await flush();

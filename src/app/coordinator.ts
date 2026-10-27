@@ -1,3 +1,4 @@
+import { createWatchTransition } from '../ui/watch-transition';
 import type { Action, ActionContext, AdaptationSnapshot, CoordinatorModule, Direction, Effect, InteractionEvent, Mode, OperationResult, PlaybackSnapshot, RecommendationResult, SitePort, WatchAction, WatchModule } from '../../types/ports';
 
 import { YTGamepadRuntime } from '../shared/runtime.ts';
@@ -24,6 +25,7 @@ import { YTGamepadShortsModule } from '../playback/shorts';
 import { isShortsPlaybackRoute } from '../shared/shorts-route';
 import { currentLanguage, t } from '../shared/i18n';
 import { normalizePlaybackLayout } from '../shared/playback-layout';
+import { playbackParameterDefaults, normalizePlaybackParameters, type PlaybackParameters } from '../shared/playback-settings';
 
 export let YTGamepadCoordinator: CoordinatorModule | undefined;
 // Application policy: mode transitions, route history and module coordination.
@@ -58,16 +60,22 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     prepareVideo: href => appState().navigation?.target === href || prepareVideo(href) });
   const routeFactory = YTGamepadRouteController;
   const lifecycle = runtime.scope('coordinator');
+  const transition = createWatchTransition(() => pageAccess?.readPlayerVideoId?.());
+  lifecycle.cleanup(transition.destroy);
   let site: SitePort, watch: WatchModule | undefined;
   let heldSeek: { route: string; action: Action; origin: number; target: number; distance: number } | null = null;
   const appState = () => interaction.state.app;
   const send = (event: InteractionEvent) => interaction.dispatch(event);
   send({ type: 'APP_INIT', route: location.pathname + location.search });
-  let savedPreferences = { enabled: true, theater: true, playbackLayout: 'fullscreen' as 'fullscreen' | 'windowed' }, suspended = false;
+  let savedPreferences = { ...playbackParameterDefaults, enabled: true, theater: true, playbackLayout: 'fullscreen' as 'fullscreen' | 'windowed' }, suspended = false;
   // All devices share the saved enable switch; connection only controls gamepad polling.
   let preferences = { ...savedPreferences, enabled: false };
   let playbackInputMode = input?.mode || 'mouse';
-  const fullscreenLayout = () => preferences.playbackLayout === 'fullscreen' && playbackInputMode === 'gamepad';
+  // Detail-page expansion belongs to this watch route, not saved preferences
+  // or the browser's fullscreen session.
+  let expandedWatchRoute: string | null = null;
+  const watchExpanded = () => expandedWatchRoute !== null && expandedWatchRoute === routeNow();
+  const fullscreenLayout = () => watchExpanded() || document.fullscreenElement === document.documentElement || preferences.playbackLayout === 'fullscreen' && playbackInputMode === 'gamepad';
   const routeNow = () => location.pathname + location.search;
   let adaptationSince = 0, rendering = false, checking = false, notice: {host:HTMLElement;message:HTMLElement;retry:HTMLButtonElement} | undefined, loading: HTMLElement | undefined;
   let healthPolling: import('../../types/ports').Scope | undefined;
@@ -81,11 +89,15 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   }
   lifecycle.cleanup(() => { healthPolling?.destroy(); healthPolling = undefined; });
   const adaptation = (): AdaptationSnapshot => appState().adaptation || { status: 'inactive', reason: '' };
-  const surfaceReady = () => adaptation().status === 'ready' && adaptation().route === routeNow();
+  const nativePageStyle = () => document.documentElement.getAttribute('data-ytg-browse-mode') === 'youtube';
+  const surfaceReady = () => !nativePageStyle() && adaptation().status === 'ready' && adaptation().route === routeNow();
   const visibleMode = () => !isShortsPlaybackRoute() && location.pathname === '/watch' && surfaceReady() ? appState().mode : 'browse';
   function syncLoading() {
+    if (!preferences.enabled || location.pathname !== '/watch' || expandedWatchRoute !== routeNow()) expandedWatchRoute = null;
+    if (watchExpanded()) document.documentElement.dataset.ytgWatchExpanded = 'true';
+    else delete document.documentElement.dataset.ytgWatchExpanded;
     const app = appState();
-    const pageLayout = !isShortsPlaybackRoute();
+    const pageLayout = !nativePageStyle() && !isShortsPlaybackRoute();
     if (preferences.enabled && pageLayout) document.documentElement.dataset.ytgPlaybackLayout = fullscreenLayout() ? 'fullscreen' : 'windowed';
     else delete document.documentElement.dataset.ytgPlaybackLayout;
     document.documentElement.classList.toggle('ytg-watch-layout', preferences.enabled && pageLayout && location.pathname === '/watch');
@@ -94,7 +106,11 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     // Position that first frame without changing the still-visible browse page.
     document.documentElement.classList.toggle('ytg-player-primed', preferences.enabled && pageLayout &&
       app.openingVideo && !!app.navigation && !destinationReady && !app.returning && adaptation().status !== 'fallback');
-    const active = preferences.enabled && !isShortsPlaybackRoute() && (app.openingVideo && !!app.navigation && !destinationReady ||
+    transition.sync(preferences.enabled && pageLayout,
+      app.openingVideo && app.navigation?.target || routeNow(),
+      !!(app.openingVideo && app.navigation) || adaptation().status === 'waiting',
+      adaptation().status === 'fallback' || !!app.returning);
+    const active = preferences.enabled && pageLayout && (app.openingVideo && !!app.navigation && !destinationReady ||
       location.pathname === '/watch' && (adaptation().status === 'waiting' || app.returning));
     if (active && !loading && typeof document.createElement === 'function') {
       loading = document.createElement('div'); loading.id = 'ytg-watch-loading';
@@ -160,7 +176,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     try { site.restoreNativeInterface(); } catch (error) { diagnose('restore.nativeInterface', error, 'site'); }
   }
   function failAdaptation(reason = 'Video interface unavailable') {
-    if (!preferences.enabled || isShortsPlaybackRoute() || location.pathname !== '/watch') {
+    if (!preferences.enabled || nativePageStyle() || isShortsPlaybackRoute() || location.pathname !== '/watch') {
       setAdaptation('inactive'); restoreNative();
       if (notice) notice.host.hidden = true;
       return;
@@ -176,8 +192,8 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       // Custom controls wait for destination identity and decoded picture.
       // The native player remains visible throughout that wait.
       const opening = preferences.enabled && appState().openingVideo && !!appState().navigation;
-      if (opening && (location.pathname !== '/watch' || appState().navigation?.target !== routeNow())) return;
-      if (!preferences.enabled || isShortsPlaybackRoute() || location.pathname !== '/watch') {
+      if (!nativePageStyle() && opening && (location.pathname !== '/watch' || appState().navigation?.target !== routeNow())) return;
+      if (!preferences.enabled || nativePageStyle() || isShortsPlaybackRoute() || location.pathname !== '/watch') {
         setAdaptation('inactive');
         if (notice) notice.host.hidden = true;
         return;
@@ -320,7 +336,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     const previous = heldSeek;
     const origin = previous?.origin ?? video.currentTime;
     const distance = previous?.action === action ? previous.distance : 0;
-    const step = YTGamepadSeeking.step(distance);
+    const step = YTGamepadSeeking.step(distance, preferences.seekStep);
     const before = previous?.target ?? origin;
     const target = YTGamepadSeeking.target(video.timeline, before + (action === 'seekBack' ? -step : step));
     if (target === null) { cancelHeldSeek(); return false; }
@@ -377,14 +393,28 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   function request(type: 'replies', value: string): OperationResult;
   function request(type: 'translateComment', value: string): OperationResult;
   function request(type: 'comments', value?: boolean): OperationResult;
+  function request(type: 'commentPost', value: { text: string; key?: string }): OperationResult | Promise<OperationResult>;
+  function request(type: 'commentSort', value: 'TOP_COMMENTS' | 'NEWEST_FIRST'): OperationResult;
+  function request(type: 'fullscreen'): OperationResult | Promise<OperationResult>;
   function request(type: 'settings' | 'backSettings' | 'channel'): OperationResult;
-  function request(...[type,value]: ['moreRecommendations'|'settings'|'backSettings'|'channel'|'playlists'] | ['mode',Mode] | ['media',Action] | ['watchAction',WatchAction] | ['seek',number] | ['recommendation'|'replies'|'translateComment'|'savePlaylist',string] | ['comments',boolean?]) {
+  function request(...[type,value]: ['fullscreen'|'moreRecommendations'|'settings'|'backSettings'|'channel'|'playlists'] | ['mode',Mode] | ['media',Action] | ['watchAction',WatchAction] | ['seek',number] | ['recommendation'|'replies'|'translateComment'|'savePlaylist',string] | ['comments',boolean?] | ['commentPost', { text: string; key?: string }] | ['commentSort', 'TOP_COMMENTS' | 'NEWEST_FIRST']) {
     if (lifecycle.destroyed) return false;
     if (!preferences.enabled || appState().navigation || appState().returning) return false;
     if (type === 'mode' && value !== 'browse' && !surfaceReady()) return false;
     try {
     switch (type) {
       case 'mode': setMode(value); return true;
+      case 'fullscreen':
+        if (location.pathname !== '/watch' || !surfaceReady()) return false;
+        if (!fullscreenLayout()) {
+          expandedWatchRoute = routeNow();
+          cancelHeldSeek();
+          setMode('playback');
+          return true;
+        }
+        if (watchExpanded()) { collapseWatch(); return true; }
+        if (!document.documentElement.requestFullscreen) return false;
+        return document.documentElement.requestFullscreen().then(() => true, () => false);
       case 'media': return performMedia(value);
       case 'watchAction': {
         const result = site.performWatchAction(value);
@@ -402,6 +432,8 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       case 'replies': return site.expandReplies(value);
       case 'translateComment': return site.translateComment(value);
       case 'comments': return site.loadComments(value);
+      case 'commentPost': return site.postComment?.(value.text, value.key) || false;
+      case 'commentSort': return site.sortComments?.(value) || false;
       default: return false;
     }
     } catch (error) { diagnose('request.' + type, error, 'site');
@@ -429,12 +461,13 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     return menu.handle(action);
   }
   const routes = routeFactory.create({ runtime, interaction, routeNow, renderMode, hasTemporaryLayer,
-    location, history, remoteHistory, window, document, enabled: () => preferences.enabled,
+    location, history, remoteHistory, window, document, enabled: () => preferences.enabled && !nativePageStyle(),
     pause: () => { void site.perform('pause'); }, closeMenu: () => menu?.close(),
     onStart: cancelHeldSeek
   });
   const prepareVideo = routes.prepareVideo, pageBack = routes.pageBack;
-  const shorts = YTGamepadShortsModule?.create({ runtime, controllerStyle, pageAccess, enabled: () => preferences.enabled,
+  const shorts = YTGamepadShortsModule?.create({ runtime, controllerStyle, pageAccess, enabled: () => preferences.enabled && !nativePageStyle(),
+    playbackSettings: () => preferences,
     canHandle: () => !menu?.opened && !core.hasTemporaryLayer, dispatch: action => core.act(action) });
   function setMode(value: Mode) {
     if (lifecycle.destroyed) return;
@@ -479,11 +512,14 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       }
     }
   }
-  function applyLayout(values: { playbackLayout?: 'fullscreen' | 'windowed'; enabled?: boolean; theater?: boolean; deadzone?: number; repeatDelay?: number; bindings?: Record<string,number>; bindingLayouts?: Record<string,Record<string,number>>; repeatInterval?: number; }) {
+  function applyLayout(values: Partial<PlaybackParameters> & { playbackLayout?: 'fullscreen' | 'windowed'; enabled?: boolean; theater?: boolean; deadzone?: number; repeatDelay?: number; bindings?: Record<string,number>; bindingLayouts?: Record<string,Record<string,number>>; repeatInterval?: number; }) {
     const wasEnabled = preferences.enabled;
     const keepSettingsOpen = !wasEnabled && menu?.opened && menu.settingsOpened;
-    savedPreferences = { ...savedPreferences, ...values, playbackLayout: normalizePlaybackLayout(values.playbackLayout ?? savedPreferences.playbackLayout) };
+    const parameters = normalizePlaybackParameters({ ...savedPreferences, ...values });
+    if (parameters.seekStep !== preferences.seekStep) cancelHeldSeek();
+    savedPreferences = { ...savedPreferences, ...values, ...parameters, playbackLayout: normalizePlaybackLayout(values.playbackLayout ?? savedPreferences.playbackLayout) };
     preferences = { ...savedPreferences, enabled: savedPreferences.enabled && !suspended };
+    site?.configurePlayback?.(preferences);
     core.configure?.(preferences);
     if (!preferences.enabled && !keepSettingsOpen) {
       menu?.close();
@@ -494,11 +530,31 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     document.documentElement.classList.toggle('ytg-theater', preferences.enabled && preferences.theater);
     setMode(!wasEnabled && preferences.enabled && location.pathname === '/watch' ? 'playback' : appState().mode);
   }
+  function collapseWatch() {
+    expandedWatchRoute = null;
+    cancelHeldSeek();
+    setMode('controls');
+  }
+  function backFromExpandedWatch(action: Action) {
+    if (action !== 'back' || !watchExpanded() || watch?.state.adjusting || hasTemporaryLayer()) return false;
+    collapseWatch();
+    return true;
+  }
   function interceptAction(action: Action, { current }: Partial<ActionContext> = {}) {
     if (!preferences.enabled) return false;
     if (appState().navigation || appState().returning) return true;
     if (location.pathname !== '/watch') return false;
     if (!surfaceReady()) return false;
+    if (backFromExpandedWatch(action)) return true;
+    // In the page layout directions move focus; seeking remains an explicit
+    // timeline adjustment or a media shortcut. Fullscreen keeps its own rules.
+    if (!fullscreenLayout() && watch && appState().mode === 'playback' && ['up', 'down', 'left', 'right', 'confirm'].includes(action)) {
+      showControls();
+      return watch.handle(action);
+    }
+    if (!fullscreenLayout() && watch?.state.row === 'player' && !watch.state.panel && action === 'back' && !hasTemporaryLayer()) {
+      pageBack(); return true;
+    }
     if (watch?.handle(action)) return true;
     if (appState().mode === 'controls') {
       const result = send({ type: 'NATIVE_CONTROLS_INPUT', action, route: routeNow(), progress: site.isProgress(current ?? null) });
@@ -518,6 +574,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   function handleRegion(action: Action, context: Partial<ActionContext> = {}) {
     if (appState().navigation || appState().returning) return 'blocked';
     if (location.pathname !== '/watch' || !surfaceReady() || appState().mode !== 'controls') return 'pass';
+    if (backFromExpandedWatch(action)) return 'handled';
     if (watch) return watch.handleInput(action);
     return interceptAction(action, context) ? 'handled' : 'pass';
   }
@@ -535,7 +592,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   function initialize(ports: {site:SitePort;watch:WatchModule}) {
     site = ports.site; watch = ports.watch;
     watch?.connect({ request, observePlayback, hasTemporaryLayer, requestAutoHide, requestRefresh: scheduleWatchRefresh,
-      get state() { return { mode: visibleMode(), enabled: preferences.enabled && !isShortsPlaybackRoute(), surfaceReady: surfaceReady(), navigating: !!appState().navigation || appState().returning }; },
+      get state() { return { mode: visibleMode(), enabled: preferences.enabled && !nativePageStyle() && !isShortsPlaybackRoute(), surfaceReady: surfaceReady(), navigating: !!appState().navigation || appState().returning }; },
       dispatchAction: (action: Action) => core.act(action),
       readRoute: site.readRoute,
       readWatchFeatures: site.readWatchFeatures,
@@ -581,6 +638,8 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     lifecycle.listen(window, 'yt-gamepad-exit', () => { suspended = true; applyLayout({}); });
     lifecycle.listen(window, 'yt-gamepad-resume', () => { suspended = false; applyLayout({}); });
     lifecycle.listen(window, 'yt-gamepad-local-settings', e => applyLayout(e.detail));
+    const pageModeObserver = lifecycle.observer(renderMode);
+    pageModeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-ytg-browse-mode'] });
     routes.start();
     const receiveSettings = (e: MessageEvent) => {
       // Same-window settings messages can be forged by the site. These values
@@ -589,6 +648,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       const raw = e.data.values;
       if (!raw || typeof raw !== 'object') return;
       const values = {
+        ...normalizePlaybackParameters(raw),
         enabled: raw.enabled !== false,
         rightHandMode: raw.rightHandMode === true,
         theater: raw.theater !== false,
@@ -652,6 +712,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       renderMode();
     }
   });
+  lifecycle.listen(document, 'fullscreenchange', () => { renderMode(); scheduleWatchRefresh(false, false); });
   lifecycle.listen(window, 'blur', cancelHeldSeek);
   lifecycle.listen(document, 'visibilitychange', () => {
     if (document.hidden) cancelHeldSeek();
@@ -667,6 +728,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     document.documentElement.classList.remove('ytg-playback', 'ytg-controls', 'ytg-theater', 'ytg-settings-open', 'ytg-player-primed', 'ytg-watch-layout');
     delete document.documentElement.dataset.ytgAdaptation;
     delete document.documentElement.dataset.ytgPlaybackLayout;
+    delete document.documentElement.dataset.ytgWatchExpanded;
   });
   lifecycle.listen(window, 'pagehide', event => { if (!event.persisted) runtime.destroy(); });
 }

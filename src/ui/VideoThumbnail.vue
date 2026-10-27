@@ -18,6 +18,14 @@ function imageError() {
   if (fallback && source.value !== fallback) source.value = fallback;
   else failed.value = true;
 }
+async function imageLoaded(event: Event) {
+  const image = event.target as HTMLImageElement, expected = source.value;
+  try { await image.decode(); } catch {
+    if (image.isConnected && source.value === expected) imageError();
+    return;
+  }
+  if (image.isConnected && source.value === expected) loaded.value = true;
+}
 const element = ref<HTMLElement>();
 const progress = computed(() => Number.isFinite(props.item.watchedPercent)
   ? Math.max(0, Math.min(100, props.item.watchedPercent!)) : 0);
@@ -27,7 +35,7 @@ defineExpose({ element });
   <div ref="element" class="video-thumbnail" :data-loading="!!source && !failed && !loaded">
     <img v-if="source && !failed" :key="source" :src="source" :data-loaded="loaded"
       :style="{ opacity: loaded ? 1 : 0 }" alt="" loading="lazy" decoding="async"
-      @load="loaded = true" @error="imageError">
+      @load="imageLoaded" @error="imageError">
     <span v-else class="thumbnail-placeholder" aria-hidden="true"></span>
     <slot name="preview" />
     <span v-if="item.duration && !item.isPlaylist" class="card-duration">{{ item.duration }}</span>

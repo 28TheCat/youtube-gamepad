@@ -1,7 +1,10 @@
+import { homeFilterDefaults, normalizeHomeFilter } from './home-filter';
 import { videoGridDefaults, normalizeVideoGrid } from './video-grid';
+import { playbackParameterDefaults, normalizePlaybackParameters } from './playback-settings';
 import { languageDefault, normalizeLanguage } from './i18n';
 import { normalizePlaybackLayout, type PlaybackLayout } from './playback-layout';
 export const settingDefaults = {
+  ...playbackParameterDefaults, ...homeFilterDefaults,
   playbackLayout: 'fullscreen' as PlaybackLayout,
   ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, autoFullscreen: true,
   deadzone: 0.35, repeatDelay: 150, repeatInterval: 80
@@ -22,7 +25,7 @@ export function normalizeSettings(raw: Record<string, unknown>): Settings {
     if (typeof value === 'number' && Number.isFinite(value))
       values[key] = Math.min(ranges[key][1], Math.max(ranges[key][0], value));
   }
-  return { ...values, ...normalizeVideoGrid(raw) };
+  return { ...values, ...normalizeVideoGrid(raw), ...normalizePlaybackParameters(raw), ...normalizeHomeFilter(raw) };
 }
 
 export async function loadSettings(): Promise<Settings> {

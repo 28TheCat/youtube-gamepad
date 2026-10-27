@@ -3,6 +3,26 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { launchExtension } from './helpers/extension.mjs';
 
+test('playback parameter settings persist, reject invalid input and follow external changes', { timeout: 45000 }, async t => {
+  const { options, worker } = await launchExtension(t);
+  await options.locator('#seekStep').waitFor();
+  assert.equal(await options.locator('#seekStep').inputValue(), '10');
+  for (const [key, value] of [['seekStep', '20'], ['shortsSeekStep', '8'], ['volumeStep', '12']]) {
+    await options.locator('#' + key).fill(value); await options.locator('#' + key).press('Tab');
+    await options.waitForFunction(({ key, value }) => document.querySelector('#' + key)?.value === value && !document.querySelector('fieldset').disabled, { key, value });
+    assert.equal(await worker.evaluate(async key => (await chrome.storage.local.get(key))[key], key), Number(value));
+  }
+  await options.reload(); await options.locator('#volumeStep').waitFor();
+  assert.equal(await options.locator('#seekStep').inputValue(), '20');
+  await options.locator('#volumeStep').fill('26'); await options.locator('#volumeStep').press('Tab');
+  assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('volumeStep')).volumeStep), 12);
+  await worker.evaluate(() => chrome.storage.local.set({ seekStep: 33, shortsSeekStep: 9, volumeStep: 7 }));
+  await options.waitForFunction(() => document.querySelector('#seekStep').value === '33');
+  await options.getByRole('button', { name: 'Restore playback defaults', exact: true }).click();
+  await options.waitForFunction(() => document.querySelector('#seekStep').value === '10' && document.querySelector('#shortsSeekStep').value === '5' && document.querySelector('#volumeStep').value === '5');
+  assert.deepEqual(await worker.evaluate(() => chrome.storage.local.get(['seekStep', 'shortsSeekStep', 'volumeStep'])), { seekStep: 10, shortsSeekStep: 5, volumeStep: 5 });
+});
+
 test('gamepad test shows all mappings, live inputs, calibration and saved sensitivity without persisting readings', { timeout: 60000 }, async t => {
   const { options, worker } = await launchExtension(t);
   const errors = [];

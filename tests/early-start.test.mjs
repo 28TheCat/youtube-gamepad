@@ -75,11 +75,18 @@ test('disabled extension reveals native page immediately', async () => {
   assert.equal(f.attributes.size, 0);
 });
 
-for (const pathname of ['/watch', '/shorts/first']) test(`startup on ${pathname} never hides or blocks native playback`, () => {
+for (const pathname of ['/watch', '/shorts/first']) test(`startup on ${pathname} guards initial playback paint`, () => {
   const f = fixture(false, false, pathname);
   const [style] = f.children;
   assert.equal(f.attributes.get('data-ytg-boot'), 'starting');
-  assert.equal(style.textContent, '', 'slow storage or application mounting cannot blank the video');
+  if (pathname.startsWith('/shorts/')) {
+    assert.match(style.textContent, /background: #fff !important/);
+    assert.match(style.textContent, /html\[dark\].*background: #0f0f0f !important/);
+    assert.match(style.textContent, /visibility: hidden !important/);
+  } else {
+    assert.match(style.textContent, /html > body.*visibility: hidden/);
+    assert.match(style.textContent, /#movie_player, #movie_player \*.*visibility: visible/, 'media stays visible while native details are hidden');
+  }
   f.exports.abortEarlyContent();
   assert.equal(f.children.size, 0);
 });

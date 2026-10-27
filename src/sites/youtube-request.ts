@@ -1,5 +1,5 @@
-import { Session } from 'youtubei.js/web';
-import type { Context } from 'youtubei.js/web';
+import { Innertube } from 'youtubei.js/web';
+import { createYouTubeSession } from './youtube-session';
 
 export type YouTubeFailure = 'cancelled' | 'timeout' | 'network' | 'http' | 'response';
 export class YouTubeRequestError extends Error {
@@ -30,26 +30,26 @@ export async function createYouTubeHeaders(context: { client: { clientVersion?: 
 }
 
 const readEndpoints = ['guide', 'browse', 'search', 'next', 'player', 'playlist/get_add_to_playlist',
+  'reel/reel_item_watch', 'reel/reel_watch_sequence',
   'navigation/resolve_url', 'account/accounts_list', 'comment/perform_comment_action'];
 const writeEndpoints = ['like/like', 'like/dislike', 'like/removelike', 'subscription/subscribe',
-  'subscription/unsubscribe', 'notification/modify_channel_preference', 'browse/edit_playlist'];
+  'subscription/unsubscribe', 'notification/modify_channel_preference', 'browse/edit_playlist', 'comment/create_comment', 'comment/create_comment_reply'];
 
 // YouTube.js owns endpoint execution, context and payload normalization. The
 // injected fetch only binds it to the page identity and our cancellation policy.
 async function executeYouTube(path: string, init: RequestInit, signal: AbortSignal) {
   const { context = { client: { clientName: 'WEB' }, user: {} }, ...args } = JSON.parse(String(init.body || '{}'));
-  const session = new Session(structuredClone({ ...context, user: context.user || {} }) as Context,
-    '', 'v1', 0, undefined, undefined, undefined, async (input, options) => {
-      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
-      if (url.origin !== 'https://www.youtube.com' || url.pathname !== `/youtubei/v1/${path}`)
-        throw new YouTubeRequestError('response');
-      const headers = Object.fromEntries(new Headers(options?.headers).entries());
-      // Keep captured account headers; never export cookies to the library.
-      new Headers(init.headers).forEach((value, key) => { headers[key] = value; });
-      const response = await fetch(url.pathname, { ...options, method: 'POST', headers, credentials: 'same-origin', signal });
-      if (!response.ok) throw new YouTubeRequestError('http', response.status);
-      return response;
-    });
+  const session = createYouTubeSession(context, async (input, options) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    if (url.origin !== 'https://www.youtube.com' || url.pathname !== `/youtubei/v1/${path}`)
+      throw new YouTubeRequestError('response');
+    const headers = Object.fromEntries(new Headers(options?.headers).entries());
+    // Keep captured account headers; never export cookies to the library.
+    new Headers(init.headers).forEach((value, key) => { headers[key] = value; });
+    const response = await fetch(url.pathname, { ...options, method: 'POST', headers, credentials: 'same-origin', signal });
+    if (!response.ok) throw new YouTubeRequestError('http', response.status);
+    return response;
+  });
   // Page authentication is already captured in init.headers. Avoid the library's
   // separate cookie/OAuth login flow and account cache.
   const result = await session.actions.execute(`/${path}`, { ...(args as Record<string, unknown>), parse: false, skip_auth_check: true });
@@ -59,6 +59,23 @@ async function executeYouTube(path: string, init: RequestInit, signal: AbortSign
 // Only read-only adapter endpoints may use bounded automatic retries.
 export async function requestYouTube(path: string, init: RequestInit, timeoutMs = 20000): Promise<Record<string, any>> {
   return request(path, init, timeoutMs, false);
+}
+
+// Let YouTube.js encode the Shorts sequence parameters and retain its opaque
+// continuation. All transport still uses the page's bounded, authenticated reads.
+export async function requestShortsInfo(videoId: string, signal: AbortSignal) {
+  const context = (window as any).ytcfg?.get?.('INNERTUBE_CONTEXT');
+  if (!context?.client) throw new YouTubeRequestError('response');
+  const headers = await createYouTubeHeaders(context);
+  const session = createYouTubeSession(context, async (input, options) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    const path = url.pathname.replace('/youtubei/v1/', '');
+    if (url.origin !== 'https://www.youtube.com' || !['reel/reel_item_watch', 'reel/reel_watch_sequence'].includes(path))
+      throw new YouTubeRequestError('response');
+    const data = await requestYouTube(path, { body: String(options?.body || '{}'), headers, signal });
+    return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+  });
+  return new Innertube(session).getShortsVideoInfo(videoId);
 }
 
 export async function mutateYouTube(path: string, init: RequestInit): Promise<Record<string, any>> {
@@ -97,6 +114,8 @@ async function request(path: string, init: RequestInit, timeoutMs: number, mutat
         }
         if (!(path === 'guide' && Array.isArray((raw as Record<string, unknown>).items)) &&
           !(path === 'player' && ('videoDetails' in raw || 'playabilityStatus' in raw)) &&
+          !(path === 'reel/reel_item_watch' && 'playerResponse' in raw) &&
+          !(path === 'reel/reel_watch_sequence' && Array.isArray((raw as Record<string, unknown>).entries)) &&
           !(path === 'account/accounts_list' && 'actions' in raw) &&
           !(path === 'playlist/get_add_to_playlist' && 'actions' in raw) &&
           !['contents', 'continuationContents', 'endpoint', 'onResponseReceivedActions',

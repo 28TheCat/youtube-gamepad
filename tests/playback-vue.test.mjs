@@ -39,6 +39,11 @@ test('shared action buttons reflect player state and delegate commands', async t
   assert.equal(await controls.locator('[data-action=save]').getAttribute('aria-pressed'), null);
   for (const action of ['like', 'comments', 'save', 'mute']) await controls.locator(`[data-action=${action}]`).click();
   assert.deepEqual(await page.evaluate(() => window.actions), ['like', 'comments', 'save', 'mute']);
+  for (const seekStep of [20, 7]) {
+    await page.evaluate(seekStep => window.view.presentation.playback({ seekStep, video: { paused: true, currentTime: 0, duration: 30 }, captionsEnabled: false, settingsOpen: false }), seekStep);
+    assert.equal(await controls.locator('[data-action=seekBack]').getAttribute('aria-label'), `Rewind ${seekStep} seconds`);
+    assert.equal(await controls.locator('[data-action=seekForward]').getAttribute('aria-label'), `Forward ${seekStep} seconds`);
+  }
 });
 
 test('shared channel avatars fall back on errors and recover when the source changes', async t => {
@@ -111,6 +116,83 @@ test('recommendations leave loading blank and show text before delayed covers wi
   assert.equal(await host.locator('.empty').count(), 0);
 });
 
+test('windowed collections appear as the first conditional tab with ordered entries and isolated recommendations', async t => {
+  const page = await browserPage(t);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.route('https://covers.test/**', route => route.fulfill({ contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#596879"/></svg>' }));
+  await page.setContent(`<html class="ytg-watch-layout" data-ytg-playback-layout="windowed" data-ytg-language="zh-CN"><head><style>${theme}</style></head><body style="margin:0"><div id="movie_player"><video></video></div></body></html>`);
+  await page.evaluate(code);
+  await page.evaluate(styles => {
+    window.actions = [];
+    window.originalVideo = document.querySelector('video');
+    window.view = PlaybackViewFixture.createVueWatchView({ activate: action => window.actions.push(action), closePanel() {}, styles: { watch: styles },
+      controllerStyle: { badge() {}, hint() {}, bind() {} } });
+    window.view.host.hidden = false;
+    window.view.host.style.cssText = '--ytg-watch-side:420px;--ytg-watch-width:860px;--ytg-watch-height:480px';
+    const entry = (id, index, selected = false) => ({ key: `queue:${id}`, href: `/watch?v=${id}&list=PLtest&index=${index}`,
+      label: `Episode ${index}`, channel: 'Creator', queue: true, selected, duration: '3:39', thumbnail: 'https://covers.test/cover.svg' });
+    window.queue = [entry('first', 1), entry('current', 2, true), entry('next', 3)];
+    window.related = { key: 'related', label: 'Related video', channel: 'Other creator', thumbnail: 'https://covers.test/cover.svg' };
+    window.pageInfo = { key: '/watch?v=current&list=PLtest&index=2', isWatch: true, title: 'Episode 2', channel: 'Creator', description: '',
+      playlistTitle: '示例合集', queue: window.queue, recommendations: [window.queue[0], window.queue[2], window.related] };
+    window.view.presentation.page(window.pageInfo, {});
+  }, styles);
+  const host = page.locator('#ytg-watch');
+  assert.deepEqual(await host.locator('.watch-tabs [role=tab]').allTextContents(), ['合集', '推荐视频', '评论']);
+  assert.equal(await host.getByRole('tab', { name: '合集', exact: true }).getAttribute('aria-selected'), 'true');
+  await host.locator('.collection-heading h2').getByText('示例合集').waitFor();
+  assert.equal(await host.locator('.collection-heading p').textContent(), '正在播放第 2 项');
+  assert.equal(await host.locator('.collection-entry').count(), 3);
+  assert.equal(await host.locator('.currently-playing').getAttribute('aria-current'), 'true');
+  assert.equal(await host.locator('.currently-playing').isDisabled(), true);
+  assert.equal(await host.locator('.currently-playing .card-duration').textContent(), '3:39');
+  assert.equal(await page.evaluate(() => window.view.presentation.cards().length), 2, 'the playing entry is excluded from navigation');
+  await host.locator('[data-video-id="queue:next"]').click();
+  assert.equal(await page.evaluate(() => window.actions.at(-1)), 'recommendation:queue:next');
+  mkdirSync('output/playwright', { recursive: true });
+  await page.screenshot({ path: 'output/playwright/watch-collection-tab.png' });
+  await host.getByRole('tab', { name: '推荐视频', exact: true }).click();
+  assert.equal(await host.locator('.recommendations .card').count(), 1);
+  assert.equal(await host.locator('.recommendations .card-title').textContent(), 'Related video');
+  await page.evaluate(() => window.view.cycleTab(-1));
+  assert.equal(await host.getByRole('tab', { name: '合集', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.evaluate(() => {
+    window.view.surface.classList.add('comments-open');
+    window.view.updateHint('controls', false);
+  });
+  assert.equal(await host.locator('.collection-panel').isVisible(), false, 'comments hide the collection instead of overlapping it');
+  assert.equal(await host.getByRole('tab', { name: '评论', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.evaluate(() => { window.view.surface.classList.remove('comments-open'); window.view.updateHint('controls', false); });
+  await page.evaluate(() => { document.documentElement.dataset.ytgPlaybackLayout = 'fullscreen'; });
+  assert.equal(await host.locator('.collection-tab').count(), 0);
+  assert.equal(await host.locator('.recommendations .card').count(), 3, 'fullscreen retains the existing combined recommendation navigation');
+  await page.evaluate(() => { document.documentElement.dataset.ytgPlaybackLayout = 'windowed'; });
+  await host.locator('.collection-tab').waitFor();
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.evaluate(() => { window.view.host.style.setProperty('--ytg-watch-side', '280px'); window.view.host.style.setProperty('--ytg-watch-width', '620px'); });
+  assert.ok(await host.locator('.collection-entry').first().evaluate(node => {
+    const bounds = node.getBoundingClientRect(), cover = node.querySelector('.card-thumbnail').getBoundingClientRect();
+    return cover.width >= 72 && cover.right <= bounds.right && node.scrollWidth <= bounds.width + 1;
+  }), 'narrow collections retain compact horizontal entries');
+  await page.evaluate(() => {
+    const queue = Array.from({ length: 40 }, (_, index) => ({ key: `episode-${index}`, label: `Episode ${index + 1}`, channel: 'Creator',
+      href: `/watch?v=episode-${index}&list=PLtest&index=${index + 1}`, thumbnail: 'https://covers.test/cover.svg', queue: true, selected: index === 30 }));
+    window.view.presentation.page({ ...window.pageInfo, key: '/watch?v=episode-30&list=PLtest&index=31', queue,
+      recommendations: [...queue.filter(item => !item.selected), window.related] }, {});
+  });
+  await page.waitForFunction(() => {
+    const panel = window.view.root.querySelector('.collection-panel'), current = panel?.querySelector('.currently-playing');
+    if (!current) return false;
+    const bounds = panel.getBoundingClientRect(), item = current.getBoundingClientRect(), heading = panel.querySelector('.collection-heading').offsetHeight;
+    return item.top >= bounds.top + heading && item.bottom <= bounds.bottom;
+  });
+  await page.evaluate(() => window.view.presentation.page({ ...window.pageInfo, key: '/watch?v=ordinary', queue: [], playlistTitle: '', recommendations: [window.related] }, {}));
+  assert.deepEqual(await host.locator('.watch-tabs [role=tab]').allTextContents(), ['推荐视频', '评论']);
+  assert.equal(await host.getByRole('tab', { name: '推荐视频', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.equal(await page.evaluate(() => document.querySelector('video') === window.originalVideo), true);
+});
+
 test('shared video thumbnails recover through fallback, keep blank placeholders and suppress playlist overlays', async t => {
   const page = await browserPage(t);
   await page.route('https://covers.test/**', route => route.request().url().endsWith('valid.svg')
@@ -171,7 +253,7 @@ test('split playback fits resized and zoomed viewports and scrolls only its side
   assert.equal(await page.locator('#ytg-watch .control.avatar .channel-badge svg').evaluate(node => getComputedStyle(node).width), '14px');
   mkdirSync(new URL('../output/playwright/', import.meta.url), { recursive: true });
   // Smaller CSS viewports also reproduce the layout pressure of browser zoom.
-  for (const [width, height] of [[1440, 900], [960, 720], [768, 600], [640, 480]]) {
+  for (const [width, height] of [[1920, 1080], [1280, 900], [1440, 900], [960, 720], [768, 600], [640, 480]]) {
     await page.setViewportSize({ width, height });
     const geometry = await page.evaluate(() => {
       const rect = node => { const r = node.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
@@ -184,11 +266,15 @@ test('split playback fits resized and zoomed viewports and scrolls only its side
         scroll: window.view.surface.scrollTop, sideScroll: recommendations.scrollTop,
         documentScroll: document.scrollingElement.scrollTop, tabs: rect(root.querySelector('.watch-tabs')) };
     });
+    if (width === 1920 || width === 1280) {
+      assert.ok(Math.abs(geometry.player.right / width - .85) < .001, `video actually reaches 85% at ${width}`);
+    }
     assert.ok(geometry.heading.top >= geometry.player.bottom - 1, `title below video at ${width}`);
     assert.ok(geometry.toolbar.top >= geometry.heading.bottom - 1, `controls below title at ${width}`);
+    assert.ok(geometry.toolbar.left >= 0 && geometry.toolbar.right <= geometry.player.right + 1,
+      `scrollable controls stay in media column at ${width}`);
     for (const control of geometry.controls) {
       assert.ok(control.bottom <= height, `control stays in viewport at ${width}`);
-      assert.ok(control.left >= 0 && control.right <= geometry.player.right + 1, `control stays in media column at ${width}`);
     }
     assert.equal(geometry.scroll, 0, `watch surface cannot scroll at ${width}`);
     assert.equal(geometry.documentScroll, 0);
@@ -296,8 +382,8 @@ test('gamepad watch layout hides desktop recommendations even during capability 
     assert.equal(await page.locator(selector).evaluate(node => getComputedStyle(node).display), 'none');
   const bounds = await page.locator('#movie_player').boundingBox();
   assert.equal(bounds.x, 0); assert.equal(bounds.y, 0);
-  assert.ok(Math.abs(bounds.width - 844.8) < 1);
-  assert.ok(Math.abs(bounds.height - 475.2) < 1);
+  assert.ok(Math.abs(bounds.width - 1088) < 1);
+  assert.ok(Math.abs(bounds.height - 612) < 1);
   await page.evaluate(() => document.documentElement.classList.remove('ytg-watch-layout'));
   assert.equal(await page.locator('#secondary').evaluate(node => getComputedStyle(node).display), 'block');
 });
@@ -389,8 +475,13 @@ for (const trustedTypes of [false, true]) {
       window.view.host.hidden = false; window.view.presentation.visible(true); window.setSnapshot(20);
     }, styles);
     const host = page.locator('#ytg-watch'), slider = host.getByRole('slider');
+    assert.equal(await host.locator('.transport-group').isVisible(), false);
+    await host.locator('[data-action="fullscreen"]').click();
+    assert.deepEqual(await page.evaluate(() => window.commands), ['fullscreen']);
+    await page.evaluate(() => { document.documentElement.dataset.ytgPlaybackLayout = 'fullscreen'; });
+    assert.equal(await host.locator('.windowed-fullscreen').isVisible(), false);
     await host.getByRole('button', { name: 'Play', exact: true }).click();
-    assert.deepEqual(await page.evaluate(() => window.commands), ['playPause']);
+    assert.deepEqual(await page.evaluate(() => window.commands), ['fullscreen', 'playPause']);
     const bounds = await slider.boundingBox();
     assert.ok(bounds?.width > 0);
     await page.mouse.move(bounds.x + bounds.width * .7, bounds.y + bounds.height / 2);

@@ -11,6 +11,19 @@ const { createState, createStore, transition } = window.YTGamepadStateMachine;
 const plain = value => JSON.parse(JSON.stringify(value));
 const effects = result => result.effects.map(effect => effect.type).join(',');
 
+test('control layout changes update the default target without closing an open panel',()=>{
+ const store=createStore(createState('/watch?v=first'));
+ store.dispatch({type:'WATCH_PANEL',panel:'comments'});
+ store.dispatch({type:'WATCH_CONTROL_LAYOUT',playIndex:3,index:6});
+ assert.equal(store.state.watch.playIndex,3);
+ assert.equal(store.state.watch.controlIndex,6);
+ assert.equal(store.state.watch.panel,'comments');
+ store.dispatch({type:'WATCH_PANEL',panel:''});
+ store.dispatch({type:'WATCH_FOCUS',region:'recommendations',index:0});
+ store.dispatch({type:'WATCH_EMPTY'});
+ assert.equal(store.state.watch.index,3);
+});
+
 test('playlist picker uses panel navigation and closes without triggering comment loading', () => {
   const store = createStore(createState('/watch?v=first'));
   store.dispatch({ type: 'WATCH_PANEL', panel: 'playlists' });
@@ -208,4 +221,36 @@ test('slider B unwinds adjustment, progress focus, controls and playback separat
   assert.equal(store.state.watch.row, 'controls');
   assert.equal(store.state.watch.index, 9);
   assert.equal(effects(input('back')), 'mode');
+});
+
+
+test('windowed directions follow player, controls and side-list geometry without seeking', () => {
+  const store = createStore(createState('/watch?v=one'));
+  const input = (action, extra = {}) => store.dispatch({ type: 'WATCH_INPUT', action, windowed: true,
+    canSeek: true, cardCount: 3, controlCount: 4, availableControls: [0, 1, 3], commentCount: 0, ...extra });
+  store.dispatch({ type: 'WATCH_FOCUS', region: 'player', index: 0 });
+  assert.equal(effects(input('left')), 'focus'); assert.equal(store.state.watch.row, 'player');
+  input('right'); assert.equal(store.state.watch.row, 'recommendations');
+  input('down'); assert.equal(store.state.watch.index, 1);
+  input('left'); assert.equal(store.state.watch.row, 'player');
+  input('down'); assert.equal(store.state.watch.row, 'metadata');
+  assert.equal(input('confirm').effects[0].value, 'description');
+  input('up'); assert.equal(store.state.watch.row, 'player');
+  assert.equal(input('confirm').effects[0].value, 'fullscreen');
+  input('down'); input('down'); assert.equal(store.state.watch.row, 'controls');
+  input('up'); assert.equal(store.state.watch.row, 'metadata');
+  input('up'); assert.equal(store.state.watch.row, 'player');
+  input('down', { canSeek: false }); assert.equal(store.state.watch.row, 'metadata');
+});
+
+test('windowed timeline adjustment and modal panels retain exclusive directional ownership', () => {
+  const store = createStore(createState('/watch?v=one'));
+  const input = action => store.dispatch({ type: 'WATCH_INPUT', action, windowed: true, canSeek: true,
+    cardCount: 2, controlCount: 4, availableControls: [0, 1, 2, 3], commentCount: 2 });
+  store.dispatch({ type: 'WATCH_FOCUS', region: 'progress' }); input('confirm');
+  assert.equal(input('right').effects[0].value, 'seekForward');
+  input('back'); assert.equal(store.state.watch.adjusting, false);
+  store.dispatch({ type: 'WATCH_PANEL', panel: 'playlists' });
+  assert.equal(input('right').disposition, 'blocked');
+  assert.equal(store.state.watch.panel, 'playlists');
 });

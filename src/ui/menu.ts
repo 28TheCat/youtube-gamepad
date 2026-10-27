@@ -2,6 +2,7 @@ import type { Dispose, InteractionEvent, MenuDependencies, MenuModule, MenuPort,
 
 import { YTGamepadActions } from '../shared/actions.ts';
 import { ui } from './ui-api';
+import { createInterfaceIcon } from './icon-shapes';
 import { createStickScroller } from '../navigation/stick-scroll';
 export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTGamepadMenu: MenuModule | undefined;
 (() => {
@@ -148,7 +149,7 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
     } else if (settingsOpened) {
       section.className = 'settings-panel';
       const dismiss = document.createElement('button');
-      dismiss.className = 'settings-close'; dismiss.textContent = '×';
+      dismiss.className = 'settings-close'; dismiss.append(createInterfaceIcon('close'));
       controllerStyle.bind(dismiss, 'Close settings', 'aria-label');
       dismiss.addEventListener('click', close); section.append(dismiss);
       const panel = document.createElement('div'); panel.id = 'inline-settings';

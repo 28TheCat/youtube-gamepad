@@ -30,12 +30,19 @@ test('page bridge publishes only allowed settings with validated values', () => 
   const s = bridge();
   assert.deepEqual(JSON.parse(JSON.stringify(s.messages[0])), {
     origin: 'https://www.youtube.com', message: { source: 'yt-gamepad-settings',
-      values: { enabled: false, theater: true, playbackLayout: 'page', rightHandMode: false, deadzone: .35, repeatDelay: 150, repeatInterval: 140,
+      values: { seekStep: 10, shortsSeekStep: 5, volumeStep: 5, enabled: false, theater: true, playbackLayout: 'fullscreen', rightHandMode: false, deadzone: .35, repeatDelay: 150, repeatInterval: 80,
         gridLayout: 'adaptive', gridAutoSwitch: true, gridSwitchWidth: 640, gridSingleCover: 40, gridDoubleCover: 50,
         gridColumns0: 1, gridColumns600: 2, gridColumns900: 3, gridColumns1200: 4,
         shortcutLayouts: { watch: {}, browse: {} },
         bindings: { confirm: 0, back: 1, playPause: 2, search: 3, seekBack: 4, seekForward: 5, volumeDown: 6, volumeUp: 7, help: 9, keyboardSymbols: 10, keyboardCandidates: 11 } } }
   });
+});
+
+test('playback parameter messages clamp numeric values and never forward unknown fields', () => {
+  const s = bridge({ seekStep: 1000, shortsSeekStep: -1, volumeStep: '25', privateField: 'hidden' });
+  const values = s.messages[0].message.values;
+  assert.equal(values.seekStep, 120); assert.equal(values.shortsSeekStep, 1); assert.equal(values.volumeStep, 5);
+  assert.equal('privateField' in values, false);
 });
 
 test('shortcut bridge drops unknown buttons, unsupported keys and arbitrary layout data', () => {

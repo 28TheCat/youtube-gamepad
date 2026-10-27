@@ -1,3 +1,4 @@
+import { interactiveComments as interactiveResponse } from './helpers/comment-interaction-data.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'vite';
@@ -294,4 +295,53 @@ test('navigation aborts old requests and late responses cannot overwrite the new
   assert.equal(f.service.read().items.length, 0);
   assert.equal(f.service.read().route, '/watch?v=second');
   f.service.destroy();
+});
+function signedIn(f) {
+  const get = f.sandbox.window.ytcfg.get;
+  f.sandbox.window.ytcfg.get = key => key === 'LOGGED_IN' ? true : get(key);
+}
+
+test('comment creation and replies use page-owned endpoints once, with no automatic mutation retry', async () => {
+  const f = fixture(body => body.commentText ? { success: true } : interactiveResponse()); signedIn(f);
+  f.service.more(true); await f.idle();
+  assert.equal(f.service.read().interaction.canPost, true);
+  assert.equal(f.service.read().items[0].canReply, true);
+  assert.equal(await f.service.post('  Hello world  '), true); await f.idle();
+  assert.equal(f.calls.filter(call => call.url.endsWith('/comment/create_comment')).length, 1);
+  const comment = f.calls.find(call => call.url.endsWith('/comment/create_comment'));
+  assert.equal(comment.body.commentText, 'Hello world'); assert.equal(comment.body.createCommentParams, 'create-token');
+  assert.equal(await f.service.post('A reply', 'parent'), true); await f.idle();
+  const reply = f.calls.find(call => call.url.endsWith('/comment/create_comment_reply'));
+  assert.equal(reply.body.commentText, 'A reply'); assert.equal(reply.body.createReplyParams, 'reply-token');
+});
+
+test('comment mutation failure is not retried and never claims successful publication', async () => {
+  const f = fixture(body => { if (body.commentText) throw new TypeError('network failed'); return interactiveResponse(); }); signedIn(f);
+  f.service.more(true); await f.idle(); assert.equal(await f.service.post('Keep this draft'), false);
+  assert.equal(f.calls.filter(call => call.body.commentText).length, 1);
+  assert.equal(f.service.read().interaction.posting, false);
+  assert.equal(f.service.read().items[0].key, 'parent');
+});
+
+test('comment ordering starts a fresh server cursor and signed-out users cannot submit', async () => {
+  const f = fixture(() => interactiveResponse());
+  f.service.more(true); await f.idle();
+  assert.equal(await f.service.post('not allowed'), false);
+  const initial = f.calls[0].body.continuation;
+  assert.equal(f.service.changeSort('NEWEST_FIRST'), true); await f.idle();
+  assert.notEqual(f.calls[1].body.continuation, initial);
+  assert.equal(f.service.read().interaction.sort, 'NEWEST_FIRST');
+  assert.equal(f.service.read().items.length, 1);
+  assert.equal(f.service.changeSort('invalid'), false);
+  assert.equal(f.calls.length, 2);
+});
+
+test('duplicate sends are blocked and navigation discards late mutation results', async () => {
+  let complete;
+  const f = fixture(body => body.commentText ? new Promise(resolve => { complete = resolve; }) : interactiveResponse()); signedIn(f);
+  f.service.more(true); await f.idle();const sending=f.service.post('One click');
+  assert.equal(await f.service.post('One click'),false);
+  for(let i=0;i<20&&!complete;i++)await new Promise(resolve=>setTimeout(resolve,5));
+  f.location.search='?v=second';f.service.routeChanged();complete({ success: true });
+  assert.equal(await sending,false);assert.equal(f.service.read().items.length,0);
 });

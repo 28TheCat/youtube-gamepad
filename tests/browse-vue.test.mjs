@@ -4,6 +4,64 @@ import { browserPage } from './helpers/bundles.mjs';
 import { mainFixture } from './helpers/main-bundle.mjs';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { modernVideo } from './helpers/modern-video.mjs';
+import { guideData } from './helpers/sidebar-data.mjs';
+
+test('subscribed people stay beside videos and switch channels through the API', { timeout: 30000 }, async t => {
+  const page = await browserPage(t);
+  const guide = guideData();
+  const person = guide.items[3].guideSubscriptionsSectionRenderer.items[0].guideEntryRenderer;
+  person.navigationEndpoint.browseEndpoint.browseId = 'UCsubscriber';
+  person.thumbnail = { thumbnails: [{ url: 'https://yt3.ggpht.com/broken-avatar', width: 40, height: 40 }] };
+  const requests = [];
+  await page.route('https://yt3.ggpht.com/**', route => route.abort());
+  await page.route('https://www.youtube.com/**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.includes('/youtubei/')) {
+      const body = route.request().postDataJSON(); requests.push({ path: url.pathname, body });
+      if (url.pathname.endsWith('/resolve_url')) return route.fulfill({ json: { endpoint: {
+        browseEndpoint: { browseId: 'UCsubscriber', params: 'api-videos-tab' }
+      } } });
+      return route.fulfill({ json: { contents: [{ videoRenderer: {
+        videoId: body.browseId === 'UCsubscriber' ? 'creator1234' : 'subscriptions123',
+        title: { simpleText: body.browseId === 'UCsubscriber' ? 'Creator video' : 'All subscriptions' }
+      } }] } });
+    }
+    return route.fulfill({ contentType: 'text/html', body: '<html><body><ytd-app></ytd-app><ytd-page-manager></ytd-page-manager></body></html>' });
+  });
+  await page.goto('https://www.youtube.com/feed/subscriptions');
+  await page.evaluate(() => {
+    window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientName: 'WEB', clientVersion: 'test' } } : undefined };
+    document.querySelector('ytd-app').navigate_ = endpoint => {
+      document.dispatchEvent(new Event('yt-navigate-start'));
+      history.pushState({}, '', endpoint.commandMetadata.webCommandMetadata.url);
+      document.dispatchEvent(new Event('yt-navigate-finish'));
+    };
+  });
+  await mainBundle(page, guide);
+  const channel = page.locator('[data-sidebar-id="subscription:UCsubscriber"]');
+  await channel.waitFor();
+  await page.locator('[data-browse-id="video:subscriptions123"]').waitFor();
+  await page.waitForFunction(() => {
+    const sidebar = window.__pageDOM.querySelector('#ytg-browse-sidebar');
+    const grid = window.__pageDOM.querySelector('#ytg-browse-grid');
+    return Math.abs(sidebar.getBoundingClientRect().width - 270) < 1 && Math.abs(grid.getBoundingClientRect().left - 270) < 1;
+  });
+  await channel.locator('.sidebar-channel-initial').waitFor();
+  await channel.click();
+  await page.locator('[data-browse-id="video:creator1234"]').waitFor();
+  assert.equal(new URL(page.url()).pathname, '/channel/UCsubscriber/videos');
+  assert.equal(await channel.getAttribute('aria-current'), 'page');
+  assert.ok(requests.some(request => request.body.browseId === 'UCsubscriber' && request.body.params === 'api-videos-tab'));
+  mkdirSync('output/playwright', { recursive: true });
+  await page.screenshot({ path: 'output/playwright/subscribed-people.png' });
+  await page.locator('[data-sidebar-id="subscriptions"]').click();
+  await page.locator('[data-browse-id="video:subscriptions123"]').waitFor();
+  assert.equal(await channel.getAttribute('aria-current'), null);
+  await page.setViewportSize({ width: 500, height: 800 });
+  await page.locator('[data-browse-id="video:subscriptions123"]').focus();
+  await page.mouse.move(450, 500);
+  await page.waitForFunction(() => window.__pageDOM.querySelector('#ytg-browse-sidebar').getBoundingClientRect().width < 100);
+});
 
 test('channel badges use Material icons and retain identity across the feed bridge', async t => {
   const items = ['verified', 'artist', 'none'].map(id => modernVideo(id));
@@ -324,6 +382,89 @@ for (const size of [60, 400]) {
   });
 }
 
+test('row height caching preserves the visible anchor and measured rows across recycling', { timeout: 30000 }, async t => {
+  const page = await browserPage(t);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.route('https://i.ytimg.com/**', route => route.fulfill({ status: 204 }));
+  await page.route('https://www.youtube.com/**', route => route.fulfill(route.request().url().includes('/youtubei/')
+    ? { json: { contents: Array.from({ length: 240 }, (_, i) => ({ videoRenderer: {
+      videoId: `height${i}`, title: { simpleText: i % 2 ? 'A longer title that can wrap to another line '.repeat(4) : 'Short title' }
+    } })) } }
+    : { contentType: 'text/html', body: '<html><body></body></html>' }));
+  await page.goto('https://www.youtube.com/');
+  await page.evaluate(() => { window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined }; });
+  await mainBundle(page);
+  const grid = page.locator('[data-ytg-virtual-feed]');
+  await grid.locator('[data-row-id="video:height0"]').waitFor();
+  const settle = () => page.evaluate(async () => {
+    for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame);
+  });
+  const columns = await grid.evaluate(node => {
+    const columns = getComputedStyle(node.querySelector('.cards')).gridTemplateColumns.split(' ').length;
+    const style = document.createElement('style');
+    style.textContent = [410, 520, 350].map((height, i) =>
+      `.virtual-row[data-row-id="video:height${i * columns}"]{min-height:${height}px}`).join('\n');
+    node.getRootNode().append(style);
+    return columns;
+  });
+  await settle();
+  await grid.evaluate(node => { node.scrollTop = 2000; node.dispatchEvent(new Event('scroll')); });
+  await settle();
+  const anchor = await grid.evaluate(node => {
+    const top = node.getBoundingClientRect().top;
+    const row = [...node.querySelectorAll('.virtual-row')].find(row => row.getBoundingClientRect().top >= top);
+    return row ? { id: row.dataset.rowId, top: row.getBoundingClientRect().top - top } : {
+      rows: [...node.querySelectorAll('.virtual-row')].map(row => ({ id: row.dataset.rowId, top: row.getBoundingClientRect().top, height: row.getBoundingClientRect().height })),
+      top, height: node.clientHeight, scrollTop: node.scrollTop
+    };
+  });
+  assert.ok(anchor.id, JSON.stringify(anchor));
+  await grid.locator('[data-row-id="video:height0"]').evaluate(node => { node.style.minHeight = '510px'; });
+  await settle();
+  const after = await grid.locator(`[data-row-id="${anchor.id}"]`).evaluate(node =>
+    node.getBoundingClientRect().top - node.closest('[data-ytg-browse-grid]').getBoundingClientRect().top);
+  assert.ok(Math.abs(after - anchor.top) <= 1, `a row growing above the viewport keeps its anchor (${anchor.top} -> ${after})`);
+  await grid.locator(`[data-row-id="${anchor.id}"] [data-browse-id]`).first().evaluate(node => node.focus({ preventScroll: true }));
+  // The stylesheet retains the new height when the first row is remounted.
+  await grid.evaluate(node => {
+    const style = document.createElement('style');
+    style.textContent = '.virtual-row[data-row-id="video:height0"]{min-height:510px}';
+    node.getRootNode().append(style);
+    node.scrollTop = 7000;
+    node.dispatchEvent(new Event('scroll'));
+  });
+  await settle();
+  assert.equal(await grid.locator('[data-row-id="video:height0"]').count(), 0, 'the measured first row is recycled');
+  await grid.evaluate(node => { node.scrollTop = 0; node.dispatchEvent(new Event('scroll')); });
+  await settle();
+  const geometry = await grid.evaluate((node, columns) => {
+    const first = node.querySelector('[data-row-id="video:height0"]');
+    const third = node.querySelector(`[data-row-id="video:height${columns * 2}"]`);
+    return { firstHeight: first.getBoundingClientRect().height,
+      thirdOffset: third.getBoundingClientRect().top - first.getBoundingClientRect().top,
+      gap: parseFloat(getComputedStyle(first).marginBottom) };
+  }, columns);
+  assert.equal(geometry.firstHeight, 510);
+  assert.ok(Math.abs(geometry.thirdOffset - (510 + 520 + geometry.gap * 2)) <= 1);
+  assert.ok(await grid.locator('[data-browse-id]').count() < 100);
+  await grid.evaluate(async node => {
+    const detail = { scrollTop: 2000 };
+    node.dispatchEvent(new CustomEvent('ytg-browse-restore', { detail }));
+    await detail.ready;
+  });
+  await settle();
+  assert.ok(Math.abs(await grid.evaluate(node => node.scrollTop) - 2000) <= 1, 'restoration keeps the requested offset');
+  await page.setViewportSize({ width: 900, height: 900 });
+  await settle();
+  assert.ok(await grid.evaluate(node => {
+    const bounds = node.getBoundingClientRect();
+    return [...node.querySelectorAll('.virtual-row')].some(row => {
+      const rect = row.getBoundingClientRect();
+      return rect.bottom > bounds.top && rect.top < bounds.bottom;
+    });
+  }), 'resizing into a new layout keeps visible rows mounted');
+});
+
 test('long feeds bound mounted cards, mount offscreen gamepad neighbours and restore after reload', { timeout: 30000 }, async t => {
   const page = await browserPage(t);
   let requests = 0;
@@ -454,6 +595,8 @@ for (const count of [12, 70]) test(`Shorts shelf with ${count} cards scrolls and
   await move('right', 0);
   assert.equal(await page.locator('.shorts-row').evaluate(node => node.scrollLeft), 0);
   const next = page.locator('[data-shorts-scroll="next"]'), previous = page.locator('[data-shorts-scroll="previous"]');
+  assert.equal(await previous.locator('svg').getAttribute('data-icon'), 'mingcute:left-line');
+  assert.equal(await next.locator('svg').getAttribute('data-icon'), 'mingcute:right-line');
   await next.click();
   await page.waitForFunction(() => window.__pageDOM.querySelector('.shorts-row').scrollLeft > 0);
   await previous.click();
@@ -635,7 +778,7 @@ test('native feed churn does not rescan shell regions or measure hidden cards', 
 
 test('Shorts occupy their own row across the feed bridge and open the Shorts route', { timeout: 30000 }, async t => {
   const feedFixture = { contents: [
-      { reelItemRenderer: { videoId: 'short-one', headline: { simpleText: 'A portrait short' }, shortBylineText: { simpleText: 'Creator' } } },
+      { reelItemRenderer: { videoId: 'short-one', headline: { simpleText: 'A portrait short' }, shortBylineText: { simpleText: 'Creator' }, viewCountText: { simpleText: '12K views' } } },
       { videoRenderer: { videoId: 'normal', title: { simpleText: 'A normal video' } } },
       { reelItemRenderer: { videoId: 'short-two', headline: { simpleText: 'Another short' } } }
     ] };
@@ -650,15 +793,20 @@ test('Shorts occupy their own row across the feed bridge and open the Shorts rou
   await page.evaluate(() => {
     window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined };
 
-    document.querySelector('ytd-app').navigate_ = endpoint => { window.__shortOpen = endpoint; };
+    document.querySelector('ytd-app').navigate_ = endpoint => {
+      window.__shortOpen = endpoint;
+      history.pushState({}, '', endpoint.commandMetadata.webCommandMetadata.url);
+    };
   });
   await mainBundle(page);
   const short = page.locator('[data-browse-id="short:short-one"]');
   await short.waitFor();
-  assert.equal(await short.locator('.shorts-badge').textContent(), 'Shorts');
+  assert.equal(await page.locator('.shorts-heading h2').textContent(), 'Shorts');
+  assert.equal(await short.locator('.shorts-badge, .card-channel-avatar').count(), 0);
+  assert.equal(await short.locator('.shorts-view-count').textContent(), '12K views');
   assert.equal(await short.getAttribute('href'), '/shorts/short-one');
   const ratio = card => card.locator('.card-cover').evaluate(el => { const r = el.getBoundingClientRect(); return r.width / r.height; });
-  assert.ok(Math.abs(await ratio(short) - 9 / 16) < .01);
+  assert.ok(Math.abs(await ratio(short) - 2 / 3) < .01);
   assert.ok(Math.abs(await ratio(page.locator('[data-browse-id="video:normal"]')) - 16 / 9) < .01);
   assert.equal(await page.locator('.shorts-shelf').count(), 1);
   assert.equal(await page.locator('.shorts-row .shorts-card').count(), 2);
@@ -668,12 +816,29 @@ test('Shorts occupy their own row across the feed bridge and open the Shorts rou
   const videoBounds = await page.locator('[data-browse-id="video:normal"]').boundingBox();
   assert.equal(firstBounds.y, secondBounds.y, 'all Shorts share one row');
   assert.ok(videoBounds.y >= firstBounds.y + firstBounds.height, 'normal videos stay below the Shorts row');
+  for (const width of [1920, 1280, 800, 420]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.waitForFunction(() => {
+      const row = window.__pageDOM.querySelector('.shorts-row'), card = row.querySelector('.shorts-card');
+      const available = row.clientWidth - 20, actual = card.getBoundingClientRect().width;
+      const count = Math.round((available + 16) / (actual + 16));
+      return Math.abs(count * actual + (count - 1) * 16 - available) < 1;
+    });
+    const geometry = await short.evaluate(node => {
+      const row = node.closest('.shorts-row'), box = node.getBoundingClientRect();
+      return { width: box.width, available: row.clientWidth - 20, gap: getComputedStyle(row).gap };
+    });
+    assert.ok(geometry.width >= Math.min(194, geometry.available) - 1);
+    assert.equal(geometry.gap, '16px');
+    assert.ok(Math.abs(await ratio(short) - 2 / 3) < .01);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
   mkdirSync('output/playwright', { recursive: true });
   await page.locator('[data-ytg-browse-grid]').evaluate(el => { el.scrollTop = 0; });
   await page.screenshot({ path: 'output/playwright/shorts-card.png' });
   await page.evaluate(() => window.postMessage({ source: 'yt-gamepad-settings', values: { gridLayout: 'oneColumn' } }, location.origin));
   await page.locator('.cards[data-horizontal=true]').waitFor();
-  assert.ok(Math.abs(await ratio(short) - 9 / 16) < .01);
+  assert.ok(Math.abs(await ratio(short) - 2 / 3) < .01);
   assert.equal(await short.evaluate(el => getComputedStyle(el).flexDirection), 'column');
   await short.focus();
   await short.press('Enter');
@@ -902,16 +1067,28 @@ test('scroll pagination uses API continuation, locks requests and retries the sa
   const grid = page.locator('[data-ytg-browse-grid]');
   await grid.locator('[data-browse-id="video:video35"]').waitFor({ state: 'attached' });
   assert.equal(requests.length, 1);
-  await grid.evaluate(node => {
+  const immediateReads = await grid.evaluate(node => {
     node.scrollTop = node.scrollHeight;
+    const scrollHeight = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollHeight').get;
+    window.__pagingGeometryReads = 0;
+    Object.defineProperty(node, 'scrollHeight', { configurable: true, get() {
+      window.__pagingGeometryReads++;
+      return scrollHeight.call(this);
+    } });
     for (let i = 0; i < 8; i++) node.dispatchEvent(new Event('scroll'));
+    return window.__pagingGeometryReads;
   });
+  assert.equal(immediateReads, 0, 'scroll bursts defer geometry reads until after the frame');
   await page.waitForFunction(() => window.__pageDOM.querySelector('[data-ytg-browse-grid]')?.getAttribute('aria-busy') === 'true');
   await page.waitForTimeout(150);
   assert.equal(requests.length, 2);
+  assert.equal(await page.evaluate(() => window.__pagingGeometryReads), 1, 'scroll and observer checks share one geometry read before loading');
   assert.equal(requests[1].continuation, 'page-two');
+  assert.ok(await grid.locator('.feed-skeleton').count() > 0, 'pagination displays card skeletons in the existing grid');
+  assert.equal(await grid.locator('.feed-skeleton [data-browse-id],.feed-skeleton a,.feed-skeleton button').count(), 0, 'placeholders cannot enter gamepad navigation');
   release();
   await grid.getByRole('alert').waitFor();
+  assert.equal(await grid.locator('.feed-skeleton').count(), 0, 'failed requests remove loading placeholders');
   assert.equal(await grid.locator('[data-browse-id]').count(), 36);
   await grid.getByRole('alert').getByRole('button').click();
   await grid.locator('[data-browse-id="video:new"]').waitFor();
@@ -922,6 +1099,58 @@ test('scroll pagination uses API continuation, locks requests and retries the sa
   assert.equal(await page.evaluate(() => window.__nativeLoads), 0);
   assert.equal(await page.evaluate(() => window.scrollY), 0);
 });
+
+for (const initialCount of [35, 155]) {
+  test(`pagination skeletons fill the partial row in ${initialCount > 120 ? 'virtual' : 'ordinary'} grids`, { timeout: 30000 }, async t => {
+    const page = await browserPage(t);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    t.after(() => release());
+    await page.route('https://i.ytimg.com/**', route => route.fulfill({ status: 204 }));
+    await page.route('https://www.youtube.com/**', async route => {
+      if (!route.request().url().includes('/youtubei/')) return route.fulfill({ contentType: 'text/html', body: '<html><body></body></html>' });
+      const continuation = route.request().postDataJSON().continuation;
+      if (continuation) await gate;
+      return route.fulfill({ json: { contents: [
+        ...Array.from({ length: continuation ? 4 : initialCount }, (_, i) => ({ videoRenderer: {
+          videoId: `skeleton-test-${i + (continuation ? initialCount : 0)}`, title: { simpleText: `Video ${i}` },
+          ownerText: { simpleText: 'Creator' }
+        } })),
+        ...(!continuation ? [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'next' } } } }] : [])
+      ] } });
+    });
+    await page.goto('https://www.youtube.com/');
+    await page.evaluate(() => { window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined }; });
+    await mainBundle(page);
+    const grid = page.locator('[data-ytg-browse-grid]');
+    await grid.locator('[data-browse-id="video:skeleton-test-0"]').waitFor();
+    await grid.evaluate(node => { window.__retainedFirstCard = node.querySelector('[data-browse-id="video:skeleton-test-0"]'); });
+    await grid.locator('[data-browse-more]').dispatchEvent('click');
+    await grid.evaluate(node => { node.scrollTop = node.scrollHeight; node.dispatchEvent(new Event('scroll')); });
+    const skeleton = grid.locator(`[data-skeleton-id="skeleton:${initialCount}"]`);
+    await skeleton.waitFor({ state: 'attached' });
+    const last = grid.locator(`[data-browse-id="video:skeleton-test-${initialCount - 1}"]`);
+    await last.waitFor({ state: 'attached' });
+    const alignment = await grid.evaluate((node, count) => {
+      const last = node.querySelector(`[data-browse-id="video:skeleton-test-${count - 1}"]`).getBoundingClientRect();
+      const skeleton = node.querySelector(`[data-skeleton-id="skeleton:${count}"]`).getBoundingClientRect();
+      return { last: last.toJSON(), skeleton: skeleton.toJSON(), columns: getComputedStyle(node.querySelector('.cards')).gridTemplateColumns.split(' ').length };
+    }, initialCount);
+    assert.equal(alignment.columns, 3);
+    assert.ok(Math.abs(alignment.last.top - alignment.skeleton.top) < 1, 'the placeholder fills the existing partial row');
+    assert.ok(Math.abs(alignment.last.width - alignment.skeleton.width) < 1, 'real and skeleton cards share column widths');
+    assert.equal(await skeleton.getAttribute('aria-hidden'), 'true');
+    if (initialCount === 35) {
+      mkdirSync('output/playwright', { recursive: true });
+      await page.screenshot({ path: 'output/playwright/pagination-skeletons.png' });
+    }
+    release();
+    await grid.locator(`[data-browse-id="video:skeleton-test-${initialCount + 3}"]`).waitFor({ state: 'attached' });
+    assert.equal(await grid.locator('.feed-skeleton').count(), 0);
+    assert.equal(await grid.evaluate(node => node.querySelector('[data-browse-id="video:skeleton-test-0"]') === window.__retainedFirstCard), true, 'appending keeps the selected real card mounted');
+  });
+}
 
 test('short API pages fill the viewport but repeated empty results stop automatic paging', { timeout: 30000 }, async t => {
   const page = await browserPage(t);
@@ -1073,19 +1302,26 @@ for (const reducedMotion of ['no-preference', 'reduce']) {
     });
     await mainBundle(page);
     const grid = page.locator('[data-ytg-browse-grid]');
-    await grid.locator('.feed-skeletons').waitFor();
+    await grid.locator('.feed-skeleton').first().waitFor();
     assert.equal(await grid.getAttribute('aria-busy'), 'true');
-    assert.equal(await grid.locator('.feed-skeletons').getAttribute('aria-hidden'), 'true');
+    assert.equal(await grid.locator('.feed-skeleton').first().getAttribute('aria-hidden'), 'true');
+    assert.ok(await grid.locator('.feed-skeleton .card-channel-avatar').count() > 0);
     releaseFeed();
     const card = grid.locator('[data-browse-id="video:FEwhat_to_watch-0"]');
     await card.waitFor();
-    assert.equal(await grid.locator('.feed-skeletons').count(), 0);
+    assert.equal(await grid.locator('.feed-skeleton').count(), 0);
     assert.equal(await grid.getAttribute('aria-busy'), 'false');
     const cover = card.locator('.card-cover');
     const before = await cover.evaluate(node => ({ width: node.offsetWidth, height: node.offsetHeight }));
     assert.equal(await cover.getAttribute('data-loading'), 'true');
+    assert.equal(await card.locator('strong').textContent(), 'FEwhat_to_watch 0', 'metadata does not wait for the thumbnail');
+    const coverStyle = await cover.evaluate(node => ({ background: getComputedStyle(node).backgroundColor, animation: getComputedStyle(node).animationName,
+      duration: getComputedStyle(node.querySelector('img')).transitionDuration }));
+    assert.equal(coverStyle.animation, 'none', 'the thumbnail backdrop stays stable while the image loads');
+    assert.equal(coverStyle.duration, reducedMotion === 'reduce' ? '0s' : '0.28s');
     releaseImages();
     await page.waitForFunction(() => window.__pageDOM.querySelector('[data-browse-id="video:FEwhat_to_watch-0"] img')?.dataset.loaded === 'true');
+    assert.equal(await cover.evaluate(node => getComputedStyle(node).backgroundColor), coverStyle.background);
     await card.focus();
     await page.evaluate(() => { document.documentElement.classList.add('ytg-gamepad-input'); document.documentElement.dataset.ytgInputMode = 'gamepad'; window.YTGamepad.refresh(); });
     await page.waitForTimeout(220);
@@ -1102,7 +1338,7 @@ for (const reducedMotion of ['no-preference', 'reduce']) {
     await grid.locator('[data-browse-id="video:more-0"]').waitFor();
     assert.equal(await page.evaluate(() => window.__motionCalls.filter(id => id === 'ytg-feed-enter').length), calls, 'navigation and appending never replay the feed entrance');
     await page.locator('#ytg-browse-categories button').last().click();
-    await grid.locator('.feed-skeletons').waitFor();
+    await grid.locator('.feed-skeleton').first().waitFor();
     await page.locator('.client-brand').evaluate(node => window.YTGamepad.focus(node));
     releaseMusic();
     await grid.locator('[data-browse-id="video:music-0"]').waitFor();
@@ -1126,8 +1362,8 @@ for (const reducedMotion of ['no-preference', 'reduce']) {
   });
 }
 
-async function mainBundle(page) {
-  await page.route('https://www.youtube.com/youtubei/v1/guide**', route => route.fulfill({ json: { items: [] } }));
+async function mainBundle(page, guide = { items: [] }) {
+  await page.route('https://www.youtube.com/youtubei/v1/guide**', route => route.fulfill({ json: guide }));
   // Playback metadata and recommendations use separate endpoints from the feed.
   // Keep those requests out of browse pagination and restoration assertions.
   await page.route('https://www.youtube.com/youtubei/v1/next**', route => route.fulfill({ json: {} }));
@@ -1970,6 +2206,61 @@ test('unsupported routes stay empty and ignore native cards and mutations', { ti
   });
   await page.waitForTimeout(250);
   assert.equal(await grid.locator('[data-browse-id]').count(), 0);
-  assert.equal(await grid.locator('.feed-skeletons').count(), 0);
+  assert.equal(await grid.locator('.feed-skeleton').count(), 0);
   assert.equal(requests, 0);
+});
+
+
+test('Home sidebar and YouTube brand each request a fresh recommendation batch', async t => {
+  const page = await browserPage(t);
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  let batches = 0;
+  await page.route('https://www.youtube.com/**', async route => {
+    if (route.request().url().includes('/youtubei/')) {
+      const body = route.request().postDataJSON();
+      if (body?.browseId === 'FEwhat_to_watch') {
+        batches++;
+        if (batches === 3) await gate;
+        return route.fulfill({ json: { contents: [modernVideo('batch' + batches)] } });
+      }
+      return route.fulfill({ json: {} });
+    }
+    return route.fulfill({ contentType: 'text/html', body: '<html><body><ytd-page-manager></ytd-page-manager></body></html>' });
+  });
+  await page.goto('https://www.youtube.com/');
+  await page.evaluate(() => { window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined }; });
+  await mainBundle(page);
+  await page.locator('[data-browse-id="video:batch1"]').waitFor();
+  await page.locator('[data-sidebar-id="home"]').click();
+  await page.locator('[data-browse-id="video:batch2"]').waitFor();
+  assert.equal(await page.locator('[data-browse-id="video:batch1"]').count(), 0);
+  await page.evaluate(() => {
+    window.__retainedHomeCard = window.__pageDOM.querySelector('[data-browse-id="video:batch2"]');
+    window.__homeRefreshFrames = [];
+    window.__recordHomeRefresh = true;
+    const sample = () => {
+      if (!window.__recordHomeRefresh) return;
+      const cards = window.__pageDOM.querySelector('[data-ytg-browse-grid] .cards');
+      const root = window.__pageDOM.querySelector('#ytg-browse-grid');
+      window.__homeRefreshFrames.push({ count: cards?.querySelectorAll('[data-browse-id]').length || 0,
+        opacity: cards && getComputedStyle(cards).opacity, hidden: !root || root.hidden });
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await page.locator('.client-brand').click();
+  await page.locator('.home-loading-line').waitFor();
+  await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => window.__pageDOM.querySelector('[data-browse-id="video:batch2"]') === window.__retainedHomeCard), true);
+  assert.equal(await page.locator('.feed-skeleton').count(), 0, 'refresh preserves the current batch instead of displaying a skeleton screen');
+  release();
+  await page.locator('[data-browse-id="video:batch3"]').waitFor();
+  assert.equal(await page.locator('.home-loading-line').count(), 0);
+  const frames = await page.evaluate(() => { window.__recordHomeRefresh = false; return window.__homeRefreshFrames; });
+  assert.ok(frames.length > 0);
+  assert.ok(frames.every(frame => frame.count > 0 && frame.opacity === '1' && !frame.hidden), JSON.stringify(frames));
+  assert.equal(batches, 3);
+  assert.equal(await page.locator('[data-browse-id="video:batch2"]').count(), 0);
 });

@@ -12,6 +12,7 @@ export interface WatchNextSnapshot {
   queue: RecommendationSnapshot[];
   loading: boolean;
   failed: boolean;
+  playlistTitle?: string;
 }
 type Node = Record<string, any>;
 // Scope the library's parsed response before converting presentation fields.
@@ -52,6 +53,7 @@ export function parseWatchNext(raw: Node, currentVideo: string, continuationKind
     return items;
   }
   return { recommendations: records(recommendationRoots, false), queue: records(queueRoots, true),
+    playlistTitle: label(watch?.playlist?.title),
     recommendationContinuation: continuationToken(recommendationRoots), queueContinuation: continuationToken(queueRoots) };
 }
 
@@ -98,6 +100,7 @@ export function createWatchNextService(sharedData?: WatchDataService) {
       const parsed = parseWatchNext(data, target.videoId, append ? kind : undefined, target.watchEndpoint.playlistId);
       if (!append) {
         captured.recommendations = parsed.recommendations; captured.queue = parsed.queue;
+        captured.playlistTitle = parsed.playlistTitle;
         tokens = parsed;
         if (captured.queue.length >= 120) tokens.queueContinuation = undefined;
         if (captured.recommendations.length >= 120) tokens.recommendationContinuation = undefined;

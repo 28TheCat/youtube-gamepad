@@ -1,7 +1,9 @@
 import { createDrawer } from './drawer';
 import { createCommentOperations } from './comment-operations';
 import { createPlaylistOperations } from './playlist-operations';
-import { mountWatchPanel } from './mount-watch-panel';
+import { createWatchActionOperations } from './watch-action-operations';
+import { subscriptionOptions } from './subscription-options';
+import { mountWatchPanel, backCommentComposer } from './mount-watch-panel';
 import type { ModuleFactory, WatchPanels, WatchPanelsPort } from '../../types/ports';
 export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
 // Description/comments rendering and data requests through an injected port.
@@ -39,7 +41,11 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     });
     let renderer: ReturnType<typeof mountWatchPanel> | undefined;
     let destroyed = false;
-    let subscriptionLoading = false, subscriptionFailed = false, subscriptionVersion = 0;
+    const subscription = createWatchActionOperations({
+      request: async action => await port.controller.request('watchAction', action) === true,
+      active: () => !destroyed && watchState().panel === 'subscription',
+      route: () => port.controller.readRoute().key, changed: paintSubscription
+    });
     const playlist = createPlaylistOperations({
       read: async () => await port.controller.request('playlists') as readonly import('../../types/ports').SavedPlaylistSnapshot[] | undefined,
       toggle: async key => !!await port.controller.request('savePlaylist', key),
@@ -48,15 +54,23 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     function paint(panel: 'description' | 'comments' | 'playlists' | 'subscription', records: readonly import('../../types/ports').CommentSnapshot[] = [], unavailable = false) {
       if (destroyed) return;
       renderer ||= mountWatchPanel(description, controllerStyle, {
-        openThread, replies: loadReplies,
-        translate(key) { comments.translate(key, key => { port.controller.request('translateComment', key); }); commentKey = ''; readComments(); },
-        load: loadComments, subscriptionAction: updateSubscription, savePlaylist: togglePlaylist, retryPlaylists: loadPlaylists
+        ...comments.callbacks({
+          active: () => !destroyed && watchState().panel === 'comments',
+          changed() { commentKey = ''; readComments(); }, openThread,
+          load: loadComments,
+          post: async (text, key) => await port.controller.request('commentPost', { text, key }),
+          sort: value => port.controller.request('commentSort', value),
+          translate: key => { port.controller.request('translateComment', key); }
+        }),
+        changed() { commentButtons = renderer?.buttons() || []; send({ type: 'WATCH_PANEL_COUNT', count: commentButtons.length }); },
+        subscriptionAction: updateSubscription, savePlaylist: togglePlaylist, retryPlaylists: loadPlaylists
       });
       renderer.update({ panel, text: port.descriptionText, records, unavailable,
         thread: comments.state.thread ? records.find(item => item.key === comments.state.thread) : undefined, replyLimit: comments.state.limit,
-        notificationPreference: panel === 'subscription' ? port.controller.readWatchPage().notificationPreference : undefined, subscriptionLoading, subscriptionFailed,
+        notificationPreference: panel === 'subscription' ? port.controller.readWatchPage().notificationPreference : undefined,
+        subscriptionLoading: subscription.state.loading, subscriptionFailed: subscription.state.failed,
         playlists: playlist.state.items, playlistLoading: playlist.state.loading, playlistFailed: playlist.state.failed,
-        commentsStatus: port.controller.readCommentsStatus?.() });
+        commentsStatus: port.controller.readCommentsStatus?.(), commentRoute: port.controller.readRoute().key });
       dialog.classList.toggle('thread-detail', panel === 'comments' && !!comments.state.thread);
       commentButtons = panel !== 'description' ? renderer.buttons() : [];
     }
@@ -77,17 +91,8 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
       if (!port.controller.navigating && !port.controller.hasTemporaryLayer?.()) focus();
     }
     async function updateSubscription(action: import('../../types/ports').WatchAction) {
-      if (subscriptionLoading || destroyed || watchState().panel !== 'subscription' ||
-          !['unsubscribe', 'notificationsAll', 'notificationsPersonalized', 'notificationsNone'].includes(action)) return;
-      const version = ++subscriptionVersion, route = port.controller.readRoute().key;
-      subscriptionLoading = true; subscriptionFailed = false; paintSubscription();
-      try {
-        const ok = await port.controller.request('watchAction', action);
-        if (destroyed || version !== subscriptionVersion || route !== port.controller.readRoute().key) return;
-        if (ok) { closePanel(); port.controller.requestRefresh?.(); }
-        else subscriptionFailed = true;
-      } catch { if (version === subscriptionVersion) subscriptionFailed = true; }
-      finally { if (!destroyed && version === subscriptionVersion) { subscriptionLoading = false; paintSubscription(); } }
+      if (action !== 'unsubscribe' && !subscriptionOptions.some(option => option.action === action)) return;
+      if (await subscription.run(action) === true) { closePanel(); port.controller.requestRefresh?.(); }
     }
     function outsideClick(event: Event) { if (watchState().panel === 'subscription' && event.target === dialog) closePanel(); }
     dialog.addEventListener('click', outsideClick);
@@ -103,7 +108,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     function unmount() { renderer?.dispose(); renderer = undefined; commentButtons = []; commentKey = ''; }
   function clearPanel() {
     comments.reset();
-    ++subscriptionVersion; subscriptionLoading = false; subscriptionFailed = false;
+    subscription.reset();
     playlist.reset();
     // Keep the panel geometry through the discrete display/opacity exit transition.
     // Removing "comments" here turns the fading sidebar into a full-screen backdrop.
@@ -115,8 +120,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
   }
   function openThread(key: string) {
     if (destroyed || watchState().panel !== 'comments') return;
-    const record = port.controller.readComments().find(item => item.key === key);
-    if (!record || (!record.hasReplies && !record.replies.length)) return;
+    if (!comments.canOpen(key)) return;
     drawer.enterDetail(() => {
       comments.reset();
       controllerStyle.bind(close, 'Back');
@@ -130,6 +134,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     commentKey = ''; readComments(); sheet.scrollTop = 0;
   }
   function back() {
+    if (backCommentComposer(description)) return true;
     if (destroyed || watchState().panel !== 'comments' || !comments.state.thread) return false;
     return drawer.backDetail();
   }
@@ -191,7 +196,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     if (action === 'description') {
       paint('description'); focus();
     } else if (action === 'subscription') {
-      subscriptionLoading = false; subscriptionFailed = false;
+      subscription.reset();
       paintSubscription();
       send({ type: 'WATCH_FOCUS', region: 'panel', index: 1 }); focus();
     } else if (action === 'playlists') {

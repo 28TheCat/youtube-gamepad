@@ -11,6 +11,7 @@ const props = defineProps<{
   openThread?: (key: string) => void;
   translate?: (key: string) => void;
   focusKey?: string;
+  reply?: (key: string) => void;
 }>();
 const { t, language } = useI18n();
 const vBadge: Directive<HTMLElement> = {
@@ -56,6 +57,7 @@ const replyLabel = computed(() => 'replyCount' in props.item && props.item.reply
         <LoadStatus class="translation-error" :failed="translation?.failed" error-role="status"
           :error-message="t('Translation unavailable. Original text is still shown.')" />
       </div>
+      <button v-if="reply && 'canReply' in item && item.canReply" class="comment-reply-action" :data-focus-id="`reply:${item.key}`" @click="reply(item.key)">{{ t('Reply') }}</button>
       <button v-if="canOpen" class="comment-replies" :data-focus-id="`replies:${item.key}`" @click="openThread?.(item.key)">
         <span class="comment-expand-hint key-controller-badge" aria-hidden="true"><span v-badge></span></span>
         <span class="comment-replies-label">{{ replyLabel }}</span>

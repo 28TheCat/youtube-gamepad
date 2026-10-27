@@ -10,21 +10,15 @@ import InterfaceIcon from './InterfaceIcon.vue';
 import ChannelBadge from './ChannelBadge.vue';
 import ChannelAvatar from './ChannelAvatar.vue';
 import MediaActionButton from './MediaActionButton.vue';
-const props = defineProps<{ page: PlaybackMetadata; playback: PlaybackControlState; commentsOpen: boolean; activate: (action: string) => void; controllerStyle: ControllerStyle }>();
+import { primaryPlaybackGroups as primaryGroups, secondaryPlaybackGroups as secondaryGroups } from './playback-control-config';
+const props = defineProps<{ page: PlaybackMetadata; playback: PlaybackControlState; commentsOpen: boolean; hasCollection?: boolean; collectionOpen?: boolean; activate: (action: string) => void; controllerStyle: ControllerStyle }>();
 const vBadge: Directive<HTMLElement, string> = {
   mounted(node, binding) { props.controllerStyle.badge(node, binding.value); }
 };
 const video = computed(() => props.playback);
 const canSeek = computed(() => video.value.canSeek);
-const primaryGroups = [
-  [['channel', ''], ['subscribe', ''], ['description', '']],
-  [['seekBack', 'previous'], ['playPause', 'pause'], ['seekForward', 'next']]
-];
-const secondaryGroups = [
-  [['like', 'like'], ['dislike', 'dislike'], ['comments', 'comments'], ['save', 'save'], ['mute', 'volume']],
-  [['captions', 'captions'], ['settings', 'settings'], ['goLive', '']]
-];
 function label(action: string) {
+  if (action === 'seekBack' || action === 'seekForward') return t(action === 'seekBack' ? 'Rewind {seconds} seconds' : 'Forward {seconds} seconds', { seconds: video.value.seekStep ?? 10 });
   if (action === 'channel') return props.page.channel ? t('Channel: {name}', { name: props.page.channel }) : t('Channel');
   if (action === 'subscribe') return t(props.page.subscribed ? 'Subscribed, manage subscription' : 'Subscribe');
   if (action === 'playPause') return t(video.value?.paused ? 'Play' : 'Pause');
@@ -37,7 +31,7 @@ function pressed(action: string) {
 </script>
 <template>
     <nav class="toolbar" :aria-label="t('Video controls')">
-        <div v-for="(group, groupIndex) in primaryGroups" :key="groupIndex" class="group" :class="{ 'channel-group': groupIndex === 0 }">
+        <div v-for="(group, groupIndex) in primaryGroups" :key="groupIndex" class="group" :class="{ 'channel-group': groupIndex === 0, 'transport-group': groupIndex === 1 }">
           <button v-for="[action, symbol] in group" :key="action" class="control" :class="{ play: action === 'playPause', avatar: action === 'channel' }"
             :data-action="action" :data-focus-id="action" :title="action === 'channel' ? page.channel || t('Channel') : label(action)" :aria-label="label(action)" :aria-pressed="pressed(action)" :aria-haspopup="action === 'subscribe' && page.subscribed ? 'dialog' : undefined"
             :disabled="['seekBack', 'seekForward'].includes(action) && !canSeek" @click="activate(action)">
@@ -46,6 +40,8 @@ function pressed(action: string) {
             <InterfaceIcon v-else-if="symbol" :name="action === 'playPause' ? (video?.paused ? 'play' : 'pause') : symbol" :filled="action === 'playPause'" /><span v-else>{{ label(action) }}</span>
           </button>
         </div>
+        <button type="button" class="control windowed-fullscreen" data-action="fullscreen" data-focus-id="fullscreen"
+          :title="t('Enter fullscreen')" :aria-label="t('Enter fullscreen')" @click="activate('fullscreen')"><InterfaceIcon name="fullscreen" /></button>
         <div class="group right-group">
           <div v-for="(group, index) in secondaryGroups" :key="index" class="cluster">
             <template v-for="[action, symbol] in group" :key="action">
@@ -61,7 +57,8 @@ function pressed(action: string) {
         </div>
     </nav>
     <nav class="watch-tabs" role="tablist" :aria-label="t('Recommendations')">
-      <button class="watch-tab" role="tab" :aria-selected="!commentsOpen" @click="activate('recommendations')"><InterfaceIcon name="play" filled />{{ t('Recommendations') }}</button>
+      <button v-if="hasCollection" class="watch-tab collection-tab" role="tab" :aria-selected="collectionOpen && !commentsOpen" @click="activate('collection')"><InterfaceIcon name="playlists" filled />{{ t('Collection') }}</button>
+      <button class="watch-tab" role="tab" :aria-selected="!collectionOpen && !commentsOpen" @click="activate('recommendations')"><InterfaceIcon name="play" filled />{{ t('Recommendations') }}</button>
       <button class="watch-tab" role="tab" :aria-selected="!!commentsOpen" @click="activate('comments')"><InterfaceIcon name="comments" />{{ t('Comments') }}</button>
       <span class="tab-hint key-controller-badge"><span v-badge="'LB'"></span><span aria-hidden="true">/</span><span v-badge="'RB'"></span></span>
     </nav>

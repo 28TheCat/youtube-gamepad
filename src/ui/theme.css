@@ -1,3 +1,6 @@
+@media(prefers-reduced-motion:no-preference){
+  .video-thumbnail>img{transition:opacity 280ms ease-out}
+}
 /* Shared visual tokens. Page and Shadow DOM UI inherit these from html.
    Keep YouTube theme selectors here; playback uses explicit overlay tokens. */
 :root {

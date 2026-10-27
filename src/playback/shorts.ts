@@ -1,27 +1,31 @@
+import { captureMediaFrame, createMediaFrameReadiness } from './media-frame';
 import { createDrawer } from '../ui/drawer';
-import type { Action, ControllerStyle, Runtime } from '../../types/ports';
+import type { Action, ControllerStyle, Runtime, WatchAction } from '../../types/ports';
 import type { PageAccess } from '../bridge/page-protocol';
 import { PAGE_COMMENTS, PAGE_WATCH_INFO } from '../bridge/page-protocol';
-import { isShortsPlaybackRoute, readShortsQueue, shortsQueueKey } from '../shared/shorts-route';
+import { isShortsPlaybackRoute, readShortsQueue } from '../shared/shorts-route';
 import { t } from '../shared/i18n';
-import { mountWatchPanel } from '../ui/mount-watch-panel';
+import { mountWatchPanel, backCommentComposer } from '../ui/mount-watch-panel';
 import { createInterfaceIcon } from '../ui/icon-shapes';
 import { createCommentOperations } from '../ui/comment-operations';
 import { createPlaylistOperations } from '../ui/playlist-operations';
+import { createWatchActionOperations } from '../ui/watch-action-operations';
 import pageCSS from './shorts-page.css?inline';
 import controlsCSS from './shorts-controls.css?inline';
 import { h, render } from 'vue';
 import MediaActionButton from '../ui/MediaActionButton.vue';
+import { playbackParameterDefaults, type PlaybackParameters } from '../shared/playback-settings';
 import mediaActionCSS from '../ui/media-action.css?inline';
 
-type Panel = '' | 'comments' | 'playlists' | 'actions';
+type Panel = '' | 'comments' | 'playlists' | 'actions' | 'quality' | 'subscription';
 const layoutOverrides = { display: 'block', position: 'static' } as const;
 type LayoutProperty = keyof typeof layoutOverrides;
 type NativeLayout = Partial<Record<LayoutProperty, { value: string; priority: string }>>;
 
 /** Shorts use native media with an independent layout and input owner. */
 export let YTGamepadShortsModule = {
-  create({ runtime, controllerStyle, pageAccess, enabled, canHandle, dispatch }: {
+  create({ runtime, controllerStyle, pageAccess, enabled, canHandle, dispatch, playbackSettings }: {
+    playbackSettings?: () => PlaybackParameters;
     runtime: Runtime; controllerStyle: ControllerStyle; pageAccess?: PageAccess;
     enabled: () => boolean; canHandle?: () => boolean; dispatch: (action: Action) => void;
   }) {
@@ -30,16 +34,18 @@ export let YTGamepadShortsModule = {
     let unregister: (() => void) | undefined;
     let host: HTMLElement | undefined, backdrop: HTMLElement | undefined, style: HTMLStyleElement | undefined, shadow: ShadowRoot;
     let title: HTMLElement, author: HTMLElement, status: HTMLElement, clock: HTMLElement, count: HTMLElement;
+    let avatar: HTMLImageElement, avatarFallback: HTMLElement, subscribe: HTMLButtonElement;
     let progress: HTMLProgressElement, play: HTMLButtonElement, previous: HTMLButtonElement, next: HTMLButtonElement, retry: HTMLButtonElement;
     let rail: HTMLElement, drawer: HTMLElement, drawerTitle: HTMLElement, body: HTMLElement, hint: HTMLElement;
     const actionSlots = new Map<'like' | 'comments' | 'save' | 'mute', HTMLElement>();
     const panelActionSlots = new Map<'like' | 'comments' | 'save' | 'mute', HTMLElement>();
+    const extraActions = new Map<string, HTMLButtonElement>();
     const actionStates = new WeakMap<HTMLElement, string>();
-    const actionCallbacks = { like: () => { void toggleLike(); }, comments: () => openPanel('comments'), save: () => openPanel('playlists'), mute: () => { handle('mute'); } };
+    const actionCallbacks = { like: () => { void performWatchAction('like'); }, comments: () => openPanel('comments'), save: () => openPanel('playlists'), mute: () => { handle('mute'); } };
     function paintActions(liked = false) {
       for (const [action, slot] of [...actionSlots, ...panelActionSlots]) {
         const active = action === 'like' ? liked : action === 'mute' ? !!media?.muted : action === 'comments' ? panel === 'comments' : undefined;
-        const disabled = action === 'like' && working, showLabel = panelActionSlots.get(action) === slot;
+        const disabled = action === 'like' && watchActions.state.loading, showLabel = panelActionSlots.get(action) === slot;
         const state = `${active}:${disabled}:${showLabel}`;
         if (actionStates.get(slot) === state) continue;
         actionStates.set(slot, state);
@@ -48,12 +54,50 @@ export let YTGamepadShortsModule = {
     }
     function clearActions() { for (const slot of actionSlots.values()) render(null, slot); actionSlots.clear(); }
     function clearPanelActions() { for (const slot of panelActionSlots.values()) render(null, slot); panelActionSlots.clear(); }
-    let preview: HTMLElement, cover: HTMLImageElement;
+    let preview: HTMLElement, cover: HTMLImageElement, frame: HTMLCanvasElement;
+    let awaitingMedia = false;
+    const frameReadiness = createMediaFrameReadiness();
+    const clearFrameReadiness = frameReadiness.reset;
+    function hasPresentedFrame(video: HTMLVideoElement | null) {
+      const playerId = pageAccess?.readPlayerVideoId?.();
+      if (playerId && playerId !== id()) return false;
+      return frameReadiness.ready(video, route, () => { if (!lifecycle.destroyed) update(); });
+    }
+    let previewDirection = 1, previewVersion = 0, revealing = false, heldVideoId = '';
+    let slide: Animation | undefined, outgoing: Animation | undefined, fade: Animation | undefined;
+    const motionDuration = (duration: number) => matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : duration;
+    function resetPreviewMotion() {
+      ++previewVersion; slide?.cancel(); outgoing?.cancel(); fade?.cancel();
+      slide = outgoing = fade = undefined; revealing = false;
+      if (cover) cover.style.transform = `translateY(${previewDirection * 100}%)`;
+    }
+    function slidePreview() {
+      // A failed or still-loading thumbnail must never push the last frame out.
+      if (!awaitingMedia || cover.dataset.videoId === heldVideoId || !cover.complete || !cover.naturalWidth || slide || revealing) return;
+      const options = { duration: motionDuration(240), easing: 'cubic-bezier(.22,.61,.36,1)', fill: 'forwards' as const };
+      slide = cover.animate([{ transform: `translateY(${previewDirection * 100}%)` }, { transform: 'translateY(0)' }], options);
+      if (!frame.hidden) outgoing = frame.animate([{ transform: 'translateY(0)' }, { transform: `translateY(${-previewDirection * 100}%)` }], options);
+    }
+    function revealMedia() {
+      if (revealing) return;
+      revealing = true; awaitingMedia = false;
+      const version = previewVersion;
+      void (async () => {
+        try {
+          if (slide) await slide.finished;
+          if (version !== previewVersion || !active() || lifecycle.destroyed) return;
+          fade = preview.animate([{ opacity: 1 }, { opacity: 0 }], { duration: motionDuration(120), fill: 'forwards' });
+          await fade.finished;
+          if (version !== previewVersion) return;
+          resetPreviewMotion(); frame.hidden = true; preview.hidden = true;
+        } catch { /* A newer direction or leaving Shorts cancelled this handoff. */ }
+      })();
+    }
     let route = '', inShorts = false, returning = false, started = 0;
     let entryIndex: number | undefined, media: HTMLVideoElement | null = null, originalLoop = false;
     let mediaPlayer: HTMLElement | null = null, mediaAncestors: HTMLElement[] = [];
     const nativeLayouts = new Map<HTMLElement, NativeLayout>();
-    let playbackFailure = '', panel: Panel = '', panelKey = '';
+    let playbackFailure = '', panel: Panel = '', panelKey = '', optionFocus = '';
     let panelView: ReturnType<typeof mountWatchPanel> | undefined;
     const comments = createCommentOperations({
       records: () => pageAccess?.readComments?.()?.items || [], status: () => pageAccess?.readComments?.(),
@@ -64,24 +108,53 @@ export let YTGamepadShortsModule = {
       toggle: async key => await pageAccess?.watchPlaylistToggle?.(key),
       active: () => !lifecycle.destroyed && panel === 'playlists', route: () => route, changed: paintPlaylists
     });
-    let desiredId = '', navigatingId = '', loading = false, nativeSteps = 0, nativeMoving = false;
+    let desiredId = '', navigatingId = '', loading = false;
+    let apiIds: string[] = [], apiExhausted = false, apiVersion = 0, waitingRecommendations = false, apiRetryAt = 0, apiNeedsReset = true;
+    let recommendationsRequest: Promise<boolean> | undefined;
     let moveTimer: number | undefined, navigationTimer: number | undefined, wheelTimer: number | undefined, wheelHeld = false;
-    let message = '', messageUntil = 0, working = false, resumeOnCancel = false;
+    let message = '', messageUntil = 0, resumeOnCancel = false;
+    const watchActions = createWatchActionOperations({
+      request: async (action: Exclude<WatchAction, 'save' | 'dislike'>) => await pageAccess?.watchAction?.(action) === true,
+      active: () => !lifecycle.destroyed && !switching(), route: () => route,
+      changed() {
+        paintActions(!!currentInfo()?.liked); paintExtraActions();
+        if (panel === 'subscription') paintOptions();
+      }
+    });
     const panelDrawer = createDrawer({
       element: () => drawer, content: () => body,
       activeElement: () => shadow?.activeElement as HTMLElement | null,
       route: () => route, fallback: () => play,
-      items: () => drawer ? Array.from(drawer.querySelectorAll<HTMLElement>('button,.comment-text[tabindex]')) : [],
+      items: () => drawer ? Array.from(drawer.querySelectorAll<HTMLElement>('button,textarea,.comment-text[tabindex]')) : [],
       cleared: clearPanel
     });
     const historyIndex = () => (window as unknown as { navigation?: { currentEntry?: { index: number } } }).navigation?.currentEntry?.index;
     const active = () => enabled() && isShortsPlaybackRoute();
     const id = () => location.pathname.split('/')[2] || '';
-    const sourceQueue = () => { const queue = readShortsQueue(); return queue.currentId === id() || loading && queue.currentId === navigatingId && queue.ids.includes(id()) ? queue : undefined; };
+    const sourceQueue = () => apiIds.includes(id()) ? { ids: apiIds } : undefined;
     const routeKey = () => location.pathname + location.search;
     const time = (value: number) => Number.isFinite(value) ? `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}` : '0:00';
     const text = (el: HTMLElement, value: string) => { if (el.textContent !== value) el.textContent = value; };
-    const switching = () => loading || nativeMoving || !!desiredId && desiredId !== id();
+    const switching = () => loading || waitingRecommendations || !!desiredId && desiredId !== id();
+    function loadRecommendations(): Promise<boolean> {
+      if (recommendationsRequest) return recommendationsRequest;
+      if (apiExhausted || !pageAccess?.shortsRecommendations) return Promise.resolve(false);
+      const version = apiVersion, seed = id();
+      const request = (async () => {
+        try {
+          const result = await pageAccess.shortsRecommendations!(seed, apiNeedsReset);
+          if (version !== apiVersion || lifecycle.destroyed || !active() || !result) return false;
+          apiIds = [...new Set([...apiIds, ...result.ids])];
+          const discard = Math.max(0, apiIds.indexOf(id()) - 100);
+          if (apiIds.length > 300 && discard) apiIds.splice(0, discard);
+          apiNeedsReset = false;
+          apiExhausted = !result.hasMore; apiRetryAt = performance.now() + 3000;
+          paintTarget(); return true;
+        } catch { return false; }
+        finally { if (version === apiVersion) { recommendationsRequest = undefined; apiRetryAt = performance.now() + 3000; } }
+      })();
+      recommendationsRequest = request; return request;
+    }
     function node<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', value = '') {
       const el = document.createElement(tag); el.className = className; el.textContent = value; return el;
     }
@@ -132,22 +205,32 @@ export let YTGamepadShortsModule = {
       mediaAncestors = ancestors;
     }
     function releaseMedia() {
+      clearFrameReadiness();
       if (media) media.loop = originalLoop;
       media = null;
       syncMediaSurface();
     }
+    function holdMediaFrame() {
+      if (awaitingMedia) return;
+      clearFrameReadiness();
+      resetPreviewMotion();
+      awaitingMedia = true;
+      heldVideoId = id();
+      frame.hidden = !captureMediaFrame(frame, media);
+    }
     function cancelMoves() {
       lifecycle.clearTimeout(moveTimer); lifecycle.clearTimeout(navigationTimer);
-      moveTimer = navigationTimer = undefined; desiredId = ''; navigatingId = ''; loading = false; nativeSteps = 0; nativeMoving = false;
+      moveTimer = navigationTimer = undefined; desiredId = ''; navigatingId = ''; loading = false; waitingRecommendations = false;
       resumeOnCancel = false;
-      if (preview) preview.hidden = true;
+      if (preview) preview.hidden = !awaitingMedia && !revealing;
     }
     function closePanel(restore = true) { panelDrawer.close(restore); }
     function clearPanel() {
       clearPanelActions();
+      extraActions.clear();
       panelView?.dispose(); panelView = undefined; comments.reset(); playlist.reset();
       drawer?.classList.remove('comments');
-      panel = ''; panelKey = '';
+      panel = ''; panelKey = ''; optionFocus = '';
       host?.removeAttribute('data-panel'); document.documentElement.classList.remove('ytg-shorts-panel-open');
       if (drawer) body.replaceChildren();
       updateHint();
@@ -174,7 +257,7 @@ export let YTGamepadShortsModule = {
     }
     function retryPlayback() {
       cancelMoves(); closePanel(false); playbackFailure = ''; messageUntil = 0; started = performance.now(); retry.hidden = true;
-      if (media && !media.error && media.readyState >= 2) { startPlayback(); update(); }
+      if (!awaitingMedia && media && !media.error && media.readyState >= 2) { startPlayback(); update(); }
       else { loading = true; location.reload(); }
     }
     function mount() {
@@ -186,12 +269,20 @@ export let YTGamepadShortsModule = {
       const css = node('style'); css.textContent = controlsCSS + mediaActionCSS + controllerStyle.css;
       const back = button('Back to feed', () => handle('back'), 'left'); back.className = 'back';
       const stage = node('div', 'stage');
-      preview = node('div', 'preview'); preview.hidden = true; cover = node('img'); cover.alt = ''; preview.append(cover);
+      preview = node('div', 'preview'); preview.hidden = true; cover = node('img'); cover.alt = '';
+      frame = node('canvas'); frame.hidden = true; frame.setAttribute('aria-hidden', 'true'); preview.append(cover, frame);
+      lifecycle.listen(cover, 'load', slidePreview);
       play = button('Play / pause', () => dispatch('playPause'), 'play'); play.className = 'play'; play.dataset.shortsAction = 'playPause';
       play.querySelector('span')!.hidden = true;
-      const metadata = node('div', 'metadata'); author = node('p', 'author'); title = node('h1', 'title', 'Shorts'); metadata.append(author, title);
+      const metadata = node('div', 'metadata'), identity = node('div', 'identity');
+      avatar = node('img', 'avatar'); avatar.alt = ''; avatar.hidden = true;
+      avatarFallback = node('span', 'avatar avatar-fallback', 'Y'); avatarFallback.setAttribute('aria-hidden', 'true');
+      lifecycle.listen(avatar, 'error', () => { avatar.hidden = true; avatarFallback.hidden = false; });
+      author = node('p', 'author'); title = node('h1', 'title', 'Shorts');
+      subscribe = button('Subscribe', () => { void manageSubscription(); }); subscribe.className = 'subscribe'; subscribe.dataset.shortsSubscribe = '';
+      identity.append(avatar, avatarFallback, author, subscribe); metadata.append(identity, title);
       const timeline = node('div', 'timeline'); progress = node('progress'); progress.max = 1; progress.value = 0; progress.setAttribute('aria-label', t('Video progress'));
-      clock = node('span', 'clock'); timeline.append(progress, clock); stage.append(preview, play, metadata, timeline);
+      clock = node('span', 'clock'); timeline.append(progress, clock); stage.append(preview, play, timeline);
       rail = node('nav', 'rail'); rail.setAttribute('aria-label', t('Shorts controls'));
       for (const action of ['like', 'comments', 'save', 'mute'] as const) {
         const slot = node('div'); slot.style.display = 'contents'; actionSlots.set(action, slot); rail.append(slot);
@@ -209,9 +300,9 @@ export let YTGamepadShortsModule = {
       hints.append(hint, controllerStyle.hint(node('p'), 'LB / RB Seek · LT / RT Volume · Start More'));
       drawer = node('aside', 'drawer'); drawer.hidden = true; drawer.setAttribute('role', 'region');
       const header = node('header'); drawerTitle = node('h2'); drawerTitle.id = 'shorts-panel-title'; drawer.setAttribute('aria-labelledby', drawerTitle.id);
-      const close = button('Close', () => panelDrawer.back(), 'close'); close.className = 'close'; close.querySelector('span')!.hidden = true;
+      const close = button('Close', () => { if (!backCommentComposer(body)) panelDrawer.back(); }, 'close'); close.className = 'close'; close.querySelector('span')!.hidden = true;
       body = node('div', 'drawer-body'); header.append(drawerTitle, close); drawer.append(header, body);
-      shadow.append(css, back, stage, rail, navigation, feedback, drawer, hints);
+      shadow.append(css, back, stage, metadata, rail, navigation, feedback, drawer, hints);
       lifecycle.listen(shadow, 'focusin', updateHint); updateHint();
       document.documentElement.append(style, backdrop, host); unregister = controllerStyle.register(shadow);
     }
@@ -228,30 +319,28 @@ export let YTGamepadShortsModule = {
       if (key === panelKey) return; panelKey = key;
       const selected = (shadow.activeElement as HTMLElement | null)?.dataset.focusId, scroll = body.scrollTop;
       panelView ||= mountWatchPanel(body, controllerStyle, {
-        openThread(key) {
-          if (!pageAccess?.readComments?.()?.items.some(item => item.key === key && (item.hasReplies || item.replies.length))) return;
-          panelDrawer.enterDetail(() => {
-            comments.reset(); panelKey = ''; text(drawerTitle, t('Comments')); readComments();
+        ...comments.callbacks({
+          active: () => !lifecycle.destroyed && panel === 'comments',
+          changed() { panelKey = ''; readComments(); },
+          post: async (text, key) => await pageAccess?.commentPost?.(text, key),
+          sort: value => pageAccess?.commentSort?.(value),
+          translate: (key, target) => { pageAccess?.commentTranslate?.(key, target); },
+          load() {
+            const current = pageAccess?.readComments?.();
+            pageAccess?.moreComments?.(!current || !current.items.length);
+          },
+          openThread(key) {
+            panelDrawer.enterDetail(() => {
+              comments.reset(); panelKey = ''; text(drawerTitle, t('Comments')); readComments();
           });
           if (!comments.open(key)) return; panelKey = '';
           text(drawerTitle, t('Replies')); readComments(); body.scrollTop = 0;
         },
-        replies() {
-          if (!comments.more()) return;
-          panelKey = ''; readComments();
-        },
-        load() {
-          const current = pageAccess?.readComments?.();
-          pageAccess?.moreComments?.(!current || !current.items.length); panelKey = ''; readComments();
-        },
-        translate(key) {
-          comments.translate(key, (key, target) => { pageAccess?.commentTranslate?.(key, target); });
-          panelKey = ''; readComments();
-        }
+        })
       });
       panelView.update({ panel: 'comments', text: '', records: current?.items || [], unavailable: !current || current.failed,
         thread: current?.items.find(item => item.key === comments.state.thread), replyLimit: comments.state.limit,
-        commentsStatus: { loading: current?.loading ?? true, failed: current?.failed ?? false, hasMore: current?.hasMore ?? true } });
+        commentsStatus: current || { loading: true, failed: false, hasMore: true }, commentRoute: routeKey() });
       body.scrollTop = scroll;
       if (selected) Array.from(body.querySelectorAll<HTMLElement>('[data-focus-id]')).find(el => el.dataset.focusId === selected)?.focus({ preventScroll: true });
     }
@@ -278,25 +367,110 @@ export let YTGamepadShortsModule = {
       text(drawerTitle, t(value === 'comments' ? 'Comments' : value === 'playlists' ? 'Save to playlist' : 'Shorts controls'));
       if (value === 'comments') { pageAccess?.moreComments?.(true); readComments(); }
       else if (value === 'playlists') { paintPlaylists(); void playlist.load(); }
+      else if (value === 'quality' || value === 'subscription') paintOptions();
       else {
         const slots = (['like', 'comments', 'save', 'mute'] as const).map(action => {
           const slot = node('div'); slot.style.display = 'contents'; panelActionSlots.set(action, slot); return slot;
         });
-        replaceBody([...slots, button('Back to feed', () => { closePanel(false); handle('back'); })]);
+        extraActions.clear();
+        const extras = [
+          ['captions', 'Toggle captions', () => toggleCaptions(), 'captions'],
+          ['quality', 'Quality', () => openOptions('quality'), 'settings'],
+          ['subscribe', 'Subscribe', () => { void manageSubscription(); }, 'bell']
+        ] as const;
+        for (const [key, label, callback, icon] of extras) {
+          const el = button(label, callback, icon); el.dataset.shortsAction = key; el.dataset.focusId = key; extraActions.set(key, el);
+        }
+        replaceBody([...slots, ...extraActions.values(), button('Back to feed', () => { closePanel(false); handle('back'); })]);
         paintActions(!!pageAccess?.readWatchInfo?.()?.liked);
+        paintExtraActions();
       }
       panelDrawer.focus();
     }
-    async function toggleLike() {
-      if (working || switching()) return;
-      const current = route, info = pageAccess?.readWatchInfo?.();
-      if (!info?.canLike) { notify('Sign in to like this video.'); return; }
-      working = true; paintActions(!!info.liked);
-      let ok = false;
-      try { ok = await pageAccess?.watchAction?.('like') === true; } catch { /* Leave state intact. */ }
-      if (lifecycle.destroyed || route !== current) { working = false; return; }
-      working = false;
-      if (!ok) notify('Could not update Like. Try again.'); update();
+    function currentInfo() {
+      const info = pageAccess?.readWatchInfo?.();
+      return info?.route === routeKey() && info.details?.videoId === id() ? info : undefined;
+    }
+    function currentSettings() {
+      const settings = pageAccess?.readShortsSettings?.();
+      return settings?.videoId === id() ? settings : undefined;
+    }
+    function paintExtraActions() {
+      const settings = currentSettings(), info = currentInfo();
+      extraActions.get('captions')?.setAttribute('aria-pressed', String(!!settings?.captionsEnabled));
+      const subscribe = extraActions.get('subscribe');
+      if (subscribe) {
+        const label = t(info?.subscribed ? 'Subscribed, manage subscription' : 'Subscribe');
+        subscribe.setAttribute('aria-label', label); text(subscribe.querySelector('span')!, label); subscribe.disabled = watchActions.state.loading;
+      }
+    }
+    function toggleCaptions() {
+      if (switching()) return;
+      if (!currentSettings()?.captionsAvailable || !pageAccess?.shortsSetting?.(id(), 'captions')) notify('No captions available for this video');
+      paintExtraActions();
+    }
+    function openOptions(value: 'quality' | 'subscription') {
+      if (switching()) return;
+      if (panel !== 'actions') { openPanel('actions'); }
+      panelDrawer.enterDetail(() => { openPanel('actions'); });
+      clearPanelActions(); extraActions.clear(); panel = value; panelKey = ''; optionFocus = '';
+      host!.dataset.panel = value; paintOptions(); panelDrawer.focus();
+    }
+    function paintOptions() {
+      const settings = panel === 'quality' ? currentSettings() : undefined, info = panel === 'subscription' ? currentInfo() : undefined;
+      const key = JSON.stringify([panel, settings, info?.subscribed, info?.notificationPreference, watchActions.state.loading, watchActions.state.failed]);
+      if (key === panelKey) return; panelKey = key;
+      const focused = shadow.activeElement as HTMLElement | null;
+      if (focused) optionFocus = focused.dataset.key || '';
+      text(drawerTitle, t(panel === 'quality' ? 'Quality' : 'Notifications'));
+      const items: HTMLElement[] = [];
+      if (panel === 'quality') {
+        const labels: Record<string, string> = { auto: t('Auto'), highres: t('High resolution'), hd2880: '2880p', hd2160: '2160p', hd1440: '1440p', hd1080: '1080p', hd720: '720p', large: '480p', medium: '360p', small: '240p', tiny: '144p' };
+        for (const quality of settings?.qualities || []) {
+          const el = button(labels[quality] || quality, () => {
+            if (!pageAccess?.shortsSetting?.(settings!.videoId, 'quality', quality)) notify('Player settings are currently unavailable');
+            panelKey = ''; paintOptions();
+          });
+          el.dataset.key = quality; el.dataset.focusId = quality; el.setAttribute('aria-pressed', String(settings?.quality === quality)); items.push(el);
+        }
+        if (!items.length) items.push(node('p', 'drawer-message', t('Player settings are currently unavailable')));
+      } else if (info?.subscribed) {
+        panelView ||= mountWatchPanel(body, controllerStyle, {
+          openThread() {}, replies() {}, load() {},
+          subscriptionAction: action => { if (action !== 'save' && action !== 'dislike') void performWatchAction(action); }
+        });
+        panelView.update({ panel: 'subscription', text: '', records: [], unavailable: false,
+          notificationPreference: info.notificationPreference, subscriptionLoading: watchActions.state.loading,
+          subscriptionFailed: watchActions.state.failed });
+        if (!watchActions.state.loading && optionFocus)
+          Array.from(body.querySelectorAll<HTMLButtonElement>('[data-key]')).find(item => item.dataset.key === optionFocus)?.focus({ preventScroll: true });
+        return;
+      } else {
+        panelView?.dispose(); panelView = undefined;
+        items.push(node('p', 'drawer-message', t('Sign in to subscribe to this channel.')));
+      }
+      replaceBody(items);
+      if (!watchActions.state.loading && optionFocus) items.find(item => item.dataset.key === optionFocus)?.focus({ preventScroll: true });
+    }
+    async function manageSubscription() {
+      if (switching() || watchActions.state.loading) return;
+      const info = currentInfo();
+      if (info?.subscribed) { openOptions('subscription'); return; }
+      if (!info?.canSubscribe) { notify('Sign in to subscribe to this channel.'); return; }
+      await performWatchAction('subscribe');
+    }
+    async function performWatchAction(action: Exclude<WatchAction, 'save' | 'dislike'>) {
+      if (switching() || watchActions.state.loading) return;
+      const info = currentInfo(), liking = action === 'like';
+      if (liking ? !info?.canLike : !info?.canSubscribe) {
+        if (liking) notify('Sign in to like this video.');
+        return;
+      }
+      const ok = await watchActions.run(action);
+      if (ok === undefined) return;
+      if (!ok) notify(liking ? 'Could not update Like. Try again.' : 'Could not update subscription. Try again.');
+      if (ok && action === 'unsubscribe' && panel === 'subscription') panelDrawer.back();
+      update();
     }
     function currentReel() {
       const onScreen = (r: DOMRect) => r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
@@ -310,12 +484,17 @@ export let YTGamepadShortsModule = {
     }
     function paintTarget() {
       const queue = sourceQueue(), position = queue?.ids.indexOf(desiredId || id()) ?? -1;
-      text(count, queue && position >= 0 ? `${position + 1} / ${queue.ids.length}` : 'Shorts');
-      previous.disabled = !!queue && position <= 0; next.disabled = !!queue && position >= queue.ids.length - 1;
-      preview.hidden = !desiredId;
+      text(count, queue && position >= 0 ? `${position + 1} / ${apiExhausted ? queue.ids.length : '…'}` : 'Shorts');
+      previous.disabled = position <= 0;
+      next.disabled = apiExhausted && !!queue && position >= queue.ids.length - 1;
+      preview.hidden = !desiredId && !awaitingMedia && !revealing;
+      cover.hidden = false;
       if (!preview.hidden) {
-        const url = `https://i.ytimg.com/vi/${encodeURIComponent(desiredId)}/hqdefault.jpg`;
-        if (cover.src !== url) cover.src = url; text(status, t('Loading video…'));
+        const url = `https://i.ytimg.com/vi/${encodeURIComponent(desiredId || id())}/hqdefault.jpg`;
+        if (cover.src !== url) {
+          resetPreviewMotion(); cover.dataset.videoId = desiredId || id(); cover.src = url;
+        }
+        slidePreview(); text(status, t('Loading video…'));
       }
     }
     function update() {
@@ -323,18 +502,40 @@ export let YTGamepadShortsModule = {
       paintTarget(); if (switching()) return;
       const reel = currentReel();
       const video = reel?.querySelector<HTMLVideoElement>('video') || document.querySelector<HTMLVideoElement>('ytd-shorts video');
-      if (video !== media) { releaseMedia(); media = video; if (media) originalLoop = media.loop; playbackFailure = ''; }
+      // Adopt a ready reel directly; never tear down the old surface between
+      // route completion and the replacement video's first available frame.
+      const waiting = awaitingMedia && !hasPresentedFrame(video);
+      if (!waiting && video !== media) {
+        if (media) media.loop = originalLoop;
+        media = video; if (media) originalLoop = media.loop; playbackFailure = '';
+      }
       syncMediaSurface();
+      if (!waiting && media?.videoWidth && media.videoHeight) {
+        const ratio = String(media.videoWidth / media.videoHeight), rootStyle = document.documentElement.style;
+        if (rootStyle.getPropertyValue('--ytg-shorts-ratio') !== ratio) rootStyle.setProperty('--ytg-shorts-ratio', ratio);
+      }
+      if (awaitingMedia && !waiting) { revealMedia(); paintTarget(); }
       const advertising = !!mediaPlayer?.classList.contains('ad-showing');
       host.toggleAttribute('data-ad', advertising);
       if (media) media.loop = advertising ? originalLoop : true;
       const info = pageAccess?.readWatchInfo?.(), currentInfo = info?.route === routeKey() ? info : undefined;
       text(title, currentInfo?.details?.title?.slice(0, 240) || 'Shorts');
       text(author, currentInfo?.details?.author?.slice(0, 120) || 'YouTube');
+      text(avatarFallback, (currentInfo?.details?.author || 'Y').slice(0, 1).toUpperCase());
+      const avatarSource = currentInfo?.avatar || '';
+      if (avatar.getAttribute('src') !== avatarSource) {
+        if (avatarSource) avatar.src = avatarSource; else avatar.removeAttribute('src');
+        avatar.hidden = !avatarSource; avatarFallback.hidden = !!avatarSource;
+      }
+      const subscriptionLabel = t(currentInfo?.subscribed ? 'Subscribed, manage subscription' : 'Subscribe');
+      text(subscribe.querySelector('span')!, subscriptionLabel); subscribe.setAttribute('aria-label', subscriptionLabel);
+      subscribe.disabled = watchActions.state.loading; subscribe.setAttribute('aria-pressed', String(!!currentInfo?.subscribed));
       paintActions(!!currentInfo?.liked);
+      if (extraActions.size) paintExtraActions();
+      if (panel === 'quality' || panel === 'subscription') paintOptions();
       if (panel === 'comments') readComments();
       if (media?.error) { text(status, t('Video could not play. Retry playback.')); retry.hidden = false; updateHint(); return; }
-      if (!media || !media.readyState && !playbackFailure) {
+      if (waiting || !media || !media.readyState && !playbackFailure) {
         const timedOut = performance.now() - started > (media ? 15000 : 10000);
         text(status, t(timedOut ? 'Shorts could not load. Retry playback.' : 'Loading video…')); retry.hidden = !timedOut; updateHint(); return;
       }
@@ -349,80 +550,84 @@ export let YTGamepadShortsModule = {
       if (!active()) {
         polling?.destroy(); polling = undefined;
         if (!inShorts && !host) return;
-        cancelMoves(); closePanel(false); releaseMedia(); document.documentElement.classList.remove('ytg-shorts-player');
+        ++apiVersion; apiIds = []; recommendationsRequest = undefined;
+        awaitingMedia = false; resetPreviewMotion(); cancelMoves(); closePanel(false); releaseMedia(); document.documentElement.classList.remove('ytg-shorts-player');
+        document.documentElement.style.removeProperty('--ytg-shorts-ratio');
         inShorts = false; entryIndex = undefined; returning = false; route = ''; wheelHeld = false; lifecycle.clearTimeout(wheelTimer);
         if (host) host.hidden = true; if (backdrop) backdrop.hidden = true; return;
       }
       if (!inShorts) { inShorts = true; entryIndex = historyIndex(); }
       if (!polling) { polling = runtime.scope('shorts-poll'); polling.interval(() => { if (!document.hidden) sync(); }, 250); }
       const playbackRoute = location.pathname;
-      if (route !== playbackRoute) { route = playbackRoute; started = performance.now(); messageUntil = 0; closePanel(false); releaseMedia(); }
+      if (route !== playbackRoute) {
+        if (route) holdMediaFrame();
+        route = playbackRoute; watchActions.reset(); started = performance.now(); messageUntil = 0; closePanel(false);
+      }
+      if (!apiIds.includes(id())) { ++apiVersion; apiIds = [id()]; apiExhausted = false; apiRetryAt = 0; apiNeedsReset = true; recommendationsRequest = undefined; }
       mount(); host!.hidden = false;
       document.documentElement.classList.add('ytg-shorts-player');
       backdrop!.hidden = false; update();
+      if (!apiExhausted && apiIds.length - apiIds.indexOf(id()) < 4 && performance.now() >= apiRetryAt) void loadRecommendations();
     }
     function scheduleMove() { lifecycle.clearTimeout(moveTimer); moveTimer = lifecycle.timeout(commitMove, 100); }
     function commitMove() {
       if (!enabled() || returning || lifecycle.destroyed) { cancelMoves(); return; }
-      if (loading || nativeMoving) return;
+      if (loading) return;
       if (desiredId) {
         if (desiredId === id()) {
           const resume = resumeOnCancel; cancelMoves();
           if (resume && media?.paused) startPlayback();
           update(); return;
         }
-        loading = true; media?.pause();
-        const target = desiredId, queue = sourceQueue();
+        holdMediaFrame(); loading = true; media?.pause();
+        const target = desiredId;
         navigatingId = target;
-        if (queue) {
-          try { sessionStorage.setItem(shortsQueueKey, JSON.stringify({ ...queue, currentId: target })); } catch { /* Native playback remains available without the queue. */ }
-        }
-        // Keep the stage mounted while YouTube starts the next native reel.
-        navigationTimer = lifecycle.timeout(() => {
-          if (queue) {
-            try { sessionStorage.setItem(shortsQueueKey, JSON.stringify({ ...queue, currentId: id() })); } catch { /* Keep native playback available. */ }
-          }
-          cancelMoves(); sync(); notify('No next video is available yet. Try again.');
-        }, 8000);
-        if (!pageAccess?.openWatchVideo?.(`/shorts/${encodeURIComponent(target)}`)) {
-          lifecycle.clearTimeout(navigationTimer);
-          location.replace(`/shorts/${encodeURIComponent(target)}`);
-        }
-      } else {
-        if (!nativeSteps) { cancelMoves(); return; }
-        const direction = nativeSteps > 0 ? 'down' : 'up'; nativeSteps += direction === 'down' ? -1 : 1;
-        const control = document.querySelector<HTMLElement>(`ytd-shorts #navigation-button-${direction} button,ytd-shorts button#navigation-button-${direction},ytd-shorts #navigation-button-${direction}[role="button"]`);
-        if (control && !control.hasAttribute('disabled') && control.getAttribute('aria-disabled') !== 'true') {
-          nativeMoving = true;
-          navigationTimer = lifecycle.timeout(() => { cancelMoves(); notify('No next video is available yet. Try again.'); }, 8000); control.click();
-        } else {
-          const reels = Array.from(document.querySelectorAll<HTMLElement>('ytd-reel-video-renderer')), current = currentReel();
-          const target = reels[reels.indexOf(current!) + (direction === 'down' ? 1 : -1)];
-          if (target) target.scrollIntoView({ block: 'start', behavior: 'instant' });
-          else notify('No next video is available yet. Try again.');
-          cancelMoves(); update();
-        }
+        const failed = () => {
+          const resume = resumeOnCancel;
+          awaitingMedia = false; clearFrameReadiness(); resetPreviewMotion(); cancelMoves();
+          if (resume && media?.paused) startPlayback();
+          sync(); notify('No next video is available yet. Try again.');
+        };
+        // Reuse the current player through its API; the native reel never scrolls.
+        navigationTimer = lifecycle.timeout(failed, 8000);
+        if (!pageAccess?.playShorts?.(target)) failed();
+        else finished();
       }
     }
     function finished() {
       if (loading && navigatingId !== id()) return;
       loading = false;
       navigatingId = '';
-      nativeMoving = false; lifecycle.clearTimeout(navigationTimer); sync();
-      if (desiredId && desiredId !== id() || nativeSteps) scheduleMove();
+      lifecycle.clearTimeout(navigationTimer); sync();
+      if (desiredId && desiredId !== id()) scheduleMove();
       else { cancelMoves(); update(); }
     }
     function move(direction: 'up' | 'down') {
       closePanel(false);
       if (inRail()) play.focus({ preventScroll: true });
+      if (direction === 'up') waitingRecommendations = false;
       const queue = sourceQueue();
       if (queue) {
         const position = queue.ids.indexOf(desiredId || id());
         const target = queue.ids[position + (direction === 'down' ? 1 : -1)];
-        if (position < 0 || !target) { notify('No more Shorts in this list. Press B to return.'); return; }
+        if (position < 0 || !target) {
+          if (direction === 'down' && !apiExhausted && !waitingRecommendations) {
+            const version = apiVersion, current = route;
+            waitingRecommendations = true; notify('Loading video…');
+            void loadRecommendations().then(ok => {
+              if (version !== apiVersion || route !== current || !waitingRecommendations || lifecycle.destroyed) return;
+              waitingRecommendations = false;
+              if (ok && apiIds[position + 1]) move('down');
+              else notify('No next video is available yet. Try again.');
+            });
+          } else notify('No more Shorts in this list. Press B to return.');
+          return;
+        }
         if (!desiredId && !loading) resumeOnCancel = !!media && !media.paused;
+        previewDirection = direction === 'down' ? 1 : -1;
+        holdMediaFrame();
         desiredId = target; media?.pause(); paintTarget(); scheduleMove();
-      } else { nativeSteps += direction === 'down' ? 1 : -1; commitMove(); }
+      }
     }
     function backToFeed() {
       returning = true; cancelMoves(); closePanel(false); media?.pause(); const index = historyIndex();
@@ -433,8 +638,13 @@ export let YTGamepadShortsModule = {
     function handle(action: Action) {
       if (!active() && !loading) return false;
       if (!loading) sync(); if (returning) return true;
+      if (action === 'captions') {
+        if (switching()) return true;
+        toggleCaptions();
+        return true;
+      }
       if (panel) {
-        if (action === 'back' || action === 'help') { panelDrawer.back(); return true; }
+        if (action === 'back' || action === 'help') { if (!backCommentComposer(body)) panelDrawer.back(); return true; }
         if (['up', 'down', 'left', 'right'].includes(action)) {
           const buttons = panelDrawer.items(), current = buttons.indexOf(shadow.activeElement as HTMLButtonElement);
           panelDrawer.focus(current + (action === 'up' || action === 'left' ? -1 : 1));
@@ -461,8 +671,8 @@ export let YTGamepadShortsModule = {
       if (action === 'confirm' || action === 'playPause') {
         if (media.paused) startPlayback(); else media.pause();
       } else if (action === 'pause') media.pause(); else if (action === 'mute') media.muted = !media.muted;
-      else if (action === 'volumeDown' || action === 'volumeUp') { media.volume = Math.max(0, Math.min(1, media.volume + (action === 'volumeDown' ? -.05 : .05))); if (action === 'volumeUp') media.muted = false; }
-      else if (Number.isFinite(media.duration)) media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + (action === 'seekBack' ? -5 : 5)));
+      else if (action === 'volumeDown' || action === 'volumeUp') { const step = (playbackSettings?.() || playbackParameterDefaults).volumeStep / 100; media.volume = Math.max(0, Math.min(1, media.volume + (action === 'volumeDown' ? -step : step))); if (action === 'volumeUp') media.muted = false; }
+      else if (Number.isFinite(media.duration)) { const step = (playbackSettings?.() || playbackParameterDefaults).shortsSeekStep; media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + (action === 'seekBack' ? -step : step))); }
       update(); return true;
     }
     // Retain pending Shorts directions while the core guards route navigation.
@@ -482,11 +692,13 @@ export let YTGamepadShortsModule = {
     }, { capture: true, passive: false });
     lifecycle.listen(document, 'yt-navigate-finish', finished);
     lifecycle.listen(document, 'yt-page-data-updated', sync);
+    lifecycle.listen(document, 'loadeddata', update, true);
+    lifecycle.listen(document, 'playing', update, true);
     lifecycle.listen(document, PAGE_COMMENTS, readComments);
     lifecycle.listen(document, PAGE_WATCH_INFO, update);
     lifecycle.listen(window, 'popstate', () => { cancelMoves(); sync(); });
     lifecycle.listen(document, 'ytg-language-changed', () => { if (host) { closePanel(false); clearActions(); unregister?.(); unregister = undefined; host.remove(); host = undefined; style?.remove(); backdrop?.remove(); } sync(); });
-    lifecycle.cleanup(() => { cancelMoves(); closePanel(false); clearActions(); polling?.destroy(); unregister?.(); releaseMedia(); document.documentElement.classList.remove('ytg-shorts-player'); host?.remove(); backdrop?.remove(); style?.remove(); });
+    lifecycle.cleanup(() => { resetPreviewMotion(); cancelMoves(); closePanel(false); clearActions(); polling?.destroy(); unregister?.(); releaseMedia(); document.documentElement.classList.remove('ytg-shorts-player'); document.documentElement.style.removeProperty('--ytg-shorts-ratio'); host?.remove(); backdrop?.remove(); style?.remove(); });
     return { sync, handle };
   }
 };

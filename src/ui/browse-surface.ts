@@ -1,3 +1,5 @@
+import { homeFilterDefaults, normalizeHomeFilter, homeFilterActive } from '../shared/home-filter';
+import { createPageClient } from '../bridge/page-client';
 import { createApp, nextTick, reactive, watch } from 'vue';
 import { ui } from './ui-api';
 import type { Pinia } from 'pinia';
@@ -29,9 +31,22 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
   const browseMode = mountBrowseMode(runtime, core);
   lifecycle.cleanup(browseMode.destroy);
   const gridSettings = reactive({ ...videoGridDefaults });
+  let filters = { ...homeFilterDefaults }, subscriptions = new Set<string>(), subscriptionVersion = 0;
+  const pageAccess = createPageClient(); lifecycle.cleanup(() => pageAccess.destroy?.());
+  async function readSubscriptions() {
+    const version = ++subscriptionVersion;
+    if (!filters.homeExemptSubscribed || !homeFilterActive(filters)) return;
+    const guide = await pageAccess.readSidebar?.();
+    if (lifecycle.destroyed || version !== subscriptionVersion) return;
+    const next = new Set(guide?.subscribedChannelIds || []);
+    if (next.size !== subscriptions.size || [...next].some(id => !subscriptions.has(id))) { subscriptions = next; feedController.refilter(); }
+  }
   function receive(data: import("../../types/ports").ApplicationMessage) {
-    if (data?.source === 'yt-gamepad-settings' && data.values && typeof data.values === 'object')
+    if (data?.source === 'yt-gamepad-settings' && data.values && typeof data.values === 'object') {
       Object.assign(gridSettings, normalizeVideoGrid({ ...data.values }));
+      const next = normalizeHomeFilter(data.values);
+      if (JSON.stringify(next) !== JSON.stringify(filters)) { filters = next; feedController.refilter(); void readSubscriptions(); }
+    }
   }
   if (channel) lifecycle.cleanup(channel.subscribe(receive));
   else lifecycle.listen(window, 'message', e => { if (e.source === window && e.origin === location.origin) receive(e.data); });
@@ -39,16 +54,18 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
   const store = useBrowseStore(pinia);
   const feed = createFeedClient();
   lifecycle.cleanup(feed.destroy);
+  let freshHomeNavigation = false;
   let returnView: ReturnType<typeof readBrowseReturn>;
   const returnViews = new Map<string, NonNullable<typeof returnView>>();
   const feedController = createBrowseFeedController({
-    store, feed,
+    store, feed, getFilters: () => filters, getSubscriptions: () => subscriptions,
     unavailable: () => browseMode.unavailable(),
     getRoute: () => location.pathname + location.search,
     isVisible: () => !lifecycle.destroyed && document.documentElement.classList.contains('ytg-browse'),
     isRestoring: () => core.restoring,
     restoreState: () => {
       const route = location.pathname + location.search;
+      if (freshHomeNavigation && location.pathname === '/') { freshHomeNavigation = false; returnView = undefined; return; }
       returnView = readBrowseReturn(history, route) || returnViews.get(route);
       return returnView;
     },
@@ -89,8 +106,8 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
   const headerHasFocus = () => Boolean(pageActiveElement()?.closest('#ytg-browse-top') || core.current?.closest('#ytg-browse-top'));
   const ownsFocus = () => !sidebarHasFocus() && !categoryHasFocus() && !headerHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring &&
     (host.contains(pageActiveElement()) || focusWanted);
-  const more = () => {
-    if (feedController.active) { void feedController.changeCategory(store.category, true); return; }
+  const more = (manual = false) => {
+    if (feedController.active) { void feedController.changeCategory(store.category, true, manual); return; }
   };
   const openSettings = () => {
     if (ui.openPanel('settings')) return;
@@ -106,7 +123,17 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
       core.refresh(); core.focus(target); return pageActiveElement() === target;
     }));
   }
-  const app = createApp(BrowsePage, { browseMode, gridSettings, ownsFocus, more, openSettings, focusAccount: (node: HTMLElement) => core.focus(node), refreshNavigation: () => core.refresh(), changeCategory: (id: string) => { if (!pendingRoute) void feedController.changeCategory(id); }, open: (id: string) => {
+  const refreshHome = () => {
+    if (pendingRoute) return;
+    freshHomeNavigation = location.pathname !== '/';
+    for (const route of returnViews.keys()) if (/^\/(?:\?|$)/.test(route)) returnViews.delete(route);
+    if (location.pathname === '/') {
+      const grid = host.querySelector('[data-ytg-browse-grid]');
+      if (grid) grid.scrollTop = 0;
+    }
+    void feedController.refreshHome();
+  };
+  const app = createApp(BrowsePage, { refreshHome, browseMode, gridSettings, ownsFocus, more, openSettings, focusAccount: (node: HTMLElement) => core.focus(node), refreshNavigation: () => core.refresh(), changeCategory: (id: string) => { if (!pendingRoute) void feedController.changeCategory(id); }, open: (id: string) => {
     if (!pendingRoute && !isMenuOpen() && !core.hasTemporaryLayer) {
       if (feedController.active) {
         const item = store.snapshot.items.find(item => item.id === id);
@@ -234,6 +261,7 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
   }
   async function restorePresentation(currentRevision: number) {
     if (lifecycle.destroyed || !document.documentElement.classList.contains('ytg-browse') || currentRevision !== revision) return;
+    const preferredId = store.activeItemId, wantedFocus = ownsFocus();
     core.refresh();
     if (returnView) {
       const saved = returnView; returnView = undefined;
@@ -246,16 +274,17 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
       if (lifecycle.destroyed || currentRevision !== revision) return;
       if (!sidebarHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring) {
         const node = Array.from(host.querySelectorAll<HTMLAnchorElement>('[data-browse-id]'))
-          .find(item => item.dataset.browseId === saved.activeItemId);
+          .find(item => item.dataset.browseId === (store.snapshot.items.some(video => video.id === saved.activeItemId) ? saved.activeItemId : preferredId));
         if (node) core.focus(node);
       }
       focusWanted = false;
       return;
     }
-    if (ownsFocus()) {
+    if (wantedFocus && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring) {
       const node = Array.from(host.querySelectorAll<HTMLAnchorElement>('[data-browse-id]'))
-        .find(item => item.dataset.browseId === store.activeItemId);
+        .find(item => item.dataset.browseId === preferredId);
       if (node) core.focus(node);
+      else { const fallback = host.querySelector<HTMLElement>('[data-browse-more],#ytg-browse-categories button'); if (fallback) core.focus(fallback); }
     }
     focusWanted = false;
   }
@@ -280,7 +309,8 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
     if (pendingRoute || (feedController.snapshot && feedController.snapshot.route !== location.pathname + location.search)) resetFeed();
     pendingRoute = false; syncVisibility(); initializeFeed(); publishFeed(); scheduleLayout();
   };
-  lifecycle.listen(document, 'yt-navigate-finish', finishNavigation);
+  lifecycle.listen(document, 'yt-navigate-finish', () => { finishNavigation(); void readSubscriptions(); });
+  lifecycle.listen(document, 'yt-page-data-updated', () => { void readSubscriptions(); });
   lifecycle.listen(document, 'yt-navigate-cancel', finishNavigation);
   lifecycle.listen(document, 'yt-navigate-error', finishNavigation);
   lifecycle.listen(window, 'resize', scheduleLayout);

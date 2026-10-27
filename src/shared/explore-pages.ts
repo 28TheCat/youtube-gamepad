@@ -51,7 +51,7 @@ export function sidebarBrowseEndpoint(href: unknown) {
   const routes: Record<string, string> = { '/': 'FEwhat_to_watch', '/feed/subscriptions': 'FEsubscriptions',
     '/feed/history': 'FEhistory', '/feed/playlists': 'FEplaylist_aggregation' };
   const playlist = url.pathname === '/playlist' && /^\?list=[\w-]+$/.test(url.search) ? url.searchParams.get('list') : undefined;
-  const channel = !url.search ? url.pathname.match(/^\/channel\/(UC[\w-]+)$/)?.[1] : undefined;
+  const channel = !url.search ? url.pathname.match(/^\/channel\/(UC[\w-]+)(?:\/videos)?$/)?.[1] : undefined;
   const browseId = routes[href] || channel || (playlist ? `VL${playlist}` : !url.search ? resolveExplorePage(href)?.browseId : undefined);
   if (browseId) return { commandMetadata: { webCommandMetadata: { url: href, webPageType: 'WEB_PAGE_TYPE_BROWSE' } },
     browseEndpoint: { browseId } };

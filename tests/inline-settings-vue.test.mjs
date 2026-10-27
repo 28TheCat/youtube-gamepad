@@ -45,6 +45,22 @@ async function setup(t, trustedTypes = false) {
 
 const focused = page => page.evaluate(() => document.querySelector('#yt-gamepad-menu').shadowRoot.activeElement?.dataset.setting);
 
+test('inline playback parameters save with gamepad focus and synchronize with full settings', { timeout: 45000 }, async t => {
+  const { page, menu, options, worker, press } = await setup(t);
+  await worker.evaluate(() => chrome.storage.local.set({ repeatDelay: 1000 }));
+  await menu.locator('[data-setting=general]').click();
+  const increase = menu.locator('[data-setting="volumeStep-+"]');
+  await increase.focus(); await press(0);
+  await options.waitForFunction(() => document.querySelector('#volumeStep').value === '6');
+  assert.equal(await focused(page), 'volumeStep-+');
+  await options.locator('#seekStep').fill('20'); await options.locator('#seekStep').press('Tab');
+  await menu.locator('.inline-adjustment').filter({ hasText: 'Video seek step · 20 s' }).waitFor();
+  await page.bringToFront();
+  await menu.locator('[data-setting=resetPlaybackParameters]').click();
+  await options.waitForFunction(() => document.querySelector('#seekStep').value === '10' && document.querySelector('#volumeStep').value === '5');
+  assert.deepEqual(await worker.evaluate(() => chrome.storage.local.get(['seekStep', 'shortsSeekStep', 'volumeStep'])), { seekStep: 10, shortsSeekStep: 5, volumeStep: 5 });
+});
+
 test('sidebar settings opens plugin preferences and restores keyboard focus on close', { timeout: 60000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, theater: true, autoFullscreen: false, uiLanguage: 'zh-CN' }));
@@ -138,6 +154,7 @@ test('side settings work without a gamepad, persist edits and fit both screen si
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await menu.locator('section').evaluate(node => node.scrollWidth <= node.clientWidth), true);
   await page.screenshot({ path: 'output/playwright/side-settings-mobile.png' });
+  assert.equal(await menu.locator('.settings-close svg').getAttribute('data-icon'), 'material:close-line');
   await menu.getByRole('button', { name: 'Close settings', exact: true }).click();
   await menu.waitFor({ state: 'hidden' });
   await page.setViewportSize({ width: 1280, height: 900 });

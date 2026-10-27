@@ -1,52 +1,52 @@
-// Compatibility dependencies for legacy VM/DOM fixtures only. Production
-// dependencies are declared by source imports and resolved by Vite.
-// Site and view instances are connected by coordinator; they do not import each other.
-export const dependencies = {
-  'src/shared/playback-layout.ts': [],
-  'src/ui/ui-api.ts': [],
-  'src/shared/watch-link.ts': [],
-  'src/bridge/page-protocol.ts': ['src/shared/watch-link.ts', 'src/shared/comment-language.ts'],
-  'src/shared/page-dom.ts': [],
-  'src/shared/actions.ts': [],
-  'src/playback/seek.ts': [],
-  'src/playback/shorts.ts': ['src/shared/shorts-route.ts', 'src/ui/drawer.ts', 'src/ui/comment-operations.ts', 'src/ui/playlist-operations.ts', 'src/ui/icon-shapes.ts'],
-  'src/input/bindings.ts': ['src/shared/actions.ts'],
-  'src/shared/runtime.ts': [],
-  'src/diagnostics/diagnostics.ts': ['src/shared/runtime.ts'],
-  'src/diagnostics/diagnostics-store.ts': [],
-  'src/app/route-state.ts': [],
-  'src/app/state-machine.ts': ['src/app/route-state.ts'],
-  'src/app/route-controller.ts': ['src/shared/runtime.ts', 'src/app/state-machine.ts'],
-  'src/input/controller-style.ts': ['src/shared/runtime.ts', 'src/ui/styles.ts', 'src/input/bindings.ts'],
-  'src/input/gamepad.ts': ['src/shared/runtime.ts', 'src/input/controller-style.ts'],
-  'src/navigation/navigation.ts': [],
-  'src/navigation/focus.ts': [],
-  'src/navigation/stick-scroll.ts': [],
-  'src/navigation/core.ts': ['src/shared/page-dom.ts', 'src/navigation/stick-scroll.ts', 'src/shared/runtime.ts', 'src/input/controller-style.ts', 'src/app/state-machine.ts', 'src/navigation/navigation.ts', 'src/navigation/focus.ts'],
-  'src/search/keyboard.ts': [],
-  'src/search/pinyin-data.ts': [],
-  'src/search/pinyin.ts': ['src/search/pinyin-data.ts'],
-  'src/ui/styles.ts': [],
-  'src/search/search-text.ts': [],
-  'src/search/search-model.ts': ['src/search/search-text.ts'],
-  'src/search/mount-search.ts': [],
-  'src/search/search.ts': ['src/input/controller-style.ts', 'src/search/keyboard.ts', 'src/search/pinyin.ts', 'src/app/state-machine.ts', 'src/search/search-model.ts', 'src/search/mount-search.ts'],
-  'src/ui/menu.ts': ['src/ui/ui-api.ts', 'src/navigation/stick-scroll.ts', 'src/shared/runtime.ts', 'src/ui/styles.ts', 'src/search/search.ts', 'src/navigation/focus.ts', 'src/app/state-machine.ts', 'src/input/controller-style.ts'],
-  'src/ui/watch-view.ts': ['src/input/controller-style.ts', 'src/ui/styles.ts'],
-  'src/ui/mount-watch-panel.ts': [],
-  'src/ui/icon-shapes.ts': ['src/ui/mingcute-icons.ts'],
-  'src/ui/watch-panels.ts': ['src/input/controller-style.ts', 'src/ui/mount-watch-panel.ts', 'src/ui/drawer.ts', 'src/ui/comment-operations.ts', 'src/ui/playlist-operations.ts'],
-  'src/ui/playback-presentation.ts': [],
-  'src/ui/watch-surface.ts': ['src/ui/ui-api.ts', 'src/navigation/stick-scroll.ts', 'src/ui/playback-presentation.ts'],
-  'src/playback/watch.ts': ['src/shared/runtime.ts', 'src/app/state-machine.ts', 'src/ui/watch-view.ts', 'src/ui/watch-panels.ts', 'src/navigation/focus.ts', 'src/ui/watch-surface.ts'],
-  'src/app/browse.ts': ['src/shared/runtime.ts'],
-  'src/sites/youtube.ts': ['src/shared/explore-pages.ts', 'src/shared/page-dom.ts', 'src/bridge/page-protocol.ts', 'src/shared/actions.ts', 'src/playback/seek.ts', 'src/shared/runtime.ts', 'src/navigation/focus.ts'],
-  'src/app/coordinator.ts': ['src/shared/playback-layout.ts', 'src/playback/shorts.ts', 'src/input/bindings.ts', 'src/diagnostics/diagnostics.ts', 'src/shared/runtime.ts', 'src/app/route-controller.ts', 'src/navigation/core.ts', 'src/sites/youtube.ts'],
-  'src/app/content.ts': ['src/shared/playback-layout.ts', 'src/ui/ui-api.ts', 'src/input/bindings.ts'],
-  'src/settings/inline-settings.ts': ['src/input/bindings.ts', 'src/diagnostics/diagnostics-store.ts'],
-  'src/background/background.ts': ['src/diagnostics/diagnostics-store.ts']
-};
-// Full extension assembly requires these definitions; small VM policy tests can
-// provide module doubles instead of rendering every feature.
-export const compositionModules = ['src/navigation/focus.ts', 'src/input/controller-style.ts', 'src/input/gamepad.ts',
-  'src/ui/menu.ts', 'src/playback/watch.ts', 'src/app/browse.ts', 'src/ui/styles.ts', 'src/search/keyboard.ts', 'src/search/pinyin.ts'];
+import { existsSync, readFileSync } from 'node:fs';
+import { posix } from 'node:path';
+import ts from 'typescript-vue';
+
+const root = new URL('../', import.meta.url);
+const cache = new Map();
+
+// Read emitted JavaScript so type-only imports never become runtime edges.
+export function runtimeImports(file) {
+  if (cache.has(file)) return cache.get(file);
+  const source = readFileSync(new URL(file, root), 'utf8');
+  const output = ts.transpileModule(source, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext }
+  }).outputText;
+  const ast = ts.createSourceFile(file, output, ts.ScriptTarget.ES2022, true);
+  const imports = [];
+  function visit(node) {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier))
+      imports.push(node.moduleSpecifier.text);
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && ts.isStringLiteral(node.arguments[0]))
+      imports.push(node.arguments[0].text);
+    ts.forEachChild(node, visit);
+  }
+  visit(ast);
+  cache.set(file, [...new Set(imports)]);
+  return cache.get(file);
+}
+
+export function resolveModule(file, specifier) {
+  if (!specifier.startsWith('.')) return undefined;
+  const path = posix.normalize(posix.join(posix.dirname(file), specifier.split(/[?#]/, 1)[0]));
+  const resolved = [path, path + '.ts', path + '.vue', path + '/index.ts']
+    .find(candidate => existsSync(new URL(candidate, root)));
+  if (!resolved) throw new Error(`Missing module ${specifier} in ${file}`);
+  return resolved;
+}
+
+// Traverse reachable runtime modules; callers choose explicit fixture substitutions.
+export function moduleGraph(entries, imports = runtimeImports) {
+  const graph = new Map();
+  function visit(file) {
+    if (graph.has(file)) return;
+    const edges = imports(file);
+    graph.set(file, edges);
+    for (const edge of edges) {
+      const target = resolveModule(file, edge);
+      if (target?.endsWith('.ts')) visit(target);
+    }
+  }
+  for (const entry of entries) visit(entry);
+  return graph;
+}

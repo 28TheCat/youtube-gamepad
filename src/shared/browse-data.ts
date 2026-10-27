@@ -1,5 +1,6 @@
 /** Serializable list data shared by InnerTube, the bridge and the browse UI. */
 export interface BrowseItem {
+  readonly filterData?: import('./home-filter').HomeFilterData;
   readonly id: string;
   readonly title: string;
   readonly channel: string;
@@ -21,4 +22,6 @@ export interface BrowseSnapshot {
   readonly route: string;
   readonly items: readonly BrowseItem[];
   readonly canLoadMore: boolean;
+  readonly autoLoadBlocked?: boolean;
+  readonly filteredCount?: number;
 }

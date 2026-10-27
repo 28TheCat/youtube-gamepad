@@ -1,5 +1,6 @@
-import { Helpers, Session, YT, YTNodes } from 'youtubei.js/web';
+import { Helpers, YT, YTNodes } from 'youtubei.js/web';
 import type { Context } from 'youtubei.js/web';
+import { createYouTubeSession } from './youtube-session';
 import type { FeedCategory } from './youtube-feed';
 import { browsePage } from './youtube-search';
 import { listEndpoint, parseYouTubePage } from './youtube-parser';
@@ -51,7 +52,7 @@ export function parseChannelPage(raw: Node, context: Context) {
     for (const item of page.contents_memo?.getType(YTNodes.SortFilterSubMenu)[0]?.sub_menu_items || [])
       add('sort', item.title, item.endpoint);
     try {
-      const session = new Session(structuredClone({ ...context, user: context.user || {} }), '', 'v1', 0);
+      const session = createYouTubeSession(context, async () => { throw Error('Unexpected channel request'); });
       // Channel requires a two-column shell; reuse already parsed tabs for
       // single-column responses rather than parsing their cards a second time.
       let controlsPage = page;

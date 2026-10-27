@@ -13,11 +13,12 @@ import type { mountBrowseMode } from './browse-mode';
 defineProps<{
   browseMode: ReturnType<typeof mountBrowseMode>;
   open: (id: string) => void;
-  more: () => void;
+  more: (manual?: boolean) => void;
   ownsFocus: () => boolean;
   openSettings: () => void;
   gridSettings: VideoGridSettings;
   changeCategory?: (id: string) => void;
+  refreshHome?: () => void;
   refreshNavigation?: () => void;
   focusAccount?: (node: HTMLElement) => void;
 }>();
@@ -26,8 +27,8 @@ const explorePage = computed(() => resolveExplorePage(store.snapshot.route));
 </script>
 
 <template>
-  <BrowseHeader :browse-mode="browseMode" :refresh-navigation="refreshNavigation" :focus-account="focusAccount" />
-  <BrowseSidebar :route="store.snapshot.route" @changed="refreshNavigation?.()" @settings="openSettings" />
+  <BrowseHeader :refresh-home="refreshHome" :browse-mode="browseMode" :refresh-navigation="refreshNavigation" :focus-account="focusAccount" />
+  <BrowseSidebar :refresh-home="refreshHome" :route="store.snapshot.route" @changed="refreshNavigation?.()" @settings="openSettings" />
   <BrowseCategoryTabs :categories="store.categories" :selected="store.category" @change="changeCategory?.($event)" />
   <ExplorePage v-if="explorePage" :key="explorePage.id" :page="explorePage" :open="open" :more="more"
     :owns-focus="ownsFocus" :grid-settings="gridSettings" :change-category="changeCategory" />

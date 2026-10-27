@@ -1,5 +1,6 @@
 import { createWatchDataService, type WatchDataService } from './youtube-watch-data';
-import { Innertube, Session, Parser, YTNodes } from 'youtubei.js/web';
+import { Innertube, Parser, YTNodes } from 'youtubei.js/web';
+import { createYouTubeSession } from './youtube-session';
 import type { YouTubeVideoDetails } from '../../types/core';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import { createYouTubeHeaders, requestYouTube, mutateYouTube } from './youtube-request';
@@ -44,8 +45,7 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
     const context = config('INNERTUBE_CONTEXT');
     if (!context?.client) throw Error('YouTube context unavailable');
     const captured = state, signal = controller.signal;
-    const session = new Session(structuredClone({ ...context, user: context.user || {} }), '', 'v1', 0,
-      undefined, undefined, undefined, async () => { throw Error('Unexpected watch parser request'); });
+    const session = createYouTubeSession(context, async () => { throw Error('Unexpected watch parser request'); });
     session.logged_in = config('LOGGED_IN') === true || /(?:^|;\s*)(?:SAPISID|__Secure-3PAPISID)=/.test(document.cookie);
     session.actions.execute = (async (endpoint: string, args: Node = {}) => {
       const path = endpoint.replace(/^\//, '');
