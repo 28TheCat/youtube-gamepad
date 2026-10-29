@@ -3,7 +3,9 @@ import { PAGE_REQUEST, PAGE_RESPONSE } from './page-protocol';
 import { parseWatchLink, parseShortLink, parsePlaylistLink } from '../shared/watch-link';
 import type { FeedCategory } from '../sites/youtube-feed';
 import type { BrowseItem } from '../shared/browse-data';
+import { safePreviewThumbnail } from '../shared/browse-data';
 import { playlistColor } from '../shared/playlist-colors';
+import { safeImageUrl } from '../shared/image-url';
 
 export function createFeedClient() {
   let sequence = 0;
@@ -49,7 +51,7 @@ export function createFeedClient() {
     pending.delete(id);
     return opened;
   }
-  function request(category: string, page?: string): Promise<{ items: BrowseItem[]; nextPage?: string }> {
+  function request(category: string, page?: string): Promise<{ items: BrowseItem[]; nextPage?: string; channelHeader?: import('../shared/browse-data').ChannelHeader }> {
     return new Promise((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const id = dispatch('requestBrowse', { category, page }, message => {
@@ -62,12 +64,12 @@ export function createFeedClient() {
             typeof item.channel !== 'string') return false;
           try { return new URL(item.thumbnail).protocol === 'https:'; } catch { return false; }
         }).map((item: BrowseItem) => {
-          let channelAvatar: string | undefined;
-          try { if (typeof item.channelAvatar === 'string' && item.channelAvatar.length <= 4096 &&
-            new URL(item.channelAvatar).protocol === 'https:') channelAvatar = item.channelAvatar; } catch { /* No avatar. */ }
+          const channelAvatar = safeImageUrl(item.channelAvatar);
           const filterData = safeHomeFilterData(item.filterData);
+          const previewThumbnail = item.isPlaylist !== true ? safePreviewThumbnail(item.previewThumbnail) : undefined;
           return { ...(filterData ? { filterData } : {}), id: item.id, title: item.title.slice(0, 2000), channel: item.channel.slice(0, 2000),
           ...(channelAvatar ? { channelAvatar } : {}),
+          ...(previewThumbnail ? { previewThumbnail } : {}),
           ...(['verified', 'artist'].includes(item.channelBadge || '') ? { channelBadge: item.channelBadge } : {}),
           ...(typeof item.viewCount === 'string' ? { viewCount: item.viewCount.slice(0, 200) } : {}),
           ...(typeof item.publishedTime === 'string' ? { publishedTime: item.publishedTime.slice(0, 200) } : {}),
@@ -81,7 +83,13 @@ export function createFeedClient() {
         if (message.value.items.length && !items.length) {
           reject(new Error('Invalid YouTube video response')); return;
         }
-        resolve({ items, nextPage: typeof message.value.nextPage === 'string' ? message.value.nextPage.slice(0, 100) : undefined });
+        const raw = message.value.channelHeader;
+        const channelHeader = raw && typeof raw.title === 'string' ? {
+          title: raw.title.slice(0, 2000),
+          ...Object.fromEntries(['metadata', 'description'].map(key => [key, typeof raw[key] === 'string' ? raw[key].slice(0, 2000) : ''])),
+          ...Object.fromEntries(['avatar', 'banner'].map(key => [key, safeImageUrl(raw[key]) || '']))
+        } as import('../shared/browse-data').ChannelHeader : undefined;
+        resolve({ items, channelHeader, nextPage: typeof message.value.nextPage === 'string' ? message.value.nextPage.slice(0, 100) : undefined });
       });
       if (pending.has(id)) timer = setTimeout(() => { pending.get(id)?.complete(); }, 22000);
     });

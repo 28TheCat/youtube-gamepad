@@ -296,7 +296,7 @@ export let YTGamepadShortsModule = {
       const more = button('More', () => openPanel('actions'), 'more'); more.dataset.shortsAction = 'more';
       rail.append(more);
       const navigation = node('div', 'navigation'); count = node('span', 'count');
-      previous = button('Previous Shorts', () => handle('up'), 'up'); next = button('Next Shorts', () => handle('down'), 'down');
+      previous = button('Previous Shorts', () => move('up'), 'up'); next = button('Next Shorts', () => move('down'), 'down');
       previous.dataset.shortsAction = 'up'; next.dataset.shortsAction = 'down';
       previous.querySelector('span')!.hidden = true; next.querySelector('span')!.hidden = true; navigation.append(count, previous, next);
       const feedback = node('div', 'feedback'); status = node('p', 'status'); status.setAttribute('role', 'status');
@@ -611,6 +611,10 @@ export let YTGamepadShortsModule = {
       else { cancelMoves(); update(); }
     }
     function move(direction: 'up' | 'down') {
+      if (!active() || returning || lifecycle.destroyed) return;
+      // Explicit navigation buttons own video switching even with a drawer open.
+      // Only controller directions pass through the panel's focus routing.
+      sync();
       closePanel(false);
       if (inRail()) play.focus({ preventScroll: true });
       if (direction === 'up') waitingRecommendations = false;

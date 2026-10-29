@@ -229,3 +229,83 @@ test('late session config retries; failed pagination retains data and retries th
     assert.equal(f.service.read().queue.length, 4);
   } finally { f.service.destroy(); }
 });
+
+const filterChips = () => ({ relatedChipCloudRenderer: { content: { chipCloudRenderer: { chips: ['All', 'Related', 'Recently uploaded'].map((text, index) => ({
+  chipCloudChipRenderer: { text: { simpleText: text }, isSelected: index === 0, navigationEndpoint: {
+    continuationCommand: { token: `filter-token-${index}`, request: 'CONTINUATION_REQUEST_TYPE_WATCH_NEXT' }
+  } }
+})) } } } });
+const filteredResponse = id => ({ onResponseReceivedEndpoints: [{ reloadContinuationItemsCommand: {
+  targetId: 'watch-next-feed', slot: 'RELOAD_CONTINUATION_SLOT_BODY', continuationItems: [compact(id), continuation(id + '-page')]
+} }] });
+
+test('native filter chips use library endpoints, isolated pagination and cached return without changing the playlist', async () => {
+  const f = fixture();
+  try {
+    f.service.read(); await settle();
+    f.calls[0].resolve(response([filterChips(), compact('original'), continuation('original-page')])); await settle();
+    const first = f.service.read();
+    assert.deepEqual(Array.from(first.filters, item => item.label), ['All', 'Related', 'Recently uploaded']);
+    assert.equal(JSON.stringify(first).includes('filter-token'), false, 'opaque commands stay service-owned');
+    assert.equal(f.service.selectFilter('filter:99'), false);
+    assert.equal(f.service.selectFilter('filter:1'), true); await settle();
+    assert.equal(f.calls[1].body.continuation, 'filter-token-1');
+    assert.equal(f.calls[1].url, '/youtubei/v1/next');
+    assert.equal(f.calls[1].headers['x-goog-authuser'], '2');
+    assert.equal(f.service.read().queue.length, first.queue.length);
+    f.calls[1].resolve(filteredResponse('filtered')); await settle();
+    assert.deepEqual(Array.from(f.service.read().recommendations, item => item.label), ['filtered']);
+    f.service.more('recommendations'); await settle();
+    assert.equal(f.calls[2].body.continuation, 'filtered-page', 'recommendation pagination bypasses the queue cursor');
+    f.calls[2].resolve(filteredResponse('filtered-second')); await settle();
+    assert.equal(f.service.selectFilter('filter:0'), true);
+    assert.equal(f.calls.length, 3, 'returning to All uses its original cached page');
+    assert.equal(f.service.read().recommendations[0].label, 'original');
+    f.service.selectFilter('filter:1');
+    assert.equal(f.service.read().recommendations.length, 2);
+    f.service.more('queue'); await settle();
+    assert.equal(f.calls[3].body.continuation, 'queue-page');
+    f.calls[3].resolve({ contents: [] }); await settle();
+    assert.equal(f.service.read().playlistTitle, first.playlistTitle);
+  } finally { f.service.destroy(); }
+});
+
+test('rapid filter switches discard late results, retry the selected endpoint and retain the active filter after route return', async () => {
+  const f = fixture();
+  try {
+    f.service.read(); await settle(); f.calls[0].resolve(response([filterChips(), compact('original')])); await settle();
+    f.service.selectFilter('filter:1'); await settle();
+    f.service.selectFilter('filter:2'); await settle();
+    assert.equal(f.calls[1].signal.aborted, true);
+    f.calls[1].resolve(filteredResponse('stale'));
+    f.calls[2].resolve({ error: { code: 400 } }); await settle();
+    assert.equal(f.service.read().failed, true);
+    f.advance(5001); f.service.read(); await settle();
+    assert.equal(f.calls[3].body.continuation, 'filter-token-2');
+    f.calls[3].resolve(filteredResponse('latest')); await settle();
+    assert.equal(f.service.read().recommendations[0].label, 'latest');
+    const originalRoute = f.location.search;
+    f.location.search = '?v=other'; f.service.routeChanged();
+    f.location.search = originalRoute; f.service.routeChanged();
+    assert.equal(f.service.read().filters.find(item => item.selected).key, 'filter:2');
+    f.service.selectFilter('filter:0');
+    assert.equal(f.service.read().recommendations[0].label, 'original');
+  } finally { f.service.destroy(); }
+});
+
+test('filter endpoints cannot execute unrelated API actions', async () => {
+  const f = fixture();
+  try {
+    const chips = filterChips();
+    chips.relatedChipCloudRenderer.content.chipCloudRenderer.chips[1].chipCloudChipRenderer.navigationEndpoint = {
+      browseEndpoint: { browseId: 'evil' }
+    };
+    f.service.read(); await settle(); f.calls[0].resolve(response([chips, compact('original')])); await settle();
+    f.service.selectFilter('filter:1'); await settle();
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.service.read().failed, true);
+    assert.equal(f.service.read().queue.length, 3);
+    f.service.selectFilter('filter:0');
+    assert.equal(f.service.read().recommendations[0].label, 'original');
+  } finally { f.service.destroy(); }
+});

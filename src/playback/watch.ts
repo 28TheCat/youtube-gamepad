@@ -24,7 +24,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   let leftReturn = { region: 'player' as 'player' | 'metadata' | 'controls' | 'progress', id: 'player' };
   function rememberLeft() {
     const state = watchState();
-    if (!windowed() || panelFocused() || state.row === 'recommendations' || state.row === 'tabs') return;
+    if (!windowed() || panelFocused() || state.row === 'recommendations' || state.row === 'tabs' || state.row === 'filters') return;
     leftReturn = { region: state.row,
       id: state.row === 'controls' ? snapshot().controls[state.index]?.id || '' : state.row };
   }
@@ -94,14 +94,14 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   }
   function focus() {
     const state = watchState(), data = snapshot(), panel = panelFocused();
-    const targets = panel ? data.panel : state.row === 'tabs' ? data.tabs || [] : state.row === 'recommendations' ? data.recommendations : data.controls;
+    const targets = panel ? data.panel : state.row === 'filters' ? data.filters || [] : state.row === 'tabs' ? data.tabs || [] : state.row === 'recommendations' ? data.recommendations : data.controls;
     const target = !panel && state.row === 'metadata' ? data.metadata : !panel && state.row === 'player' ? data.player
       : !panel && state.row === 'progress'
       ? { id: 'progress', region: 'progress', itemKey: 'progress', index: 0, available: data.canSeek }
       : targets[panel ? Math.min(state.panelIndex, targets.length - 1) : state.index];
     view.focus(target, state.adjusting, mode());
     rememberPage();
-    if (!state.panel && state.row === 'recommendations' && state.index >= data.recommendations.length - recommendationColumns() * 2) controller.request('moreRecommendations');
+    if (!state.panel && state.row === 'recommendations' && state.index >= data.recommendations.length - recommendationColumns() * 2) controller.request('moreRecommendations', view.collectionOpen ? 'queue' : 'recommendations');
   }
   function feedback(text: string|null) {
     view.feedback({ label: text || '' }); lifecycle.clearTimeout(timer);
@@ -110,6 +110,11 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   function closePanel() { view.panel.close(); }
   function activate(action?: string) {
     if (!enabled() || controller.state.navigating) return;
+    if (action?.startsWith('recommendationFilter:')) {
+      controller.request('recommendationFilter', action.slice('recommendationFilter:'.length));
+      readPage();
+      send({ type: 'WATCH_FOCUS', region: 'filters', index: view.activeFilter() }); focus(); return;
+    }
     if (action?.startsWith('recommendation:')) { openVideo(action.slice('recommendation:'.length)); return; }
     if (mode() === 'playback') show();
     const data = snapshot(), target = data.controls.find(target => target.id === action);
@@ -213,7 +218,9 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   }
   function openVideo(key?: string) {
     view.closeFullCollection?.();
-    if (controller.request('recommendation', key || '') === 'missing') { feedback('Recommendations have changed. Please select again.'); readPage(); }
+    const result = controller.request('recommendation', key || '');
+    if (result === 'failed') { feedback('Unable to load this video. Please try again.'); return; }
+    if (result === 'missing') { feedback('Recommendations have changed. Please select again.'); readPage(); }
   }
   function hasTemporaryLayer() {
     return !!(view.fullCollectionOpen || watchState().panel || focusManager?.suspended || controller.hasTemporaryLayer?.());
@@ -223,6 +230,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     lastActivity = Date.now();
     controller.request('mode', 'controls');
     send({ type: 'WATCH_SHOW', target, count: snapshot().recommendations.length });
+    if (target === 'recommendations' && !snapshot().recommendations.length && snapshot().filters?.length) send({ type: 'WATCH_FOCUS', region: 'filters', index: view.activeFilter() });
     if ((windowed() || view.fullCollectionOpen) && target === 'recommendations' && snapshot().recommendations.length) send({ type: 'WATCH_FOCUS', region: 'recommendations', index: view.sideIndex() });
     if (windowed() && target === 'controls' && snapshot().player) send({ type: 'WATCH_FOCUS', region: 'player', index: 0 });
     focus();
@@ -231,7 +239,9 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   function sync() {
     if (mode() !== renderedMode) lastActivity = Date.now();
     renderedMode = mode();
-    const active = enabled() && controller.state.surfaceReady !== false && controller.readRoute().isWatch && mode() !== 'browse';
+    const loadingShell = controller.state.shellVisible === true && controller.state.surfaceReady === false;
+    const active = enabled() && controller.readRoute().isWatch &&
+      (loadingShell || controller.state.surfaceReady !== false && mode() !== 'browse');
     // Preserve the last presentation while the native player is being replaced.
     if (!active && enabled() && controller.state.transitioning && view.visible) { view.hold(true); return; }
     view.hold(false);
@@ -239,7 +249,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     if (entering || !active && wasActive) ++returnRevision;
     wasActive = active;
     if (entering && typeof history !== 'undefined') pendingReturn = readWatchReturn(history, controller.readRoute().key);
-    view.sync(active, mode());
+    view.sync(active, loadingShell ? 'playback' : mode());
     if (!active) { clearFeedback(); controller?.nativePlayer?.clear(); }
     if (active) {
       const nextRoute = controller.readRoute().key;
@@ -268,7 +278,9 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
         send({ type: 'WATCH_FOCUS', region: nextWindowed && snapshot().player ? 'player' : 'controls', index: nextWindowed ? 0 : playIndex() });
         if (mode() === 'controls' && (!hasTemporaryLayer() || watchState().commentsParked)) focus();
       }
-      readPage(); updateProgress();
+      readPage();
+      if (loadingShell) { view.hold(true); return; }
+      updateProgress();
       if (pendingReturn) {
         const saved = pendingReturn;
         restoringReturn = true;
@@ -306,6 +318,23 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
         return true;
       }
       if (action === 'left' || action === 'right') return true;
+    }
+    const filters = snapshot().filters || [];
+    if (!panelFocused() && filters.length) {
+      const state = watchState();
+      if (action === 'up' && state.row === 'recommendations' && state.index === 0) {
+        send({ type: 'WATCH_FOCUS', region: 'filters', index: view.activeFilter() }); focus(); return true;
+      }
+      if (state.row === 'filters') {
+        if (action === 'left' || action === 'right') {
+          send({ type: 'WATCH_FOCUS', region: 'filters', index: (state.index + (action === 'right' ? 1 : filters.length - 1)) % filters.length }); focus();
+        } else if (action === 'up' && windowed()) {
+          send({ type: 'WATCH_FOCUS', region: 'tabs', index: view.activeTab() }); focus();
+        } else if (action === 'confirm') view.activateFilter(state.index);
+        else if (action === 'down') show('recommendations');
+        else if (action === 'back') { if (windowed()) returnLeft(); else show('controls'); }
+        return true;
+      }
     }
     if (windowed() && snapshot().tabs?.length) {
       const state = watchState();
@@ -358,7 +387,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
         case 'panelScroll': view.panel.scroll(effect.value as number); break;
         case 'loadComments': view.panel.load(); break;
         case 'loadRecommendations':
-          if (controller.request('moreRecommendations') === false) feedback('No more recommendations');
+          if (controller.request('moreRecommendations', view.collectionOpen ? 'queue' : 'recommendations') === false) feedback('No more recommendations');
           break;
         case 'focus': focus(); break;
         case 'mode': controller.request('mode', effect.value as Mode); break;

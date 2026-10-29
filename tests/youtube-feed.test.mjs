@@ -304,7 +304,7 @@ test('watch later parses playlist videos, retains queue positions and skips unav
 });
 
 for (const [pathname, search, browseId, label] of [
-  ['/feed/subscriptions', '', 'FEsubscriptions', '订阅'],
+  ['/feed/subscriptions', '', 'FEsubscriptions', 'Subscribed channels'],
   ['/feed/history', '', 'FEhistory', '历史记录'],
   ['/playlist', '?list=WL', 'VLWL', '稍后观看']
 ]) {
@@ -594,6 +594,7 @@ test('history without chips loads its first page and continuation through the AP
 for (const [pathname, browseId] of [
   ['/channel/UC-9-kyTW8ZkZNDHQJ6FgpwQ', 'UC-9-kyTW8ZkZNDHQJ6FgpwQ'],
   ['/feed/storefront', 'FEstorefront'],
+  ['/gaming', 'UCOpNcN46UbXVtpKMrmU4Abg'],
   ['/channel/UC4R8DWoMoI7CAwX8_LjQHig', 'UC4R8DWoMoI7CAwX8_LjQHig']
 ]) test(`explore page ${pathname} requests its own feed and continuation without native cards`, async () => {
   const calls = [];
@@ -756,4 +757,30 @@ for (const directory of [true, false]) test(`playlist ${directory ? 'directory' 
   assert.equal(second.nextPage, undefined, 'a repeated continuation does not loop');
   location.pathname = '/feed/history'; location.search = '';
   await assert.rejects(restored.request('all', first.nextPage), /Category unavailable/);
+});
+
+test('topic rich grid survives an empty legacy section list in the same selected tab', () => {
+  const parsed = parseYouTubeJsBrowse({ contents: { twoColumnBrowseResultsRenderer: { tabs: [
+    { tabRenderer: { selected: true, content: {
+      sectionListRenderer: { contents: [] },
+      richGridRenderer: { contents: [{ richItemRenderer: { content: { videoRenderer: {
+        videoId: 'music-topic', title: { simpleText: 'Music topic video' }
+      } } } }] }
+    } } }
+  ] } } });
+  assert.equal(parsed.items.length, 1);
+  assert.equal(parsed.items[0].title, 'Music topic video');
+});
+
+test('storefront horizontal movie shelves expose playable movie cards', () => {
+  const parsed = parseYouTubeJsBrowse({ contents: { sectionListRenderer: { contents: [
+    { itemSectionRenderer: { contents: [{ shelfRenderer: { content: { horizontalMovieListRenderer: { items: [
+      { gridMovieRenderer: { videoId: 'store-movie', title: { simpleText: 'Store movie' },
+        thumbnail: { thumbnails: [] }, thumbnailOverlays: [],
+        navigationEndpoint: { watchEndpoint: { videoId: 'store-movie' } } } }
+    ] } } } }] } }
+  ] } } });
+  assert.equal(parsed.items.length, 1);
+  assert.equal(parsed.items[0].title, 'Store movie');
+  assert.equal(parsed.items[0].href, '/watch?v=store-movie');
 });

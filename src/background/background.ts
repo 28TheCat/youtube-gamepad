@@ -1,3 +1,4 @@
+import { updateYouTubeTabs } from './update-tabs';
 interface WindowRecord {state:'normal'|'maximized';tabId:number;dismissed?:boolean}
 type WindowRecords=Record<string,WindowRecord>;
 import { YTGamepadDiagnosticStore } from '../diagnostics/diagnostics-store.ts';
@@ -122,3 +123,7 @@ chrome.tabs.onRemoved.addListener(tabId => enqueue(async () => {
 chrome.windows.onRemoved.addListener(windowId => enqueue(async () => {
   const states = await records(); delete states[windowId]; await save(states);
 }));
+
+chrome.runtime.onInstalled?.addListener(details => {
+  if (details.reason === 'install' || details.reason === 'update') void updateYouTubeTabs();
+});

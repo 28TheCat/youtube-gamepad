@@ -1,6 +1,7 @@
 // Each pair is [English, Simplified Chinese]. UI source strings are stable keys;
 // page content (titles, comments and search queries) is never translated.
 export const messages: readonly (readonly [string, string])[] = [
+  ['Sort', '排序'],
   ['Video details unavailable', '视频详情暂不可用'],
   ['Select an episode · B / Esc to close', '选择视频 · B / Esc 关闭'],
   ['Notification center', '通知'], ['Could not load notifications.', '无法加载通知。'], ['Sign in to see notifications.', '登录后查看通知。'], ['No notifications yet.', '暂无通知。'],
@@ -25,7 +26,7 @@ export const messages: readonly (readonly [string, string])[] = [
   ['Automatic extra pages stop at this limit. You can continue with Load more videos.', '达到补页上限后暂停自动加载，可点击“加载更多视频”继续。'],
   ['{count} videos hidden by home filters.', '首页过滤已隐藏 {count} 个视频。'],
   ['Automatic loading paused. Load more videos or adjust home filters.', '已暂停自动补页，请加载更多视频或调整首页过滤规则。'],
-  ['Video preview', '视频预览'], ['New content', '有新内容'], ['Following channels', '关注频道'],
+  ['Video preview', '视频预览'], ['New content', '有新内容'], ['Subscribed channels', '订阅频道'],
   ['Notifications', '通知设置'], ['All', '全部'], ['Personalized', '个性化'], ['None', '不接收'], ['Unsubscribe', '取消订阅'], ['Saving…', '正在保存…'],
   ['Could not update subscription. Try again.', '无法更新订阅设置，请重试。'],
   ['Toggle captions', '切换字幕'], ['Quality', '清晰度'], ['Auto', '自动'], ['High resolution', '高分辨率'],
@@ -145,7 +146,7 @@ export const messages: readonly (readonly [string, string])[] = [
   ['Playback action failed', '播放操作失败'],
   ['All', '全部'], ['Podcasts', '播客'], ['Mixes', '合辑'], ['Animation', '动画'], ['Recently uploaded', '最近上传'], ['Watched', '已观看'], ['New to you', '发现新视频'], ['Volume {percent}%', '音量 {percent}%'], ['{seconds} seconds', '{seconds} 秒'],
   ['D-pad / left stick', '方向键 / 左摇杆'], ['Paused', '已暂停'], ['Playing', '正在播放'], ['Channel information is still loading', '频道信息仍在加载'], ['Player settings are currently unavailable', '播放器设置暂不可用'], ['This action is unavailable. Wait for the video information to load.', '此操作暂不可用，请等待视频信息加载。'], ['No captions available for this video', '此视频没有可用字幕'], ['This action is currently unavailable', '此操作暂不可用'], ['Recommendations have changed. Please select again.', '推荐视频已变化，请重新选择。'], ['No more recommendations', '没有更多推荐视频'],
-  ['Voice search', '语音搜索'], ['Sidebar', '侧边目录'], ['Home', '首页'], ['Subscriptions', '订阅内容'], ['History', '历史记录'], ['Playlists', '播放列表'], ['Watch later', '稍后观看'], ['Liked videos', '赞过的视频'], ['Your videos', '我的视频'], ['Music', '音乐'], ['Gaming', '游戏'], ['News', '新闻'], ['Sports', '体育'],
+  ['Voice search', '语音搜索'], ['Sidebar', '侧边目录'], ['Home', '首页'], ['Subscriptions', '订阅频道'], ['History', '历史记录'], ['Playlists', '播放列表'], ['Watch later', '稍后观看'], ['Liked videos', '赞过的视频'], ['Your videos', '我的视频'], ['Music', '音乐'], ['Gaming', '游戏'], ['News', '新闻'], ['Sports', '体育'],
   ['Binding layouts', '按键布局'], ['Playback, seeking and volume', '播放、进度与音量'], ['Browsing, selection and search', '浏览、选择与搜索'], ['Gamepad button positions', '手柄按键位置示意图'], ['Unassigned', '未分配'], ['Default bindings restored', '已恢复默认按键'], ['Could not load bindings. Please reopen this page.', '无法加载按键设置，请重新打开此页面。'], ['Could not save bindings. Please try again.', '无法保存按键设置，请重试。'],
   ['Left bumper', '左肩键'], ['Right bumper', '右肩键'], ['Left trigger', '左扳机'], ['Right trigger', '右扳机'], ['L3 · Left stick press', 'L3 · 按下左摇杆'], ['R3 · Right stick press', 'R3 · 按下右摇杆'],
   ['Volume controls', '音量控制'], ['Muted', '已静音'], ['Behind live by {time}', '落后直播 {time}'], ['Live · Replay window: {time}', '直播 · 回放范围：{time}'], ['Live · Seeking unavailable', '直播 · 无法跳转'], ['Live playback position', '直播播放进度'], ['Seeking is unavailable for this video', '此视频无法跳转进度'], ['Seeking is unavailable', '无法跳转进度'], ['Unable to seek', '跳转失败'], ['Playback position, adjusting. Left / right to seek, A to finish, B to go back', '正在调整播放进度。左 / 右跳转，A 完成，B 返回'], ['Playback position, A to start adjusting', '播放进度，按 A 开始调整'],

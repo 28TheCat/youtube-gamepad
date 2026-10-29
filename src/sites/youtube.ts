@@ -335,8 +335,10 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       const info = pageAccess?.readWatchInfo?.();
       return { details, info };
     }, () => undefined);
-    if (metadata && 'stale' in metadata) { confirmedMetadata = undefined; watchFeatures.metadata = 'missing'; page.waiting = true; return page; }
-    const details = metadata?.details, info = metadata?.info;
+    const stale = metadata && 'stale' in metadata;
+    if (stale) confirmedMetadata = undefined;
+    const details = metadata && !('stale' in metadata) ? metadata.details : undefined;
+    const info = metadata && !('stale' in metadata) ? metadata.info : undefined;
     const metadataFailed = !metadata || info?.failed === true;
     if ((!details || metadataFailed) && confirmedMetadata) {
       Object.assign(page, confirmedMetadata.page);
@@ -354,7 +356,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       page.liked = info?.liked || false;
       page.disliked = info?.disliked || false;
     }
-    page.waiting = info?.loading === true && !details;
+    page.waiting = !!stale || info?.loading === true && !details;
     page.metadataFailed = metadataFailed;
     if (details?.videoId === id && !metadataFailed) confirmedMetadata = { route: route.key, page: { ...page }, channelId };
     watchFeatures.metadata = metadataFailed ? 'failed' : details ? 'available' : 'missing';
@@ -366,6 +368,8 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       nextDestinations.clear();
       const next = optionalFeature('recommendations', () => pageAccess.readWatchNext!(), () => undefined);
       if (next?.route === route.key) {
+        page.recommendationsLoading = next.loading;
+        page.recommendationFilters = next.filters;
         page.queue = next.queue;
         page.playlistTitle = next.playlistTitle;
         page.playlistTotal = next.playlistTotal;
@@ -377,7 +381,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
     } else watchFeatures.recommendations = 'missing';
     return page;
   }
-  function loadRecommendations() { return pageAccess?.moreWatchNext?.() || false; }
+  function loadRecommendations(kind?: 'queue' | 'recommendations') { return pageAccess?.moreWatchNext?.(kind) || false; }
   function openRecommendation(key: string, prepareVideo: (href: string) => boolean) {
     if (pageAccess?.readWatchNext) {
       const next = pageAccess.readWatchNext();
@@ -386,7 +390,9 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       if (!href || ![...next.queue, ...next.recommendations].some(item => item.key === key && item.href === href)) return 'missing';
       if (prepareVideo(href) === false) return 'blocked';
       if (pageAccess.openWatchVideo?.(href)) return 'opened';
-      location.assign(href); return 'opened';
+      // Keep the current document and player when in-page navigation fails.
+      document.dispatchEvent(new Event('yt-navigate-cancel'));
+      return 'failed';
     }
     return 'missing';
   }
@@ -679,7 +685,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
     readCommentsStatus: () => pageAccess?.readComments?.(),
     postComment: (text, key) => pageAccess?.commentPost?.(text, key) || Promise.resolve(false),
     sortComments: sort => pageAccess?.commentSort?.(sort) === true,
-    openRecommendation, loadRecommendations, openChannel, performWatchAction, expandReplies, translateComment, loadComments,
+    openRecommendation, loadRecommendations, selectRecommendationFilter: key => pageAccess?.selectRecommendationFilter?.(key, readRoute().key) || false, openChannel, performWatchAction, expandReplies, translateComment, loadComments,
     listPlaylists: () => pageAccess?.watchPlaylists?.() || Promise.resolve(undefined),
     togglePlaylist: (key: string) => pageAccess?.watchPlaylistToggle?.(key) || Promise.resolve(false),
     settingsOpen, openSettings, backSettings, seekTo, getSearchTarget, readSearch, syncSearch, submitSearch, moveSearchCursor, readTheme, observePage };

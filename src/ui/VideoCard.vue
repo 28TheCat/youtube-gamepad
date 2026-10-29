@@ -32,9 +32,8 @@ onBeforeUnmount(() => press?.cancel());
     @click.prevent="open">
     <VideoThumbnail ref="cover" class="card-cover" :item="item">
       <template #preview>
-        <iframe v-if="previewSource" class="card-video-preview" :class="{ ready: previewReady }" :src="previewSource"
-          :title="t('Video preview')" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"
-          tabindex="-1" @load="previewLoaded" @error="previewFailed" />
+        <img v-if="previewSource" class="card-video-preview" :class="{ ready: previewReady }" :src="previewSource"
+          :alt="t('Video preview')" decoding="async" @load="previewLoaded" @error="previewFailed">
       </template>
       <slot name="cover-overlay" />
     </VideoThumbnail>

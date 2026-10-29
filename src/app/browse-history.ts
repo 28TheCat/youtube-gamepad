@@ -41,7 +41,7 @@ export function saveWatchReturn(history: Pick<History, 'state' | 'replaceState'>
 }
 export function readWatchReturn(history: Pick<History, 'state'>, route: string): WatchReturnState | undefined {
   const value = history.state?.[watchKey];
-  if (!value || value.route !== route || !['player', 'metadata', 'controls', 'progress', 'tabs', 'recommendations', 'panel'].includes(value.target?.region) ||
+  if (!value || value.route !== route || !['player', 'metadata', 'controls', 'progress', 'tabs', 'filters', 'recommendations', 'panel'].includes(value.target?.region) ||
       !Number.isInteger(value.target.index) || value.target.index < 0 ||
       (value.target.itemKey !== undefined && typeof value.target.itemKey !== 'string') ||
       (value.panel !== undefined && !['description', 'comments', 'playlists', 'subscription'].includes(value.panel)) ||

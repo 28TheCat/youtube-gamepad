@@ -8,8 +8,10 @@ if ((window as unknown as DisposerHost)[key] === previous) delete (window as unk
 
 export function registerMainDispose(dispose: { (): void; (): void; }) {
   (window as unknown as DisposerHost)[key] = () => {
+    document.removeEventListener('ytg-extension-handoff', current);
     dispose();
     if ((window as unknown as DisposerHost)[key] === current) delete (window as unknown as DisposerHost)[key];
   };
-  const current = (window as unknown as DisposerHost)[key];
+  const current = (window as unknown as DisposerHost)[key]!;
+  document.addEventListener('ytg-extension-handoff', current);
 }

@@ -76,3 +76,21 @@ test('Shorts API failures retain current playback and can retry without native f
   assert.match(page.url(), /\/shorts\/second$/);
   assert.equal(documents(), 1);
 });
+
+test('Shorts navigation arrows switch videos while a detail panel is open', { timeout: 45000 }, async t => {
+  const { page, controls, documents } = await setup(t);
+  await controls.locator('[data-shorts-action=comments]').click();
+  await controls.locator('.drawer').waitFor({ state: 'visible' });
+  await controls.locator('[data-shorts-action=down]').click();
+  await page.waitForURL('**/shorts/second', { timeout: 5000 });
+  await controls.locator('.drawer').waitFor({ state: 'hidden' });
+  await controls.locator('.preview').waitFor({ state: 'hidden' });
+  await controls.locator('[data-shorts-action=more]').click();
+  await controls.locator('.drawer').waitFor({ state: 'visible' });
+  await controls.locator('[data-shorts-action=up]').click();
+  await page.waitForURL('**/shorts/first', { timeout: 5000 });
+  await controls.locator('.drawer').waitFor({ state: 'hidden' });
+  assert.deepEqual(await page.evaluate(() => window.apiLoads), ['second', 'first']);
+  assert.equal(await page.evaluate(() => window.nativeMoves + window.routeMoves), 0);
+  assert.equal(documents(), 1);
+});

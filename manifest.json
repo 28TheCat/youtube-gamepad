@@ -7,8 +7,10 @@
     "128": "assets/icons/gamepad-128.png"
   },
   "permissions": [
-    "storage"
+    "storage",
+    "scripting"
   ],
+  "host_permissions": ["https://www.youtube.com/*"],
   "background": {
     "service_worker": "bundles/background.js"
   },

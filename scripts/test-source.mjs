@@ -38,7 +38,7 @@ export function legacyModuleSource(file) {
   let source = fixtureSource(new URL('../' + fixtureFile, import.meta.url))
     .replace(/^import[^\n]*\n/gm, '').replace(/^export let [\w ,]+;\s*/gm, '')
     .replace(/^export let /gm, 'let ')
-    .replace(/^export function /gm, 'function ').replace(/^export const /gm, 'var ').replace(/^export \{\};?\s*/gm, '');
+    .replace(/^export (async )?function /gm, '$1function ').replace(/^export const /gm, 'var ').replace(/^export \{\};?\s*/gm, '');
   if (file === 'src/sites/youtube.ts') source = source.replace('pageAccess = undefined', `pageAccess = { readVideoDetails: () => document.querySelector('#movie_player')?.getPlayerResponse?.()?.videoDetails, showControls: () => document.querySelector('#movie_player')?.showControls?.(), hideControls: () => document.querySelector('#movie_player')?.hideControls?.(), readWatchNext: () => window.__testWatchNext?.(), moreWatchNext: () => false, openWatchVideo: href => window.__testOpenWatchVideo?.(href) === true, readComments: () => window.__testComments?.(), moreComments: start => window.__testLoadComments?.(start) === true, commentReplies: key => window.__testCommentReplies?.(key) === true }`);
   if (file === 'src/ui/ui-api.ts') source = source.replace('var ui = createUiApi();', 'var ui = ui || createUiApi();');
   source = source.replace(aliasPattern, name => `${name === 'YTGamepadDiagnosticStore' ? 'globalThis' : 'window'}.${name}`);

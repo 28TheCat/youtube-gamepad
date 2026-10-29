@@ -66,6 +66,16 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
       else raw = await mutateYouTube(path, init);
       if (destroyed || captured !== state || signal.aborted || captured.route !== route()) throw Error('Watch request cancelled');
       if (path === 'next') nextResponse = raw;
+      // Publish basic metadata as soon as player responds; getInfo also waits
+      // for next, whose channel/action data can arrive independently later.
+      const details = path === 'player' ? raw.videoDetails : undefined;
+      const expected = parseWatchLink(captured.route) || parseShortLink(captured.route);
+      if (details?.videoId === expected?.videoId) {
+        captured.details = { videoId: details.videoId, title: details.title, author: details.author,
+          channelId: details.channelId, shortDescription: details.shortDescription,
+          viewCount: details.viewCount, isLive: details.isLiveContent };
+        notify();
+      }
       return args.parse ? Parser.parseResponse(raw) : { success: true, status_code: 200, data: raw };
     }) as typeof session.actions.execute;
     return api = new Innertube(session);
@@ -73,8 +83,8 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
   function load(): Promise<void> {
     syncRoute();
     const target = parseWatchLink(state.route) || parseShortLink(state.route);
-    if (destroyed || !target || state.details || Date.now() < retryAt) return Promise.resolve();
     if (pending) return pending;
+    if (destroyed || !target || state.details && !state.failed || Date.now() < retryAt) return Promise.resolve();
     const captured = state;
     captured.loading = true;
     pending = (async () => {

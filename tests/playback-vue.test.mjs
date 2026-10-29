@@ -154,17 +154,17 @@ test('windowed collections appear as the first conditional tab with ordered entr
     'windowed previews never render duplicate custom player controls');
   assert.equal(await host.locator('.currently-playing').getAttribute('aria-current'), 'true');
   assert.equal(await host.locator('.currently-playing').isDisabled(), true);
-  assert.equal(await host.locator('.currently-playing .collection-duration').textContent(), '3:39');
-  assert.equal(await host.locator('.currently-playing .collection-index').textContent(), '2');
-  assert.equal(await host.locator('.collection-entry .card-thumbnail').count(), 0);
-  assert.equal(await host.locator('.collection-entry .card-meta').count(), 0, 'single-author collections omit repeated author names');
+  assert.equal(await host.locator('.currently-playing .card-duration').textContent(), '3:39');
+  assert.equal(await host.locator('.currently-playing .collection-playing-icon').count(), 1);
+  assert.equal(await host.locator('.collection-entry .card-thumbnail').count(), 3);
+  assert.equal(await host.locator('.collection-entry .card-meta').count(), 3, 'playlist rows retain author names like YouTube');
   await page.evaluate(() => {
     const queue = window.queue.map((item, index) => index === 2 ? { ...item, channel: 'Second creator' } : item);
     window.view.presentation.page({ ...window.pageInfo, queue }, {});
   });
   assert.deepEqual(await host.locator('.collection-entry .card-meta').allTextContents(), ['Creator', 'Creator', 'Second creator']);
   await page.evaluate(() => window.view.presentation.page(window.pageInfo, {}));
-  assert.equal(await host.locator('.collection-entry .card-meta').count(), 0);
+  assert.equal(await host.locator('.collection-entry .card-meta').count(), 3);
   assert.equal(await page.evaluate(() => window.view.presentation.cards().length), 2, 'the playing entry is excluded from navigation');
   await host.locator('[data-video-id="queue:next"]').click();
   assert.equal(await page.evaluate(() => window.actions.at(-1)), 'recommendation:queue:next');
@@ -208,7 +208,7 @@ test('windowed collections appear as the first conditional tab with ordered entr
   await page.setViewportSize({ width: 900, height: 800 });
   await page.evaluate(() => { window.view.host.style.setProperty('--ytg-watch-side', '280px'); window.view.host.style.setProperty('--ytg-watch-width', '620px'); });
   assert.ok(await host.locator('.collection-entry').first().evaluate(node => {
-    const bounds = node.getBoundingClientRect(), duration = node.querySelector('.collection-duration').getBoundingClientRect();
+    const bounds = node.getBoundingClientRect(), duration = node.querySelector('.card-duration').getBoundingClientRect();
     return duration.right <= bounds.right && node.scrollWidth <= bounds.width + 1;
   }), 'narrow collections retain compact horizontal entries');
   await page.evaluate(() => {
@@ -554,6 +554,43 @@ for (const trustedTypes of [false, true]) {
   });
 }
 
+
+test('playlist route reserves its collection tab and sidebar before queue data arrives', async t => {
+  const page = await browserPage(t);
+  await page.setContent('<html data-ytg-playback-layout="windowed"><body></body></html>');
+  await page.evaluate(code);
+  const result = await page.evaluate(styles => {
+    const view = PlaybackViewFixture.createVueWatchView({ activate() {}, closePanel() {}, styles: { watch: styles },
+      controllerStyle: { badge() {}, hint() {}, bind() {} } });
+    const info = { key: '/watch?v=episode&list=PLtest', isWatch: true, title: '', channel: '', recommendations: [], queue: [] };
+    view.presentation.page(info, {});
+    const tab = view.root.querySelector('.collection-tab');
+    const panel = view.root.querySelector('.collection-panel');
+    const pending = { tab: !!tab, panel: !!panel, placeholders: panel?.querySelectorAll('.collection-placeholder').length };
+    view.presentation.page({ ...info, title: 'Episode', queue: [{ key: 'episode', label: 'Episode', channel: 'Creator', selected: true, queue: true }] }, {});
+    return { pending, sameTab: tab === view.root.querySelector('.collection-tab'), samePanel: panel === view.root.querySelector('.collection-panel'),
+      loading: !!view.root.querySelector('.collection-loading'), entries: view.root.querySelectorAll('.collection-entry').length };
+  }, styles);
+  assert.deepEqual(result, { pending: { tab: true, panel: true, placeholders: 5 }, sameTab: true, samePanel: true, loading: false, entries: 1 });
+});
+
+test('late collection data updates the entry and list in the same page refresh', async t => {
+  const page = await browserPage(t);
+  await page.setContent('<html data-ytg-playback-layout="windowed"><body></body></html>');
+  await page.evaluate(code);
+  const state = await page.evaluate(styles => {
+    const view = PlaybackViewFixture.createVueWatchView({ activate() {}, closePanel() {}, styles: { watch: styles },
+      controllerStyle: { badge() {}, hint() {}, bind() {} } });
+    view.host.hidden = false;
+    const queue = [];
+    const info = { key: 'video', isWatch: true, title: 'Video', channel: 'Creator', queue, recommendations: [] };
+    view.presentation.page(info, {});
+    queue.push({ key: 'episode', label: 'Episode', channel: 'Creator', queue: true, selected: true });
+    view.presentation.page({ ...info, recommendations: [...queue] }, {});
+    return { entry: !!view.root.querySelector('.collection-tab'), list: !!view.root.querySelector('.collection-entry') };
+  }, styles);
+  assert.deepEqual(state, { entry: true, list: true });
+});
 
 test('subscribed control uses a bell and dropdown arrow without a state dot', async t => {
   const page = await browserPage(t);

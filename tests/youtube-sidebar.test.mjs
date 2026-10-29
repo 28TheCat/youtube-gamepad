@@ -9,6 +9,9 @@ import { guideData } from './helpers/sidebar-data.mjs';
 const result = await build({ configFile: false, logLevel: 'silent', build: { write: false, minify: false,
   target: 'es2022', lib: { entry: fileURLToPath(new URL('../src/sites/youtube-sidebar.ts', import.meta.url)), formats: ['iife'], name: 'SidebarFixture' } } });
 const code = (Array.isArray(result) ? result[0] : result).output.find(item => item.type === 'chunk').code;
+const flatten = entries => Array.from(entries || []).flatMap(entry => [entry, ...flatten(entry.children)]);
+const links = snapshot => snapshot.sections.flatMap(section => flatten(section.entries));
+const explore = snapshot => snapshot.sections.find(section => section.label === 'Découvrir').entries;
 function fixture(handler) {
   const calls = [], settings = { INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: 'fixture' }, user: {} },
     LOGGED_IN: true, SESSION_INDEX: 2, DELEGATED_SESSION_ID: 'brand' };
@@ -31,18 +34,20 @@ test('sidebar guide uses the selected page account and parses nested entries wit
   assert.equal(s.calls[0].headers['x-goog-authuser'], '2');
   assert.equal(s.calls[0].headers['x-goog-pageid'], 'brand');
   assert.match(s.calls[0].headers.authorization, /^SAPISIDHASH /);
-  assert.deepEqual(Array.from(value.explore, item => item.label), ['Musique régionale', 'Games']);
-  assert.equal(value.personal.find(item => item.id === 'videos').href, 'https://studio.youtube.com/channel/UCcreator/videos');
+  assert.deepEqual(Array.from(explore(value), item => item.label), ['Musique régionale', 'Games']);
+  assert.equal(links(value).find(item => item.id === 'videos').href, 'https://studio.youtube.com/channel/UCcreator/videos');
   assert.equal(JSON.stringify(value).includes('navigationEndpoint'), false);
-  assert.equal(JSON.stringify(value).includes('Subscribed creator'), false);
+  assert.equal(JSON.stringify(value).includes('Subscribed creator'), true);
+  assert.equal(value.sections[1].entries[0].label, 'You');
+  assert.deepEqual(Array.from(value.sections[1].entries[0].children, item => item.label), ['History', 'Your videos']);
   s.service.destroy();
 });
 
 test('sidebar deduplicates pending requests, caches snapshots and refreshes after expiry', async () => {
   const s = fixture(); await Promise.all([s.service.read(), s.service.read()]);
   assert.equal(s.calls.length, 1);
-  const value = await s.service.read(); value.personal[0].label = 'Caller modification';
-  assert.notEqual((await s.service.read()).personal[0].label, 'Caller modification');
+  const value = await s.service.read(); value.sections[0].entries[0].label = 'Caller modification';
+  assert.notEqual((await s.service.read()).sections[0].entries[0].label, 'Caller modification');
   s.advance(); await s.service.read(); assert.equal(s.calls.length, 2); s.service.destroy();
 });
 
@@ -55,18 +60,18 @@ test('regional entries with unknown icons remain in the identified Explore secti
     entry.guideEntryRenderer.navigationEndpoint.commandMetadata.webCommandMetadata.url = '/channel/UClessons';
     section.items.push(entry); return raw;
   });
-  assert.equal((await s.service.read()).explore.at(-1).label, 'Regional learning'); s.service.destroy();
+  assert.equal(explore(await s.service.read()).at(-1).label, 'Regional learning'); s.service.destroy();
 });
 
 test('malformed guide responses fail without consulting page data and can be retried', async () => {
   const s = fixture(count => count === 1 ? { contents: {} } : guideData());
   await assert.rejects(s.service.read(), /Sidebar guide unavailable/);
-  assert.equal((await s.service.read()).explore.length, 2); s.service.destroy();
+  assert.equal(explore(await s.service.read()).length, 2); s.service.destroy();
 });
 
-test('empty guide uses built-in destinations without native guide data', async () => {
+test('empty guide remains empty without inventing personal or regional destinations', async () => {
   const s = fixture(() => ({ items: [] })); const value = await s.service.read();
-  assert.equal(value.personal.length, 5); assert.ok(value.explore.length > 0); s.service.destroy();
+  assert.deepEqual(JSON.parse(JSON.stringify(value)), { sections: [] }); s.service.destroy();
 });
 
 test('account changes reject stale guide results and load the current identity', async () => {
@@ -76,7 +81,7 @@ test('account changes reject stale guide results and load the current identity',
   while (!s.calls.length) await new Promise(resolve => setTimeout(resolve, 0));
   s.settings.SESSION_INDEX = 3;
   const second = s.service.read(); release(guideData());
-  await assert.rejects(first, /cancelled/); assert.equal((await second).explore.length, 2);
+  await assert.rejects(first, /cancelled/); assert.equal(explore(await second).length, 2);
   assert.equal(s.calls[1].headers['x-goog-authuser'], '3'); s.service.destroy();
 });
 
@@ -88,9 +93,64 @@ test('destroy aborts pending guide requests and refuses new requests', async () 
   await assert.rejects(pending, /cancelled/); await assert.rejects(s.service.read(), /destroyed/);
   assert.equal(s.calls[0].signal.aborted, true);
 });
+
+test('guide preserves personal playlists, regional sections and collapsed links across account and sign-out changes', async () => {
+  const makeEntry = (label, href) => ({ guideEntryRenderer: { formattedTitle: { simpleText: label },
+    navigationEndpoint: { commandMetadata: { webCommandMetadata: { url: href } } } } });
+  const f = fixture(count => count === 1 ? { items: [
+    { guideSectionRenderer: { items: [makeEntry('Shorts', '/shorts/fixture123')] } },
+    { guideSectionRenderer: { formattedTitle: { simpleText: 'My library' }, items: [
+      makeEntry('Travel', '/playlist?list=PLtravel'),
+      { guideCollapsibleEntryRenderer: { expanderItem: makeEntry('Show more', '/'), expandableItems: [
+        makeEntry('Private favorites', '/playlist?list=PLprivate'),
+        makeEntry('Downloads', '/feed/downloads')
+      ] } }
+    ] } },
+    { guideSectionRenderer: { formattedTitle: { simpleText: 'More from YouTube' }, items: [
+      makeEntry('Music', 'https://music.youtube.com/'), makeEntry('Premium', '/premium'),
+      makeEntry('Help', '/t/help'), makeEntry('Unsafe', 'https://evil.example/')
+    ] } }
+  ] } : { items: [{ guideSectionRenderer: { items: [makeEntry('Home', '/')] } }] });
+  const first = await f.service.read();
+  assert.deepEqual(Array.from(first.sections, section => section.label || ''), ['', 'My library', 'More from YouTube']);
+  assert.deepEqual(links(first).filter(item => !item.children).map(item => item.label),
+    ['Shorts', 'Travel', 'Private favorites', 'Downloads', 'Music', 'Premium', 'Help']);
+  const group = first.sections[1].entries[1];
+  assert.equal(group.label, 'Show more'); assert.equal(group.expanded, false);
+  assert.equal('personal' in first, false); assert.equal('explore' in first, false);
+  f.settings.SESSION_INDEX = 3;
+  const second = await f.service.read();
+  assert.deepEqual(links(second).map(item => item.label), ['Home']);
+  assert.equal(JSON.stringify(second).includes('Private favorites'), false);
+  f.settings.LOGGED_IN = false;
+  await f.service.read();
+  assert.equal(f.calls.length, 3);
+  f.service.destroy();
+});
+
+test('region changes invalidate the guide cache and download wrappers retain their links', async () => {
+  const f = fixture(() => ({ items: [{ guideSectionRenderer: { items: [{ guideDownloadsEntryRenderer: {
+    entryRenderer: { guideEntryRenderer: { formattedTitle: { simpleText: 'Offline videos' },
+      navigationEndpoint: { commandMetadata: { webCommandMetadata: { url: '/feed/downloads' } } } } }
+  } }] } }] }));
+  assert.equal(links(await f.service.read())[0].href, '/feed/downloads');
+  f.settings.INNERTUBE_CONTEXT.client.gl = 'JP'; await f.service.read();
+  f.settings.INNERTUBE_CONTEXT.client.hl = 'ja'; await f.service.read();
+  assert.equal(f.calls.length, 3); f.service.destroy();
+});
+
+test('signed-out guide keeps its sign-in destination without adding account-only links', async () => {
+  const f = fixture(() => ({ items: [{ guideSigninPromoRenderer: { signInButton: { buttonRenderer: {
+    text: { simpleText: 'Sign in' }, navigationEndpoint: { signInEndpoint: {} }
+  } } } }] }));
+  f.settings.LOGGED_IN = false;
+  const value = await f.service.read();
+  assert.deepEqual(links(value).map(item => [item.label, item.href]), [['Sign in', '/signin']]);
+  assert.equal(value.sections.length, 1); f.service.destroy();
+});
 test('guide subscription IDs are exposed only as bounded channel identities',async()=>{
  const f=fixture(()=>{const data=guideData();data.items[3].guideSubscriptionsSectionRenderer.items[0].guideEntryRenderer.navigationEndpoint.browseEndpoint.browseId='UCsubscriber';return data;});
- const result=await f.service.read();assert.deepEqual(Array.from(result.subscribedChannelIds),['UCsubscriber']);assert.equal(result.personal.some(item=>item.href==='/channel/UCsubscriber'),false);
+ const result=await f.service.read();assert.deepEqual(Array.from(result.subscribedChannelIds),['UCsubscriber']);assert.equal(result.sections.filter(section=>section.id!=='subscriptions').flatMap(section=>flatten(section.entries)).some(item=>item.href==='/channel/UCsubscriber'),false);f.service.destroy();
 });
 
 test('subscribed people include names and safe avatars in guide order without duplicate or unsafe identities', async () => {
@@ -144,5 +204,31 @@ test('subscription status badges survive parsing, cache copies and refreshes wit
   assert.equal((await f.service.read()).subscriptions[0].hasNewContent, true);
   f.advance();
   assert.equal((await f.service.read()).subscriptions[0].hasNewContent, false);
+  f.service.destroy();
+});
+
+
+test('subscription newness reads the real guide presentation style including collapsed entries', async () => {
+  const f = fixture(count => {
+    const data = guideData(), items = data.items[3].guideSubscriptionsSectionRenderer.items;
+    const entry = items[0].guideEntryRenderer;
+    entry.navigationEndpoint.browseEndpoint.browseId = 'UCsubscriber';
+    entry.presentationStyle = count === 1 ? 'GUIDE_ENTRY_PRESENTATION_STYLE_NEW_CONTENT' : 'GUIDE_ENTRY_PRESENTATION_STYLE_NONE';
+    entry.badges = { liveBroadcasting: false };
+    const nested = structuredClone(items[0]);
+    nested.guideEntryRenderer.navigationEndpoint.browseEndpoint.browseId = 'UCnested';
+    nested.guideEntryRenderer.formattedTitle = { simpleText: 'Nested channel' };
+    items.push({ guideCollapsibleEntryRenderer: { expandableItems: [nested] } });
+    const none = structuredClone(items[0]);
+    none.guideEntryRenderer.navigationEndpoint.browseEndpoint.browseId = 'UCnone';
+    none.guideEntryRenderer.presentationStyle = 'GUIDE_ENTRY_PRESENTATION_STYLE_NONE';
+    items.push(none);
+    return data;
+  });
+  const snapshot = await f.service.read();
+  assert.deepEqual(Array.from(snapshot.subscriptions, c => [c.id, c.hasNewContent, c.isLive]),
+    [['UCsubscriber', true, false], ['UCnested', true, false], ['UCnone', false, false]]);
+  f.advance();
+  assert.equal((await f.service.read()).subscriptions.some(c => c.hasNewContent), false);
   f.service.destroy();
 });

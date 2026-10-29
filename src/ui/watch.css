@@ -268,7 +268,7 @@
 
 /* Fixed information region: title, scrollable controls, and breathing room. */
 :host-context(html:not([data-ytg-playback-layout="fullscreen"])) .heading{display:flex;align-items:baseline;gap:12px;padding-top:12px;height:48px;overflow:hidden}
-:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .heading .title{flex:1;min-width:0;font-size:18px;line-height:24px;-webkit-line-clamp:1}
+:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .heading .title{flex:1;min-width:0;font-size:20px;line-height:28px;-webkit-line-clamp:1}
 :host-context(html:not([data-ytg-playback-layout="fullscreen"])) .heading .meta{flex:0 1 auto;max-width:35%;margin:0;font-size:12px;line-height:18px}
 :host-context(html:not([data-ytg-playback-layout="fullscreen"])) .toolbar{height:80px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;overscroll-behavior:contain;scrollbar-width:none;padding-block:8px}
 :host-context(html:not([data-ytg-playback-layout="fullscreen"])) .toolbar .group{flex-shrink:0;flex-wrap:nowrap}
@@ -280,21 +280,25 @@
   .recommendations:not(.collection-panel) .card-thumbnail{grid-row:auto!important}
   .recommendations:not(.collection-panel) .card-title{margin:10px 0 4px!important;font-size:14px!important}
 }
-/* A continuous episode list: header and rows share edges, without card islands. */
-:host .surface .recommendations.collection-panel{display:flex;flex-direction:column;gap:0;padding:0;border-inline-start:1px solid var(--ytg-border);border-radius:0;scroll-padding-block:88px 8px;background:var(--ytg-background);box-shadow:none}
-.collection-heading{position:sticky;top:0;z-index:2;flex:none;margin:0;padding:18px 20px 16px;background:var(--ytg-background);border-bottom:1px solid var(--ytg-border);color:var(--ytg-text)}
-.collection-heading h2{margin:0;font-size:16px;font-weight:600;line-height:24px;overflow-wrap:anywhere}
-.collection-heading p{margin:6px 0 0;font-size:13px;font-weight:400;line-height:20px;color:var(--ytg-muted)}
-:host .surface .recommendations.collection-panel .card.collection-entry{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr) max-content;gap:12px;align-items:center;flex:none;min-height:64px;margin:0;padding:14px 20px 14px 16px;border:0;border-bottom:1px solid color-mix(in srgb,var(--ytg-border) 50%,transparent);border-radius:0;background:transparent;color:var(--ytg-text);box-shadow:none;transform:none;scale:1;scroll-margin-block:8px}
-.collection-index{font-size:13px;font-weight:400;text-align:center;color:var(--ytg-muted);font-variant-numeric:tabular-nums}
-.collection-duration{grid-column:3;font-size:12px;font-weight:400;color:var(--ytg-muted);white-space:nowrap;font-variant-numeric:tabular-nums}
-.collection-copy{min-width:0;display:flex;flex-direction:column;gap:4px}
-:host .collection-panel .card.collection-entry .card-title{margin:0;font-size:15px;font-weight:400;line-height:22px;overflow-wrap:anywhere}
-:host .collection-panel .card.collection-entry .card-meta{font-size:13px;font-weight:400;line-height:18px;color:var(--ytg-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-:host .surface .recommendations.collection-panel .card.currently-playing{background:var(--ytg-current-background);color:var(--ytg-text);opacity:1;cursor:default}
-.collection-panel .currently-playing::before{content:'';position:absolute;inset:12px auto 12px 0;width:3px;background:var(--ytg-current-text)}
-.collection-playing-label{font-size:12px;font-weight:500;line-height:18px;color:var(--ytg-current-text)}
-@media(hover:hover){:host .surface .recommendations.collection-panel .card.collection-entry:not(:disabled):hover{background:var(--ytg-surface)}}
+/* Watch-page playlist panel: compact thumbnail rows, independent playback/focus. */
+:host .surface .recommendations.collection-panel{display:flex;flex-direction:column;gap:0;padding:0;border:1px solid var(--ytg-border);border-radius:12px;scroll-padding-block:88px 8px;background:var(--ytg-background);box-shadow:none;overflow-x:hidden}
+.collection-heading{position:sticky;top:0;z-index:2;flex:none;box-sizing:border-box;min-height:84px;margin:0;padding:16px 16px 12px;background:var(--ytg-surface);border-bottom:1px solid var(--ytg-border);color:var(--ytg-text)}
+.collection-heading h2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin:0;font-size:16px;font-weight:600;line-height:22px;overflow-wrap:anywhere}
+.collection-heading p{margin:4px 0 0;font-size:12px;font-weight:400;line-height:18px;color:var(--ytg-muted)}
+.collection-placeholder{display:grid;grid-template-columns:20px 160px minmax(0,1fr);gap:10px;align-items:center;min-height:112px;box-sizing:border-box;padding:10px 8px}
+.collection-placeholder span{height:14px;border-radius:4px;background:var(--ytg-surface)}
+.collection-placeholder span:nth-child(2){height:90px}
+:host .surface .recommendations.collection-panel .card.collection-entry{position:relative;display:grid;grid-template-columns:20px 160px minmax(0,1fr);gap:10px;align-items:center;flex:none;min-height:112px;margin:0;padding:10px 8px;box-sizing:border-box;border:0;border-radius:0;background:transparent;color:var(--ytg-text);box-shadow:none;transform:none;scale:1;scroll-margin-block:8px;text-align:left}
+.collection-index{display:flex;justify-content:center;align-items:center;min-width:0;font-size:12px;font-weight:400;color:var(--ytg-muted);font-variant-numeric:tabular-nums}
+.collection-playing-icon{width:20px;height:20px;fill:var(--ytg-text)}
+:host .surface .collection-panel .collection-entry .collection-thumbnail{grid-column:2;grid-row:1;width:160px;height:90px;aspect-ratio:16/9;border-radius:8px;overflow:hidden;outline:none}
+:host .surface .collection-panel .collection-thumbnail img{display:block;width:100%;height:100%;object-fit:cover;border-radius:0}
+:host .surface .collection-panel .collection-thumbnail .card-duration{right:4px;bottom:4px;margin:0;padding:1px 4px;border-radius:4px;background:#000c;color:#fff;font-size:12px;font-weight:500;line-height:16px}
+.collection-copy{grid-column:3;min-width:0;align-self:center;display:flex;flex-direction:column;gap:4px}
+:host .collection-panel .card.collection-entry .card-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin:0;font-size:14px;font-weight:500;line-height:20px;overflow-wrap:anywhere;color:var(--ytg-text)}
+:host .collection-panel .card.collection-entry .card-meta{font-size:12px;font-weight:400;line-height:18px;color:var(--ytg-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:host .surface .recommendations.collection-panel .card.currently-playing{background:color-mix(in srgb,var(--ytg-text) 8%,var(--ytg-background));color:var(--ytg-text);opacity:1;cursor:default}
+@media(hover:hover){:host .surface .recommendations.collection-panel .card.collection-entry:not(:disabled):hover{background:color-mix(in srgb,var(--ytg-text) 6%,var(--ytg-background))}}
 :host-context(html:not([data-ytg-playback-layout="fullscreen"])) .fullscreen-collection{display:none}
 :host-context(html[data-ytg-playback-layout="fullscreen"]) .collection-tab{display:none}
 :host-context(html[data-ytg-playback-layout="fullscreen"]) .fullscreen-collection-open .collection-panel{--ytg-focus-color:var(--ytg-text);position:fixed;z-index:5;right:0;top:0;bottom:0;width:min(420px,85vw);max-height:none;color:var(--ytg-text);pointer-events:auto}
@@ -307,8 +311,8 @@
 :host-context(html[data-ytg-playback-layout="fullscreen"]) .collection-heading{padding-right:64px}
 .collection-instruction{font-size:12px!important}
 :host-context(html[data-ytg-playback-layout="fullscreen"]) .fullscreen-collection-open .collection-panel{box-shadow:-8px 0 32px #0004}
-:host-context(html[data-ytg-playback-layout="fullscreen"]) .fullscreen-collection-open .collection-panel .card{min-height:72px}
-:host-context(html[data-ytg-playback-layout="fullscreen"]) .fullscreen-collection-open .collection-panel .card-title{font-size:16px}
+:host-context(html[data-ytg-playback-layout="fullscreen"]) .fullscreen-collection-open .collection-panel .card{min-height:112px}
+:host-context(html[data-ytg-playback-layout="fullscreen"]) .fullscreen-collection-open .collection-panel .card-title{font-size:14px}
 :host-context(html[data-ytg-playback-layout="fullscreen"]) .fullscreen-collection-open .collection-panel .card-meta{color:var(--ytg-muted)}
 /* Keep fullscreen controls readable on both televisions and handheld screens. */
 :host-context(html[data-ytg-playback-layout="fullscreen"]) .bottom{translate:none;transform:none}
@@ -332,8 +336,18 @@
 :host-context(html:not([data-ytg-playback-layout="fullscreen"])) .player-focus{display:block;position:absolute;left:0;top:0;width:var(--watch-main);height:var(--watch-video-height);padding:0;background:transparent;pointer-events:none;z-index:1;border-radius:0;outline-offset:-4px}
 :host([data-passive=true]) .player-focus{outline:none}
 :host-context(html:not([data-ytg-playback-layout="fullscreen"])) .heading .title{pointer-events:auto;cursor:pointer;border-radius:4px}
-:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .heading .title:is(.selected,:focus-visible){outline:3px solid var(--ytg-focus-color);outline-offset:-3px}
+:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .heading .title:is(.selected,:focus,:focus-visible){outline:none;box-shadow:none}
 
 /* Match native stage breakpoints when the watch surface mounts before the player. */
 @media(max-width:1050px){:host-context(html:not([data-ytg-playback-layout="fullscreen"])) {--watch-side:var(--ytg-watch-side,340px)}}
 @media(max-width:700px){:host-context(html:not([data-ytg-playback-layout="fullscreen"])) {--watch-side:var(--ytg-watch-side,min(240px,40vw))}}
+
+.recommendation-filters{position:sticky;top:0;z-index:2;grid-column:1/-1;display:flex;flex:none;gap:8px;overflow-x:auto;scrollbar-width:none;padding:8px 4px;background:var(--ytg-overlay-surface,#252832);color:var(--ytg-overlay-text,#fff);scroll-margin-top:8px}
+.recommendation-filters button{flex:none;white-space:nowrap;padding:8px 12px;border:0;border-radius:8px;background:var(--ytg-overlay-button,#ffffff20);color:inherit;font:inherit;font-size:var(--ytg-font-small);cursor:pointer}
+.recommendation-filters button[aria-pressed=true]{background:#fff;color:#111}
+.recommendation-filters button.selected,.recommendation-filters button:focus-visible{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:-2px}
+
+:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .recommendation-filters{background:var(--ytg-background,#fff);color:var(--ytg-text,#171717)}
+:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .recommendation-filters button{background:var(--ytg-surface,#f3f4f6)}
+:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .recommendation-filters button[aria-pressed=true]{background:var(--ytg-text,#171717);color:var(--ytg-background,#fff)}
+:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .empty.filtered-empty{top:calc(var(--watch-tabs-height) + 68px)}

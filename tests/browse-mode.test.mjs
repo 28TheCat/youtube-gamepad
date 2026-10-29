@@ -225,11 +225,13 @@ test('YouTube account flows keep their native content without changing the saved
   await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body:
     '<html><body><ytd-app><ytd-page-manager><button id="native-account-flow">Continue account selection</button></ytd-page-manager></ytd-app></body></html>' }));
   const page = await context.newPage();
-  await page.goto('https://www.youtube.com/channel_switcher');
-  await page.locator('#native-account-flow').waitFor();
-  await page.waitForFunction(() => document.documentElement.dataset.ytgBrowseMode === 'gamepad');
-  assert.equal(await page.locator('#native-account-flow').isVisible(), true);
-  assert.equal(await page.locator('[data-ytg-shell-status]').count(), 0);
+  for (const path of ['/channel_switcher', '/account']) {
+    await page.goto(`https://www.youtube.com${path}`);
+    await page.locator('#native-account-flow').waitFor();
+    await page.waitForFunction(() => document.documentElement.dataset.ytgBrowseMode === 'gamepad');
+    assert.equal(await page.locator('#native-account-flow').isVisible(), true);
+    assert.equal(await page.locator('[data-ytg-shell-status]').count(), 0);
+  }
   assert.equal((await worker.evaluate(() => chrome.storage.local.get('browseMode'))).browseMode, 'gamepad');
 });
 

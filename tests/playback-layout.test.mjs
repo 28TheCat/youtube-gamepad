@@ -266,7 +266,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`${layout} transition cove
     history.pushState({}, '', '/watch?v=new'); window.playerIdentity = 'new';
     return { mask: [mask.width, mask.height], media: [mediaCover.x, mediaCover.y, mediaCover.width, mediaCover.height], player: [player.x, player.y, player.width, player.height], viewport: [innerWidth, innerHeight] };
   }, layout);
-  assert.deepEqual(geometry.mask, geometry.viewport);
+  assert.deepEqual(geometry.mask, geometry.player.slice(2));
   for (let i = 0; i < 4; i++) assert.ok(Math.abs(geometry.media[i] - geometry.player[i]) < 1);
   await page.waitForFunction(() => !!window.destinationFrame);
   assert.equal(await page.locator('#ytg-watch-transition').count(), 1);
@@ -275,8 +275,11 @@ for (const layout of ['windowed', 'fullscreen']) test(`${layout} transition cove
   await page.evaluate(() => {
     window.transition.sync(true, '/watch?v=third', true);
     history.pushState({}, '', '/watch?v=third'); window.playerIdentity = undefined;
+    window.transition.sync(true, '/watch?v=third', false);
     document.querySelector('video').dispatchEvent(new Event('playing', { bubbles: true }));
   });
-  assert.equal(await page.locator('#ytg-watch-transition').count(), 0, 'playing releases cover without waiting on metadata');
+  await page.waitForFunction(() => !!window.destinationFrame);
+  await page.evaluate(() => window.destinationFrame());
+  assert.equal(await page.locator('#ytg-watch-transition').count(), 0, 'presented frame releases cover after navigation completes');
   await page.evaluate(() => window.transition.destroy());
 });

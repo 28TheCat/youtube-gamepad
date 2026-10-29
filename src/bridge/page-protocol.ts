@@ -14,7 +14,7 @@ export const PAGE_HISTORY = 'ytg-page-history-v1';
 export const PAGE_WATCH_NEXT = 'ytg-watch-next-updated-v1';
 export const PAGE_COMMENTS = 'ytg-comments-updated-v1';
 export const PAGE_WATCH_INFO = 'ytg-watch-info-updated-v1';
-export type PageOperation = 'readNotifications' | 'shortsRecommendations' | 'playShorts' | 'readShortsSettings' | 'shortsSetting' | 'readSidebar' | 'readAccount' | 'ping' | 'readPlayerVideoId' | 'readVideoDetails' | 'readWatchInfo' | 'watchAction' | 'watchPlaylists' | 'watchPlaylistToggle' | 'showControls' | 'hideControls' | 'readWatchNext' | 'moreWatchNext' | 'openBrowseVideo' | 'openBrowseRoute' | 'readComments' | 'moreComments' | 'commentReplies' | 'commentTranslate' | 'commentPost' | 'commentSort';
+export type PageOperation = 'readNotifications' | 'shortsRecommendations' | 'playShorts' | 'readShortsSettings' | 'shortsSetting' | 'readSidebar' | 'readAccount' | 'ping' | 'readPlayerVideoId' | 'readVideoDetails' | 'readWatchInfo' | 'watchAction' | 'watchPlaylists' | 'watchPlaylistToggle' | 'showControls' | 'hideControls' | 'readWatchNext' | 'moreWatchNext' | 'selectRecommendationFilter' | 'openBrowseVideo' | 'openWatchVideo' | 'openBrowseRoute' | 'readComments' | 'moreComments' | 'commentReplies' | 'commentTranslate' | 'commentPost' | 'commentSort';
 export interface PageAccess {
   readNotifications?(mode: 'count' | 'list' | 'more'): Promise<NotificationSnapshot | undefined>;
   shortsRecommendations?(videoId: string, reset?: boolean): Promise<{ ids: string[]; hasMore: boolean } | undefined>;
@@ -35,7 +35,8 @@ export interface PageAccess {
   showControls(): void;
   hideControls(): void;
   readWatchNext?(): WatchNextSnapshot | undefined;
-  moreWatchNext?(): boolean;
+  moreWatchNext?(kind?: 'queue' | 'recommendations'): boolean;
+  selectRecommendationFilter?(key: string, route: string): boolean;
   openWatchVideo?(href: string): boolean;
   openBrowseRoute?(href: string): boolean;
   readComments?(): CommentsSnapshot | undefined;
@@ -137,7 +138,7 @@ export function watchNextSnapshot(raw: unknown): WatchNextSnapshot | undefined {
         ? { watchedPercent: Math.min(100, item.watchedPercent) } : {}),
       duration: typeof item.duration === 'string' ? item.duration.slice(0, 40) : '', isPlaylist: item.isPlaylist === true, queue: item.queue === true, selected: item.selected === true }];
   });
-  return { route: value.route, recommendations: items(value.recommendations), queue: items(value.queue), loading: value.loading === true, failed: value.failed === true,
+  return { filters: Array.isArray(value.filters) ? value.filters.slice(0, 40).flatMap(item => typeof item?.key === 'string' && /^filter:\d{1,3}$/.test(item.key) && typeof item.label === 'string' && item.label.trim() ? [{ key: item.key, label: item.label.slice(0, 200), selected: item.selected === true }] : []) : [], route: value.route, recommendations: items(value.recommendations), queue: items(value.queue), loading: value.loading === true, failed: value.failed === true,
     ...(typeof value.playlistTitle === 'string' ? { playlistTitle: value.playlistTitle.slice(0, 2000) } : {}),
     ...(typeof value.playlistTotal === 'number' && Number.isSafeInteger(value.playlistTotal) && value.playlistTotal > 0 ? { playlistTotal: value.playlistTotal } : {}) };
 }

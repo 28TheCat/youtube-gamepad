@@ -19,12 +19,19 @@ test('bundled next parser preserves queue positions and return cache under CSP',
       }, body: '<!doctype html><html><body><ytd-app></ytd-app></body></html>' });
     }
     const body = request.postDataJSON(); calls.push(body);
+    if (body.continuation) return route.fulfill({ json: { onResponseReceivedEndpoints: [{ reloadContinuationItemsCommand: {
+      slot: 'RELOAD_CONTINUATION_SLOT_BODY', targetId: 'watch-next-feed', continuationItems: [{ compactVideoRenderer: {
+        videoId: body.continuation === 'filter-token' ? 'filtered' : 'filtered-next', title: { simpleText: 'Filtered video' }
+      } }, ...(body.continuation === 'filter-token' ? [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'filtered-page' } } } }] : [])]
+    } }] } });
     const image = { thumbnails: [
       { url: 'https://i.ytimg.com/vi/same/large.jpg', width: 1280 },
       { url: 'https://i.ytimg.com/vi/same/small.jpg', width: 120 }
     ] };
     await route.fulfill({ json: { contents: { twoColumnWatchNextResults: {
-      secondaryResults: { secondaryResults: { results: [{ compactVideoRenderer: {
+      secondaryResults: { secondaryResults: { results: [{ relatedChipCloudRenderer: { content: { chipCloudRenderer: { chips: ['All', 'For you'].map((label, index) => ({ chipCloudChipRenderer: {
+        text: { simpleText: label }, isSelected: index === 0, navigationEndpoint: { continuationCommand: { token: 'filter-token', request: 'CONTINUATION_REQUEST_TYPE_WATCH_NEXT' } }
+      } })) } } } }, { compactVideoRenderer: {
         videoId: 'related', title: { simpleText: 'Related' }, thumbnail: image,
         thumbnailOverlays: [{ thumbnailOverlayTimeStatusRenderer: { text: { simpleText: '12:34' }, style: 'DEFAULT' } }]
       } }] } },
@@ -38,17 +45,18 @@ test('bundled next parser preserves queue positions and return cache under CSP',
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('https://www.youtube.com/watch?v=current&list=PLtest&index=2');
   await page.evaluate(() => {
-    window.readNextFixture = () => {
+    window.callNextFixture = (operation, args = {}) => {
       const id = crypto.randomUUID(); let snapshot;
       const receive = event => {
         const reply = JSON.parse(event.detail);
         if (reply.id === id && reply.ok) snapshot = reply.value;
       };
       document.addEventListener('ytg-page-response-v1', receive);
-      document.dispatchEvent(new CustomEvent('ytg-page-request-v1', { detail: JSON.stringify({ version: 1, id, operation: 'readWatchNext' }) }));
+      document.dispatchEvent(new CustomEvent('ytg-page-request-v1', { detail: JSON.stringify({ version: 1, id, operation, ...args }) }));
       document.removeEventListener('ytg-page-response-v1', receive);
       return snapshot;
     };
+    window.readNextFixture = () => window.callNextFixture('readWatchNext');
   });
   await page.waitForFunction(() => window.readNextFixture()?.queue.length === 2);
   const first = await page.evaluate(() => window.readNextFixture());
@@ -66,5 +74,21 @@ test('bundled next parser preserves queue positions and return cache under CSP',
   });
   assert.deepEqual(await page.evaluate(() => window.readNextFixture()), first);
   assert.equal(calls.length, 1, 'return restores the original queue without refetching');
+  assert.deepEqual(first.filters.map(item => item.label), ['All', 'For you']);
+  assert.equal(JSON.stringify(first).includes('filter-token'), false);
+  assert.equal(await page.evaluate(() => window.callNextFixture('selectRecommendationFilter', { key: 'filter:1', route: '/watch?v=stale' })), false);
+  assert.equal(await page.evaluate(() => window.callNextFixture('selectRecommendationFilter', { key: 'filter:99', route: location.pathname + location.search })), false);
+  assert.equal(await page.evaluate(() => window.callNextFixture('selectRecommendationFilter', { key: 'filter:1', route: location.pathname + location.search })), true);
+  await page.waitForFunction(() => window.readNextFixture()?.recommendations[0]?.key === 'filtered');
+  const selected = await page.evaluate(() => window.readNextFixture());
+  assert.deepEqual(selected.queue, first.queue);
+  assert.equal(selected.filters[1].selected, true);
+  assert.equal(calls[1].continuation, 'filter-token');
+  await page.evaluate(() => window.callNextFixture('moreWatchNext', { kind: 'recommendations' }));
+  await page.waitForFunction(() => window.readNextFixture()?.recommendations.length === 2);
+  assert.equal(calls[2].continuation, 'filtered-page');
+  await page.evaluate(() => window.callNextFixture('selectRecommendationFilter', { key: 'filter:0', route: location.pathname + location.search }));
+  assert.deepEqual((await page.evaluate(() => window.readNextFixture())).recommendations, first.recommendations);
+  assert.equal(calls.length, 3);
   assert.deepEqual(errors, []);
 });

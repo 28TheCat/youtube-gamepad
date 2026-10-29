@@ -66,7 +66,10 @@ if (!(Parser.getParserByName('Tab') as any).ytgSelectedContent) {
     static ytgSelectedContent = true;
     constructor(raw: Node) {
       super({ ...raw, content: undefined });
-      this.content = raw.selected ? Parser.parseItem(raw.content) as typeof this.content : null;
+      // Topic destinations can include an empty sectionList beside the real
+      // richGrid. parseItem otherwise takes the first renderer and loses it.
+      const content = raw.content?.richGridRenderer ? { richGridRenderer: raw.content.richGridRenderer } : raw.content;
+      this.content = raw.selected ? Parser.parseItem(content) as typeof this.content : null;
     }
   });
 }
@@ -115,7 +118,7 @@ export function walkParsed(roots: unknown, visit: (node: any) => boolean | void,
     if (value.slot === 'RELOAD_CONTINUATION_SLOT_HEADER' || /^(?:Ad|DisplayAd|Promoted)/.test(value.type || '')) return;
     if (visit(value) === false) return;
     if (value.tabs) { walk(value.tabs.find((tab: any) => tab.selected)?.content, depth + 1); return; }
-    for (const key of ['contents', 'items', 'content', 'videos', 'primary', 'primary_contents']) walk(value[key], depth + 1);
+    for (const key of ['contents', 'items', 'content', 'chips', 'videos', 'primary', 'primary_contents']) walk(value[key], depth + 1);
     if (includeHeaders) walk(value.header, depth + 1);
   }
   walk(roots, 0);

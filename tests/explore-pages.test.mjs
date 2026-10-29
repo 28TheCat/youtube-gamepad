@@ -40,7 +40,12 @@ test('explore destinations resolve to separate reusable page definitions', () =>
 });
 
 
+test('gaming navigation uses the destination channel returned by YouTube resolve_url', () => {
+  assert.equal(resolveExplorePage('/gaming').browseId, 'UCOpNcN46UbXVtpKMrmU4Abg');
+  assert.equal(sidebarBrowseEndpoint('/gaming').browseEndpoint.browseId, 'UCOpNcN46UbXVtpKMrmU4Abg');
+});
+
 test('only explicit account flows bypass the custom shell', () => {
-  for (const route of ['/signin?next=%2F', '/logout', '/channel_switcher']) assert.equal(isNativeFlowRoute(route), true);
-  for (const route of ['/account', '/results?search_query=signin', '/@signin', 'https://evil.test/signin']) assert.equal(isNativeFlowRoute(route), false);
+  for (const route of ['/account', '/account?feature=settings', '/account/', '/signin?next=%2F', '/logout', '/channel_switcher']) assert.equal(isNativeFlowRoute(route), true);
+  for (const route of ['/accounts', '/results?search_query=signin', '/@signin', 'https://evil.test/signin']) assert.equal(isNativeFlowRoute(route), false);
 });

@@ -19,6 +19,7 @@ export interface WatchSurfaceSnapshot {
   player?: WatchTarget;
   metadata?: WatchTarget;
   tabs?: readonly WatchTarget[];
+  filters?: readonly WatchTarget[];
   controls: readonly WatchTarget[];
   recommendations: readonly WatchTarget[];
   panel: readonly WatchTarget[];
@@ -92,9 +93,9 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
   function snapshot(): WatchSurfaceSnapshot {
     const controls = controlTargets();
     const seekAvailable = canSeek && (host.dataset.nativePlayer !== 'true' || nativeControls().some(item => item.id === 'progress'));
-    return { canSeek: seekAvailable, tabs: (view.tabs || []).map((node, index) => ({ id: 'tab:' + index, region: 'tabs', itemKey: 'tab:' + index, index, available: available(node) })), metadata: view.metadata ? { id: 'metadata', region: 'metadata', itemKey: 'metadata', index: 0, available: document.documentElement.dataset.ytgPlaybackLayout !== 'fullscreen' } : undefined, player: view.player ? { id: 'player', region: 'player', itemKey: 'player', index: 0, available: document.documentElement.dataset.ytgPlaybackLayout !== 'fullscreen' } : undefined, controls, recommendations: recommendationTargets(), panel: panelTargets() };
+    return { canSeek: seekAvailable, filters: (view.filters || []).map((node, index) => ({ id: node.dataset.filterKey!, region: 'filters', itemKey: node.dataset.filterKey!, index, available: available(node) })), tabs: (view.tabs || []).map((node, index) => ({ id: 'tab:' + index, region: 'tabs', itemKey: 'tab:' + index, index, available: available(node) })), metadata: view.metadata ? { id: 'metadata', region: 'metadata', itemKey: 'metadata', index: 0, available: document.documentElement.dataset.ytgPlaybackLayout !== 'fullscreen' } : undefined, player: view.player ? { id: 'player', region: 'player', itemKey: 'player', index: 0, available: document.documentElement.dataset.ytgPlaybackLayout !== 'fullscreen' } : undefined, controls, recommendations: recommendationTargets(), panel: panelTargets() };
   }
-  function nodes(region: string) { return region === 'tabs' ? [...view.tabs || []] : region === 'metadata' ? view.metadata ? [view.metadata] : [] : region === 'player' ? view.player ? [view.player] : [] : region === 'recommendations' ? cards() : region === 'progress' ? view.progress ? [view.progress] : [] : region === 'panel' ? panelNodes() : controlNodes(); }
+  function nodes(region: string) { return region === 'filters' ? [...view.filters || []] : region === 'tabs' ? [...view.tabs || []] : region === 'metadata' ? view.metadata ? [view.metadata] : [] : region === 'player' ? view.player ? [view.player] : [] : region === 'recommendations' ? cards() : region === 'progress' ? view.progress ? [view.progress] : [] : region === 'panel' ? panelNodes() : controlNodes(); }
   function animate(node: HTMLElement, frames: Keyframe[], duration: number, id = 'ytg-feedback') {
     if (!node.animate || !window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) return;
     node.getAnimations().filter(animation => animation.id === id).forEach(animation => animation.cancel());
@@ -108,7 +109,8 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     const node = event.target as HTMLElement;
     const observations = snapshot();
     let target: WatchTarget | undefined;
-    if (view.tabs?.includes(node as HTMLButtonElement)) target = observations.tabs?.[view.tabs.indexOf(node as HTMLButtonElement)];
+    if (view.filters?.includes(node as HTMLButtonElement)) target = observations.filters?.[view.filters.indexOf(node as HTMLButtonElement)];
+    else if (view.tabs?.includes(node as HTMLButtonElement)) target = observations.tabs?.[view.tabs.indexOf(node as HTMLButtonElement)];
     else if (node === view.metadata) target = observations.metadata;
     else if (node === view.player) target = observations.player;
     else if (view.controls.includes(node as HTMLButtonElement)) target = observations.controls.find(target => target.id === node.dataset.action);
@@ -139,6 +141,9 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     toggleFullCollection() { return view.toggleFullCollection?.() || false; },
     closeFullCollection() { return view.closeFullCollection?.() || false; },
     get fullCollectionOpen() { return view.surface.classList.contains('fullscreen-collection-open'); },
+    get collectionOpen() { return !!surface.querySelector('.collection-panel'); },
+    activeFilter() { return Math.max(0, (view.filters || []).findIndex(node => node.getAttribute('aria-pressed') === 'true')); },
+    activateFilter(index: number) { view.filters?.[index]?.click(); },
     activeTab() { return Math.max(0, (view.tabs || []).findIndex(node => node.getAttribute('aria-selected') === 'true')); },
     activateTab(index: number) { view.tabs?.[index]?.click(); },
     sideIndex() { return view.sideIndex?.() ?? 0; },
@@ -195,14 +200,14 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
         : target.region === 'controls' ? node.dataset.action === target.id
         : target.region === 'player' ? node === view.player
         : target.region === 'metadata' ? node === view.metadata
-        : target.region === 'tabs' ? node === view.tabs?.[target.index]
+        : target.region === 'filters' ? node === view.filters?.[target.index] : target.region === 'tabs' ? node === view.tabs?.[target.index]
         : target.region === 'progress' ? node === view.progress
         : target.id === 'panel:close' ? node === close : node.dataset.focusId === target.id;
       const node = candidates[target.index] && matches(candidates[target.index]) ? candidates[target.index] : candidates.find(matches);
       if (!node || !available(node)) return;
       if (panel) node.classList.add('selected');
       node.focus({ preventScroll: true });
-      if (target.region === 'tabs') node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      if (target.region === 'tabs' || target.region === 'filters') node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
       if (target.region === 'controls') {
         const toolbar = node.closest<HTMLElement>('.toolbar');
         if (toolbar && toolbar.scrollWidth > toolbar.clientWidth) {
@@ -216,7 +221,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       if (target.region === 'recommendations' || (panel && state.panel !== 'description')) node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
     },
     items(region: string): FocusTarget[] {
-      const data = region === 'tabs' ? snapshot().tabs || [] : region === 'player' || region === 'metadata' ? [snapshot()[region]].filter((target): target is WatchTarget => !!target) : region === 'recommendations' ? recommendationTargets() : region === 'progress' ? [{ id: 'progress', region, itemKey: 'progress', index: 0, available: canSeek }] : region === 'panel' ? panelTargets() : controlTargets();
+      const data = region === 'filters' ? snapshot().filters || [] : region === 'tabs' ? snapshot().tabs || [] : region === 'player' || region === 'metadata' ? [snapshot()[region]].filter((target): target is WatchTarget => !!target) : region === 'recommendations' ? recommendationTargets() : region === 'progress' ? [{ id: 'progress', region, itemKey: 'progress', index: 0, available: canSeek }] : region === 'panel' ? panelTargets() : controlTargets();
       const elements = nodes(region);
       return data.filter(target => {
         if (!target.available) return false;

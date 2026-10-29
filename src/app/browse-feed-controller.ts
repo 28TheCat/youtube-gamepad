@@ -107,7 +107,8 @@ export function createBrowseFeedController({ store, feed, getRoute, isVisible, i
     }
     if (!append && !preserveView) {
       nextPage = undefined;
-      feedSnapshot = { route, items: [], canLoadMore: false };
+      feedSnapshot = { route, items: [], canLoadMore: false,
+        ...(previousSnapshot?.route === route ? { channelHeader: previousSnapshot.channelHeader } : {}) };
       changed();
     }
     try {
@@ -128,7 +129,8 @@ export function createBrowseFeedController({ store, feed, getRoute, isVisible, i
           if (!items.has(item.id) && (!accept || accept(item))) added++;
           items.set(item.id, item);
         }
-        feedSnapshot = { route, items: [...items.values()], canLoadMore: !!nextPage };
+        feedSnapshot = { route, items: [...items.values()], canLoadMore: !!nextPage,
+          channelHeader: result.channelHeader || feedSnapshot?.channelHeader };
         if (!accept || added > 0 || !nextPage) break;
         cursor = nextPage; extra = true;
       }

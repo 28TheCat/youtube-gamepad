@@ -15,6 +15,12 @@ import { pageActiveElement } from '../shared/page-dom';
 const props = defineProps<{ open: (id: string) => void; more: (manual?: boolean) => void; ownsFocus: () => boolean; gridSettings: VideoGridSettings;
   changeCategory?: (id: string) => void; pageTitle?: string }>();
 const store = useBrowseStore();
+const isHistory = computed(() => new URL(store.snapshot.route || '/', location.origin).pathname === '/feed/history');
+const isWatchLater = computed(() => {
+  const route = new URL(store.snapshot.route || '/', location.origin);
+  return route.pathname === '/playlist' && route.searchParams.get('list') === 'WL';
+});
+const isListPage = computed(() => isHistory.value || isWatchLater.value);
 const feedStatus = computed(() => ({
   loading: store.loading || (!store.snapshot.items.length && !store.category && !store.error),
   failed: !!store.error, empty: !store.snapshot.items.length,
@@ -104,7 +110,9 @@ watch(() => [store.category, store.snapshot.route, store.snapshot.items.length >
     }
   });
 const width = ref(0);
-const layout = computed(() => videoGridLayout(width.value, props.gridSettings));
+const layout = computed(() => isListPage.value
+  ? { ...videoGridLayout(width.value, props.gridSettings), columns: 1, horizontal: true, cover: 35 }
+  : videoGridLayout(width.value, props.gridSettings));
 const scrollTop = ref(0), viewportHeight = ref(800), cardsTop = ref(0), rowGap = ref(32), columnGap = ref(24);
 const heightCache = createRowHeightCache(), heightVersion = ref(0);
 let anchorVersion = 0, restoringScroll = false, restoreVersion = 0;
@@ -314,8 +322,9 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <div ref="viewport" data-ytg-browse-grid data-ytg-indexed-feed :data-ytg-virtual-feed="virtual ? '' : undefined" :style="{ scrollSnapType: virtual ? 'none' : undefined, overflowAnchor: virtual ? 'none' : undefined }" @ytg-browse-direction="direction" @ytg-browse-restore="restoreScroll" @scroll.passive="scrolled" :aria-label="pageTitle || t('Videos')" :aria-busy="store.loading">
+  <div ref="viewport" data-ytg-browse-grid data-ytg-indexed-feed :data-history="isListPage || undefined" :data-ytg-virtual-feed="virtual ? '' : undefined" :style="{ scrollSnapType: virtual ? 'none' : undefined, overflowAnchor: virtual ? 'none' : undefined }" @ytg-browse-direction="direction" @ytg-browse-restore="restoreScroll" @scroll.passive="scrolled" :aria-label="pageTitle || t('Videos')" :aria-busy="store.loading">
     <slot name="heading" />
+    <h1 v-if="isListPage" class="history-heading">{{ t(isHistory ? 'History' : 'Watch later') }}</h1>
     <p v-if="store.snapshot.filteredCount" role="status" class="feed-filter-status">{{ t('{count} videos hidden by home filters.', { count: store.snapshot.filteredCount }) }}</p>
     <p v-if="store.snapshot.autoLoadBlocked" role="status" class="feed-filter-status">{{ t('Automatic loading paused. Load more videos or adjust home filters.') }}</p>
     <LoadStatus v-if="!store.snapshot.items.length" :class="{ 'feed-loading-status': feedStatus.loading }" v-bind="feedStatus" @retry="retry" />

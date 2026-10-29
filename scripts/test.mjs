@@ -7,6 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const mode = process.argv[2] || 'unit';
 if (!['unit', 'browser', 'extension', 'live', 'all'].includes(mode)) throw new Error(`Unknown test mode: ${mode}`);
 const groups = {
+  'extension-update.test.mjs': 'extension',
   'shorts-api-extension.test.mjs': 'extension',
   'shorts-details-extension.test.mjs': 'extension',
   'youtube-sidebar-extension.test.mjs': 'extension',

@@ -10,7 +10,7 @@ import { Innertube, Mixins, YT, YTNodes } from 'youtubei.js/web';
 import { createYouTubeSession } from './youtube-session';
 
 type Node = Record<string, any>;
-interface FeedResult { items: BrowseItem[]; continuation?: string }
+interface FeedResult { items: BrowseItem[]; continuation?: string; channelHeader?: import('../shared/browse-data').ChannelHeader }
 export interface FeedCategory extends CategoryItem { selected: boolean; localize?: boolean }
 // Runs in MAIN. Session context and endpoint tokens never cross into Vue.
 export function createYouTubeFeedService() {
@@ -54,7 +54,7 @@ export function createYouTubeFeedService() {
     const explorePage = resolveExplorePage(currentRoute);
     // Personal feeds often have no filter chips. Give them the same request,
     // pagination and return-state lifecycle as the home feed.
-    const personalFeed = location.pathname === '/feed/subscriptions' ? { browseId: 'FEsubscriptions', label: '订阅' } :
+    const personalFeed = location.pathname === '/feed/subscriptions' ? { browseId: 'FEsubscriptions', label: 'Subscribed channels' } :
       location.pathname === '/feed/playlists' ? { browseId: 'FEplaylist_aggregation', label: 'Playlists' } :
       location.pathname === '/feed/history' ? { browseId: 'FEhistory', label: '历史记录' } :
       location.pathname === '/playlist' && /^[\w-]+$/.test(new URLSearchParams(location.search).get('list') || '') ?
@@ -82,7 +82,7 @@ export function createYouTubeFeedService() {
       if (channelFeed()) {
         for (const choice of channelPages.get(route) || []) {
           endpoints.set(choice.id, { path: 'browse', body: choice.body });
-          result.set(choice.id, { id: choice.id, label: choice.label, selected: false });
+          result.set(choice.id, { id: choice.id, label: choice.label, selected: choice.selected });
         }
         return [...result.values()];
       }
@@ -118,7 +118,7 @@ export function createYouTubeFeedService() {
         if (pages.size > 200) pages.delete(pages.keys().next().value!);
         savePages();
       }
-      return { items: parsed.items, nextPage };
+      return { items: parsed.items, nextPage, ...(parsed.channelHeader ? { channelHeader: parsed.channelHeader } : {}) };
     }
     const win = window as any;
     const context = win.ytcfg?.get?.('INNERTUBE_CONTEXT');

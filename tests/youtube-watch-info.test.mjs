@@ -34,6 +34,25 @@ async function ready(s) {
   assert.equal(s.service.read().failed, false);
   return s.service.read();
 }
+
+test('basic metadata publishes while next is still pending', async () => {
+  let releaseNext;
+  const nextPending = new Promise(resolve => { releaseNext = resolve; });
+  const s = fixture({ handler: url => url.endsWith('/next') ? nextPending : undefined });
+  s.service.read();
+  try {
+    for (let i = 0; i < 200 && !s.service.read().details; i++) await new Promise(resolve => setTimeout(resolve, 0));
+    const partial = s.service.read();
+    assert.equal(partial.details?.title, 'Title first');
+    assert.equal(partial.loading, true);
+    assert.equal(partial.canSubscribe, false);
+    assert.ok(s.events.length > 0);
+    releaseNext(next());
+    const complete = await ready(s);
+    assert.equal(complete.canSubscribe, true);
+    assert.equal(s.calls.length, 2);
+  } finally { releaseNext(next()); s.service.destroy(); }
+});
 test('direct Shorts metadata, reactions and playlists target their own video', async () => {
   const s = fixture(); s.location.pathname = '/shorts/first'; s.location.search = '';
   const info = await ready(s);

@@ -250,6 +250,51 @@ test('API JSON reaches the parser without reserializing the response body', asyn
   assert.equal(f.calls.length, 3);
   f.service.destroy();
 });
+
+for (const field of ['contents', 'subThreads']) test(`reply ${field} supports flat comments, buttonless pagination and retry`, async () => {
+  function flatReplies(ids, token) {
+    const raw = response(ids, token);
+    const items = raw.onResponseReceivedEndpoints[0].appendContinuationItemsAction.continuationItems;
+    for (let index = 0; index < ids.length; index++) items[index] = items[index].commentThreadRenderer.commentViewModel;
+    if (token) delete items.at(-1).continuationItemRenderer.button;
+    return raw;
+  }
+  const f = fixture((_body, count) => {
+    if (count === 1) {
+      const raw = response(['parent'], undefined, { initial: true, replies: true });
+      const data = raw.onResponseReceivedEndpoints[1].appendContinuationItemsAction.continuationItems[0]
+        .commentThreadRenderer.replies.commentRepliesRenderer;
+      const items = data.subThreads;
+      delete data.subThreads;
+      data[field] = items;
+      delete items[0].continuationItemRenderer.button;
+      return raw;
+    }
+    if (count === 2) return flatReplies(['reply1'], 'flat-next');
+    if (count === 3) return { error: { code: 400 } };
+    const raw = flatReplies(['reply1', 'reply2']);
+    const action = raw.onResponseReceivedEndpoints[0];
+    action.reloadContinuationItemsCommand = action.appendContinuationItemsAction;
+    delete action.appendContinuationItemsAction;
+    return raw;
+  });
+  f.service.more(true); await f.idle();
+  assert.equal(f.service.read().items[0].hasReplies, true);
+  assert.equal(f.service.replies('parent'), true); await f.idle();
+  assert.equal(f.service.read().failed, false);
+  assert.deepEqual(Array.from(f.service.read().items[0].replies, reply => reply.text), ['Text reply1']);
+  assert.equal(f.service.read().items[0].hasReplies, true);
+  f.service.replies('parent'); await f.idle();
+  assert.equal(f.service.read().failed, true);
+  assert.equal(f.service.read().items[0].replies.length, 1);
+  f.service.more(); await f.idle();
+  assert.deepEqual(f.calls.slice(1).map(call => call.body.continuation), ['replies:parent', 'flat-next', 'flat-next']);
+  assert.equal(f.service.read().failed, false);
+  assert.deepEqual(Array.from(f.service.read().items[0].replies, reply => reply.key), ['reply1', 'reply2']);
+  assert.equal(f.service.read().items[0].hasReplies, false);
+  assert.equal(f.service.read().items.length, 1);
+  f.service.destroy();
+});
 test('failed pagination preserves comments and retries the same token', async () => {
   const f = fixture((_body, count) => {
     if (count === 1) return response(['one'], 'retry-token', { initial: true });

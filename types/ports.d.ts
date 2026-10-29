@@ -28,6 +28,7 @@ export interface PlaybackSnapshot {
   readonly video: VideoSnapshot | null;
   readonly captionsEnabled: boolean; readonly settingsOpen: boolean;
 }
+export interface RecommendationFilter { readonly key: string; readonly label: string; readonly selected: boolean }
 export interface RecommendationSnapshot {
   readonly channelBadge?: 'verified' | 'artist';
   readonly href?: string; readonly queue?: boolean; readonly selected?: boolean;
@@ -37,6 +38,8 @@ export interface RecommendationSnapshot {
   readonly isPlaylist?: boolean;
 }
 export interface WatchPageSnapshot extends RouteSnapshot {
+  readonly recommendationFilters?: readonly RecommendationFilter[];
+  readonly recommendationsLoading?: boolean;
   readonly metadataFailed?: boolean;
   readonly channelBadge?: 'verified' | 'artist';
   readonly queue?: readonly RecommendationSnapshot[];
@@ -64,11 +67,11 @@ export interface CommentSnapshot extends CommentReplySnapshot {
 export type WatchFeatures = Readonly<Partial<Record<'metadata' | 'recommendations' | 'comments'
   | 'channel' | 'captions' | 'settings' | 'subscribe' | 'like' | 'dislike' | 'save' | 'nativeLayers', Capability>>>;
 export interface AdaptationSnapshot { readonly status: 'inactive' | 'waiting' | 'ready' | 'fallback'; readonly reason: string; readonly route?: string }
-export interface CoordinatorSnapshot { readonly mode: Mode; readonly enabled: boolean; readonly surfaceReady: boolean; readonly transitioning?: boolean; readonly navigating: boolean }
+export interface CoordinatorSnapshot { readonly mode: Mode; readonly enabled: boolean; readonly surfaceReady: boolean; readonly shellVisible?: boolean; readonly transitioning?: boolean; readonly navigating: boolean }
 export interface Settings extends Partial<HomeFilterSettings> { seekStep?: number; shortsSeekStep?: number; volumeStep?: number; playbackLayout?: 'fullscreen' | 'windowed'; rightHandMode?: boolean; enabled: boolean; theater: boolean; deadzone: number; repeatDelay: number; repeatInterval: number; bindings?: Record<string, number>; bindingLayouts?: Record<string, Record<string, number>>; shortcutLayouts?: Record<string, Record<string, string>> }
 export type SearchTarget = HTMLInputElement | null;
 export type OperationResult = boolean | void;
-export type RecommendationResult = 'opened' | 'blocked' | 'missing';
+export type RecommendationResult = 'opened' | 'blocked' | 'missing' | 'failed';
 export interface CommentsStatus {
   route?: string; loading: boolean; failed: boolean; hasMore: boolean;
   interaction?: { signedIn: boolean; canPost: boolean; sort: 'TOP_COMMENTS' | 'NEWEST_FIRST'; sortAvailable: boolean; posting: boolean };
@@ -85,7 +88,8 @@ export interface WatchRequest {
   (type: 'commentPost', value: { text: string; key?: string }): OperationResult | Promise<OperationResult>;
   (type: 'commentSort', value: 'TOP_COMMENTS' | 'NEWEST_FIRST'): OperationResult;
   (type: 'fullscreen'): OperationResult | Promise<OperationResult>;
-  (type: 'moreRecommendations'): OperationResult;
+  (type: 'moreRecommendations', value?: 'queue' | 'recommendations'): OperationResult;
+  (type: 'recommendationFilter', value: string): OperationResult;
   (type: 'mode', value: Mode): OperationResult;
   (type: 'media', value: Action): OperationResult | Promise<OperationResult>;
   (type: 'watchAction', value: WatchAction): OperationResult | Promise<OperationResult>;
@@ -138,7 +142,7 @@ export interface AppSnapshot {
   readonly adaptation?: AdaptationSnapshot;
 }
 export interface WatchSnapshot {
-  readonly row: 'player' | 'metadata' | 'tabs' | 'controls' | 'progress' | 'recommendations'; readonly index: number;
+  readonly row: 'player' | 'metadata' | 'tabs' | 'filters' | 'controls' | 'progress' | 'recommendations'; readonly index: number;
   readonly controlIndex: number; readonly recommendationIndex: number; readonly adjusting: boolean;
   readonly panel: '' | 'description' | 'comments' | 'playlists' | 'subscription'; readonly panelIndex: number; readonly playIndex: number;
   readonly commentsParked?: boolean;
@@ -294,7 +298,8 @@ export interface SitePort extends WatchDataPort, SearchDataPort {
   translateComment(key: string): boolean;
   postComment?(text: string, key?: string): Promise<boolean>;
   sortComments?(sort: 'TOP_COMMENTS' | 'NEWEST_FIRST'): boolean;
-  loadRecommendations(): OperationResult;
+  loadRecommendations(kind?: 'queue' | 'recommendations'): OperationResult;
+  selectRecommendationFilter?(key: string): OperationResult;
   settingsOpen(): boolean; openSettings(): boolean; backSettings(menu?: HTMLElement | null): boolean;
   seekTo(time: number): boolean; observePage(onChange: () => void): Dispose;
   destroy(): void;
@@ -393,6 +398,7 @@ export type WatchView = Record<'host' | 'surface' | 'recommendations' | 'dialog'
     sideIndex?(): number;
     restoreSideScroll?(): void;
     readonly tabs?: readonly HTMLButtonElement[];
+    readonly filters?: readonly HTMLButtonElement[];
     updateHint(row: WatchSnapshot['row'], adjusting: boolean, canSeek?: boolean): void;
     presentation: import('../src/ui/playback-presentation').PlaybackPresenter;
   };

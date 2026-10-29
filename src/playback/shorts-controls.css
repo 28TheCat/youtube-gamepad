@@ -73,8 +73,8 @@ button:focus-visible,button[data-selected]{outline-color:var(--ytg-shorts-text)}
   .avatar{width:28px;height:28px}.identity{flex-wrap:wrap}.author{max-width:calc(100% - 40px)}
 }
 
-/* The whole media stage grows beyond the window; its surrounding controls stay fixed. */
-:host{overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+/* Keep the complete media and timeline inside the window. */
+:host{overflow:hidden;overscroll-behavior:contain}
 .stage{height:var(--ytg-shorts-height);overflow:hidden;pointer-events:auto;touch-action:pan-y}
 .back,.metadata,.rail,.navigation,.feedback,.hints,.drawer{position:fixed}
 .stage-content{position:relative;width:100%;height:var(--ytg-shorts-height);pointer-events:none}

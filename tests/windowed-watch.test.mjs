@@ -15,7 +15,7 @@ import { createVueWatchView } from '/src/ui/vue-watch-view.ts';
 import { YTGamepadStyles as styles } from '/src/ui/styles.ts';
 import { YTGamepadWatchPanels } from '/src/ui/watch-panels.ts';
 import { createNativePlayerControls } from '/src/sites/native-player-controls.ts';
-export function setup(rich = false, native = false) {
+export function setup(rich = false, native = false, loading = false, filters = false) {
   let state = machine.createState('/watch?v=one'), mode = 'controls';
   const commands = [];
   const interaction = { get state() { return state; }, dispatch(event) {
@@ -31,9 +31,11 @@ export function setup(rich = false, native = false) {
   const page = { isWatch: true, key: '/watch?v=one', title: 'Test video', channel: 'Author', description: '', subscribed: false, liked: false,
     recommendations: Array.from({ length: rich ? 30 : 3 }, (_, i) => ({ key: 'video' + i, title: 'Video ' + i, channel: 'Author', href: '/watch?v=video' + i, thumbnail: 'https://i.ytimg.com/vi/video' + i + '/hqdefault.jpg' })),
     queue: rich ? Array.from({ length: 20 }, (_, i) => ({ key: 'queue' + i, title: 'Queue ' + i, label: 'Queue ' + i, channel: 'Author', href: '/watch?v=queue' + i + '&list=PLtest&index=' + (i + 1), queue: true, selected: i === 2 })) : [] };
+  if (filters) page.recommendationFilters = ['All', 'Related', 'Recently uploaded'].map((label, index) => ({ key: 'filter:' + index, label, selected: index === 0 }));
   page.recommendations.push(...page.queue.filter(item => !item.selected));
+  if (loading) { page.title = ''; page.channel = ''; page.recommendations = []; page.recommendationsLoading = true; }
   const comments = rich ? Array.from({ length: 25 }, (_, i) => ({ key: 'comment' + i, author: 'Reader ' + i, text: 'Comment ' + i, hasReplies: false, repliesLabel: '', replies: [] })) : [];
-  const port = { state: { enabled: true, surfaceReady: true, navigating: false, get mode() { return mode; } }, navigating: false,
+  const port = { state: { enabled: true, shellVisible: true, surfaceReady: !loading, navigating: false, get mode() { return mode; } }, navigating: false,
     readRoute: () => ({ key: page.key, isWatch: page.isWatch }), readWatchPage: () => page,
     readPlayback: () => ({ video: { paused: false, ended: false, currentTime: 10, duration: 120, volume: .5, timeline: { start: 0, end: 120, position: 10, current: 10, duration: 120, canSeek: true, ranges: [{ start: 0, end: 120 }] } }, settingsOpen: false, captionsEnabled: false }),
     readWatchFeatures: () => ({}), readComments: () => comments, observePlayback() {}, hasTemporaryLayer: () => !!state.watch.panel && !state.watch.commentsParked,
@@ -43,6 +45,7 @@ export function setup(rich = false, native = false) {
       if (type === 'backSettings') return false;
       if (type === 'watchAction' && value === 'subscribe') page.subscribed = true;
       if (type === 'watchAction' && value === 'like') page.liked = !page.liked;
+      if (type === 'recommendationFilter') page.recommendationFilters = page.recommendationFilters.map(item => ({ ...item, selected: item.key === value }));
       if (type === 'playlists') return [];
       if (type === 'mode') { mode = value; watch.sync(); }
       if (type === 'fullscreen') { document.documentElement.dataset.ytgPlaybackLayout = 'fullscreen'; watch.sync(); }
@@ -457,7 +460,7 @@ test('return restores recommendation identity and scroll after the list order ch
 });
 
 
-test('player rebuilding retains the mounted detail surface until its replacement is ready', async t => {
+test('player rebuilding updates the mounted detail surface before its replacement is ready', async t => {
   const page = await browserPage(t);
   await page.setContent('<html data-ytg-playback-layout="windowed"><body></body></html>');
   await page.addScriptTag({ content: code });
@@ -466,11 +469,97 @@ test('player rebuilding retains the mounted detail surface until its replacement
   await page.evaluate(() => { window.fixture.waitForPlayer(); window.fixture.page.title = 'Replacement video'; window.fixture.watch.sync(); });
   assert.equal(await host.isVisible(), true);
   assert.equal(await host.locator('.surface').evaluate(node => node.inert), true);
-  assert.equal(await host.getByText('Test video', { exact: true }).count(), 1);
-  assert.equal(await host.getByText('Replacement video', { exact: true }).count(), 0);
+  assert.equal(await host.getByText('Test video', { exact: true }).count(), 0);
+  assert.equal(await host.getByText('Replacement video', { exact: true }).count(), 1);
   await page.setViewportSize({ width: 900, height: 700 });
   await page.evaluate(() => window.fixture.readyPlayer());
   assert.equal(await host.locator('.surface').evaluate(node => node.inert), false);
   assert.equal(await host.getByText('Replacement video', { exact: true }).count(), 1);
   assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch') === window.__watchHost), true);
+});
+
+test('cold watch shell renders and independently accepts recommendations and metadata before video readiness', async t => {
+  const page = await browserPage(t);
+  await page.setContent('<html data-ytg-playback-layout="windowed"><body></body></html>');
+  await page.addScriptTag({ content: code });
+  await page.evaluate(() => { window.fixture = WindowedWatchFixture.setup(false, false, true); window.__watchHost = document.querySelector('#ytg-watch'); });
+  const host = page.locator('#ytg-watch');
+  assert.equal(await host.isVisible(), true);
+  assert.equal(await host.locator('.surface').evaluate(node => node.inert), true);
+  assert.equal(await host.locator('.title').textContent(), 'Loading video…');
+  assert.equal(await host.locator('[data-load-state="loading"]').count(), 1);
+  await page.evaluate(() => {
+    window.fixture.page.recommendations = [{ key: 'early', label: 'Early recommendation', channel: 'Creator' }];
+    window.fixture.page.recommendationsLoading = false;
+    window.fixture.watch.refreshPage();
+  });
+  assert.equal(await host.getByText('Early recommendation', { exact: true }).count(), 1);
+  assert.equal(await host.locator('.title').textContent(), 'Loading video…');
+  await page.evaluate(() => { window.fixture.page.title = 'Arrived metadata'; window.fixture.watch.refreshPage(); });
+  assert.equal(await host.locator('.title').textContent(), 'Arrived metadata');
+  assert.equal(await host.locator('.surface').evaluate(node => node.inert), true);
+  await page.evaluate(() => window.fixture.readyPlayer());
+  assert.equal(await host.locator('.surface').evaluate(node => node.inert), false);
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch') === window.__watchHost), true);
+});
+
+test('controller switches from a collection to recommendations through the side tabs', async t => {
+  const page = await browserPage(t);
+  await page.setContent('<html data-ytg-playback-layout="windowed"><body></body></html>');
+  await page.addScriptTag({ content: code + ';window.fixture = WindowedWatchFixture.setup(true);' });
+  const press = action => page.evaluate(action => window.fixture.press(action), action);
+  const focused = () => page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement?.dataset.focusId);
+  await press('right'); await press('up');
+  assert.equal(await focused(), 'tab:0');
+  await press('right'); assert.equal(await focused(), 'tab:1');
+  await press('confirm');
+  assert.equal(await page.locator('#ytg-watch .collection-panel').count(), 0);
+  assert.match(await focused(), /^recommendation:video/);
+  await page.evaluate(() => {
+    document.documentElement.dataset.ytgPlaybackLayout = 'windowed';
+    window.fixture.watch.sync();
+  });
+  assert.equal(await page.locator('#ytg-watch .collection-panel').count(), 0, 'repeated layout observations must not reopen the collection');
+  assert.equal(await page.locator('#ytg-watch .watch-tab:not(.collection-tab)').first().getAttribute('aria-selected'), 'true');
+  await page.locator('#ytg-watch .collection-tab').click();
+  await page.locator('#ytg-watch .watch-tab:not(.collection-tab)').first().click();
+  await page.evaluate(() => { document.documentElement.dataset.ytgPlaybackLayout = 'windowed'; });
+  assert.equal(await page.locator('#ytg-watch .collection-panel').count(), 0, 'mouse selection also survives layout synchronization');
+});
+
+test('native recommendation filters preserve the collection and support controller selection, mouse and media shortcuts', async t => {
+  const page = await browserPage(t);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.setContent('<html data-ytg-playback-layout="windowed"><body></body></html>');
+  await page.addStyleTag({ content: readFileSync(new URL('../src/ui/theme.css', import.meta.url), 'utf8') });
+  await page.addScriptTag({ content: code + ';window.fixture = WindowedWatchFixture.setup(true, false, false, true);' });
+  const host = page.locator('#ytg-watch');
+  const press = action => page.evaluate(action => window.fixture.press(action), action);
+  const focused = () => page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement?.dataset.focusId);
+  assert.equal(await host.locator('.recommendation-filters').count(), 0);
+  await host.locator('.watch-tab:not(.collection-tab)').first().click();
+  assert.equal(await host.locator('.recommendation-filters button').count(), 3);
+  await press('up'); assert.equal(await focused(), 'filter:0');
+  await press('right'); assert.equal(await focused(), 'filter:1');
+  await press('confirm');
+  assert.equal(await host.locator('[data-filter-key="filter:1"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.evaluate(() => window.fixture.commands.some(([type, key]) => type === 'recommendationFilter' && key === 'filter:1')), true);
+  await press('seekForward');
+  assert.deepEqual(await page.evaluate(() => window.fixture.commands.at(-1)), ['media', 'seekForward']);
+  assert.equal(await focused(), 'filter:1');
+  await press('up'); assert.equal(await focused(), 'tab:1');
+  await press('down'); await press('up'); assert.equal(await focused(), 'filter:1');
+  await press('down'); assert.match(await focused(), /^recommendation:video/);
+  assert.equal(await page.evaluate(() => window.fixture.commands.filter(([type]) => type === 'moreRecommendations').every(([, kind]) => kind === 'recommendations')), true);
+  await host.locator('[data-filter-key="filter:2"]').click();
+  assert.equal(await host.locator('[data-filter-key="filter:2"]').getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(await host.locator('.recommendation-filters .selected').evaluateAll(nodes => nodes.map(node => node.dataset.filterKey)), ['filter:2']);
+  mkdirSync('output/playwright', { recursive: true });
+  await page.screenshot({ path: 'output/playwright/recommendation-filters.png' });
+  await host.locator('.collection-tab').click();
+  assert.equal(await host.locator('.collection-entry').count(), 20);
+  assert.equal(await host.locator('.currently-playing').count(), 1);
+  assert.equal(await host.locator('.recommendation-filters').count(), 0);
+  await host.locator('.watch-tab:not(.collection-tab)').first().click();
+  assert.equal(await host.locator('[data-filter-key="filter:2"]').getAttribute('aria-pressed'), 'true');
 });

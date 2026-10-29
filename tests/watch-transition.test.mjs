@@ -27,7 +27,7 @@ function fixture() {
   const transition = exports.createWatchTransition(() => playerId, () => timedOut++);
   return { transition, children, callbacks, frames, media, location, listeners, get timedOut() { return timedOut; }, replace(value) { currentMedia = value; },
     id(value) { playerId = value; }, tick() { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); },
-    expire() { time = 9000; }, playing() { listeners.get('playing')?.({ target: media }); } };
+    expire(value = 21000) { time = value; }, playing() { listeners.get('playing')?.({ target: media }); } };
 }
 test('watch transition holds outgoing frame and reveals only when destination presents a frame', () => {
   const f = fixture();
@@ -75,6 +75,17 @@ test('timeout and leaving custom playback cannot leave an opaque cover', () => {
   }
 });
 
+test('slow collection navigation keeps its frame instead of timing out after eight seconds', () => {
+  const f = fixture();
+  f.transition.sync(true, '/watch?v=new&list=PLtest', true);
+  f.expire(9000); f.tick();
+  assert.equal(f.timedOut, 0);
+  assert.equal(f.children.size, 1);
+  f.expire(); f.tick();
+  assert.equal(f.timedOut, 1);
+  f.transition.destroy();
+});
+
 
 test('replacement media invalidates the old frame callback even on the same video route', () => {
   const f = fixture(); f.location.search = '?v=new'; f.id('new');
@@ -100,18 +111,18 @@ test('rapid video selections retain the already captured frame', () => {
   f.transition.destroy();
 });
 
-test('transition follows the video rectangle and holds its last bounds during player replacement', () => {
+test('transition keeps stage geometry while native media moves during player replacement', () => {
   const f = fixture();
   let bounds = { left: 24, top: 56, width: 860, height: 484 };
   f.media.getBoundingClientRect = () => bounds;
   f.transition.sync(true, '/watch?v=new', true);
   const host = [...f.children][0];
-  assert.equal(host.style.left, '24px'); assert.equal(host.style.width, '860px');
+  assert.equal(host.style.left, undefined); assert.equal(host.style.width, undefined);
   f.replace(null); f.tick();
-  assert.equal(f.children.size, 1); assert.equal(host.style.top, '56px');
+  assert.equal(f.children.size, 1); assert.equal(host.style.top, undefined);
   bounds = { left: 0, top: 0, width: 1280, height: 720 };
   f.replace(f.media); f.tick();
-  assert.equal(host.style.width, '1280px'); assert.equal(host.style.height, '720px');
+  assert.equal(host.style.width, undefined); assert.equal(host.style.height, undefined);
   f.transition.destroy();
 });
 

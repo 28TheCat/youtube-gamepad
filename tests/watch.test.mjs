@@ -103,7 +103,7 @@ function setup(integrated = false, inputMode = 'gamepad') {
   const document = {
     addEventListener: listen,
     createElement: node, createElementNS: (_ns, tag) => node(tag), body: node('body'),
-    documentElement: { dataset: {}, getAttribute: () => null, removeAttribute() {}, append() {}, classList: { contains: name => classes.has(name), add: name => classes.add(name), remove: name => classes.delete(name), toggle(name, value) { value ? classes.add(name) : classes.delete(name); } } },
+    documentElement: { style: { getPropertyValue: () => '', setProperty() {} }, dataset: {}, getAttribute: () => null, removeAttribute() {}, append() {}, classList: { contains: name => classes.has(name), add: name => classes.add(name), remove: name => classes.delete(name), toggle(name, value) { value ? classes.add(name) : classes.delete(name); } } },
     querySelector(selector) {
       if (selector === '#movie_player') return { getPlayerResponse: () => ({ videoDetails: { videoId: 'current', channelId: 'UCcreator', title: '当前视频', author: '测试频道', shortDescription: '视频说明', viewCount: '123' } }) };
       if (selector.startsWith('video')) return video;
@@ -584,6 +584,19 @@ test('adapter clears stale recommendations while the player belongs to the previ
   assert.equal(s.window.YTGamepadSite.openRecommendation('next', () => true), 'missing');
   s.watch.refresh();
   assert.equal(s.watch.state.recommendations, 0);
+});
+
+test('current-route recommendations remain available while video metadata still belongs to the previous route', () => {
+  const s = setup();
+  s.location.search = '?v=new-video';
+  s.window.__testWatchNext = () => ({ route: '/watch?v=new-video', recommendations: [
+    { key: 'ready', label: 'Already loaded', channel: 'Creator', href: '/watch?v=ready' }
+  ], queue: [], loading: false, failed: false });
+  const page = s.site.readWatchPage();
+  assert.equal(page.waiting, true);
+  assert.equal(page.title, '');
+  assert.equal(page.recommendations[0].key, 'ready');
+  assert.equal(page.recommendationsLoading, false);
 });
 
 

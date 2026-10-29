@@ -91,6 +91,8 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   const adaptation = (): AdaptationSnapshot => appState().adaptation || { status: 'inactive', reason: '' };
   const nativePageStyle = () => document.documentElement.getAttribute('data-ytg-browse-mode') === 'youtube';
   const surfaceReady = () => !transition.waiting && !nativePageStyle() && adaptation().status === 'ready' && adaptation().route === routeNow();
+  const shellVisible = () => preferences.enabled && !nativePageStyle() && !isShortsPlaybackRoute() &&
+    location.pathname === '/watch' && !appState().returning && adaptation().status !== 'fallback';
   const visibleMode = () => !isShortsPlaybackRoute() && location.pathname === '/watch' && surfaceReady() ? appState().mode : 'browse';
   function syncLoading() {
     if (!preferences.enabled || location.pathname !== '/watch' || expandedWatchRoute !== routeNow()) expandedWatchRoute = null;
@@ -106,7 +108,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     // Position that first frame without changing the still-visible browse page.
     document.documentElement.classList.toggle('ytg-player-primed', preferences.enabled && pageLayout &&
       app.openingVideo && !!app.navigation && !destinationReady && !app.returning && adaptation().status !== 'fallback');
-    transition.sync(preferences.enabled && pageLayout,
+    transition.sync(preferences.enabled && pageLayout && location.pathname === '/watch',
       app.openingVideo && app.navigation?.target || routeNow(),
       !!(app.openingVideo && app.navigation) || adaptation().status === 'waiting',
       adaptation().status === 'fallback' || !!app.returning);
@@ -209,7 +211,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       } else if (wasReady) {
         adaptationSince = Date.now(); setAdaptation('waiting');
         renderMode();
-      } else if (Date.now() - adaptationSince >= 5000) {
+      } else if (Date.now() - adaptationSince >= (health.missing.length > 0 && health.missing.every(item => item === 'current video' || item === 'video frames') ? 20000 : 5000)) {
         const reason = health.failed ? 'Player interface unavailable' : 'Missing: ' + health.missing.join(', ');
         diagnose('inspectWatchCapabilities', new Error(reason), 'site');
         failAdaptation(reason);
@@ -246,7 +248,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       const wasReady = surfaceReady();
       checkAdaptation();
       // Becoming ready already calls renderMode -> watch.sync -> readPage.
-      if ((updatePage || updatePlayback) && wasReady && surfaceReady()) {
+      if ((updatePage || updatePlayback) && (shellVisible() && !surfaceReady() || wasReady && surfaceReady())) {
         try {
           if ((updatePage && !watch?.refreshPage) || (updatePlayback && !watch?.refreshPlayback)) watch?.refresh();
           else { if (updatePage) watch?.refreshPage?.(); if (updatePlayback) watch?.refreshPlayback?.(); }
@@ -380,7 +382,8 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       return result && typeof result === 'object' && typeof result.then === 'function' ? Promise.resolve(result).then(completed).catch(failed) : completed(result as OperationResult);
     } catch (error) { return failed(error); }
   }
-  function request(type: 'moreRecommendations'): OperationResult;
+  function request(type: 'moreRecommendations', value?: 'queue' | 'recommendations'): OperationResult;
+  function request(type: 'recommendationFilter', value: string): OperationResult;
   function request(type: 'mode', value: Mode): OperationResult;
   function request(type: 'media', value: Action): OperationResult | Promise<OperationResult>;
   function request(type: 'watchAction', value: WatchAction): OperationResult | Promise<OperationResult>;
@@ -395,7 +398,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   function request(type: 'commentSort', value: 'TOP_COMMENTS' | 'NEWEST_FIRST'): OperationResult;
   function request(type: 'fullscreen'): OperationResult | Promise<OperationResult>;
   function request(type: 'settings' | 'backSettings' | 'channel'): OperationResult;
-  function request(...[type,value]: ['fullscreen'|'moreRecommendations'|'settings'|'backSettings'|'channel'|'playlists'] | ['mode',Mode] | ['media',Action] | ['watchAction',WatchAction] | ['seek',number] | ['recommendation'|'replies'|'translateComment'|'savePlaylist',string] | ['comments',boolean?] | ['commentPost', { text: string; key?: string }] | ['commentSort', 'TOP_COMMENTS' | 'NEWEST_FIRST']) {
+  function request(...[type,value]: ['fullscreen'|'settings'|'backSettings'|'channel'|'playlists'] | ['moreRecommendations', ('queue' | 'recommendations')?] | ['mode',Mode] | ['media',Action] | ['watchAction',WatchAction] | ['seek',number] | ['recommendationFilter'|'recommendation'|'replies'|'translateComment'|'savePlaylist',string] | ['comments',boolean?] | ['commentPost', { text: string; key?: string }] | ['commentSort', 'TOP_COMMENTS' | 'NEWEST_FIRST']) {
     if (lifecycle.destroyed) return false;
     if (!preferences.enabled || appState().navigation || appState().returning) return false;
     if (type === 'mode' && value !== 'browse' && !surfaceReady()) return false;
@@ -426,7 +429,8 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       case 'backSettings': return backSettings();
       case 'channel': return site.openChannel(() => setMode('browse'));
       case 'recommendation': return site.openRecommendation(value, prepareVideo);
-      case 'moreRecommendations': return site.loadRecommendations();
+      case 'moreRecommendations': return site.loadRecommendations(value);
+      case 'recommendationFilter': return site.selectRecommendationFilter?.(value) || false;
       case 'replies': return site.expandReplies(value);
       case 'translateComment': return site.translateComment(value);
       case 'comments': return site.loadComments(value);
@@ -592,7 +596,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     site = ports.site; watch = ports.watch;
     watch?.connect({ request, observePlayback, hasTemporaryLayer, requestAutoHide, requestRefresh: scheduleWatchRefresh,
       get nativePlayer() { return site.nativePlayer; },
-      get state() { return { mode: visibleMode(), enabled: preferences.enabled && !nativePageStyle() && !isShortsPlaybackRoute(), surfaceReady: surfaceReady(), transitioning: preferences.enabled && !nativePageStyle() && !appState().returning &&
+      get state() { return { mode: visibleMode(), shellVisible: shellVisible(), enabled: preferences.enabled && !nativePageStyle() && !isShortsPlaybackRoute(), surfaceReady: surfaceReady(), transitioning: preferences.enabled && !nativePageStyle() && !appState().returning &&
         (transition.waiting || adaptation().status === 'waiting' || !!appState().openingVideo), navigating: !!appState().navigation || appState().returning }; },
       dispatchAction: (action: Action) => core.act(action),
       readRoute: site.readRoute,

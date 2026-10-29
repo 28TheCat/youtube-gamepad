@@ -1,7 +1,7 @@
 import { createYouTubeHeaders, requestYouTube, mutateYouTube } from './youtube-request';
-import { Innertube, Parser } from 'youtubei.js/web';
+import { Innertube, Parser, YTNodes } from 'youtubei.js/web';
 import { createYouTubeSession } from './youtube-session';
-import type { YT, YTNodes } from 'youtubei.js/web';
+import type { YT } from 'youtubei.js/web';
 import type { CommentSnapshot, CommentReplySnapshot, CommentsStatus } from '../../types/ports';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import { PAGE_COMMENTS } from '../bridge/page-protocol';
@@ -11,8 +11,8 @@ import { nativeCommentTranslations, type NativeCommentTranslation } from './nati
 export interface CommentsSnapshot extends CommentsStatus {
   route: string; items: CommentSnapshot[];
 }
-type ReplyCursor = { replies?: Iterable<YTNodes.CommentThread>; has_continuation: boolean;
-  getContinuation(): Promise<ReplyCursor> };
+type ReplyItem = YTNodes.CommentThread | YTNodes.CommentView | YTNodes.ContinuationItem;
+type ReplyCursor = { endpoint?: YTNodes.NavigationEndpoint };
 type ThreadState = { thread: YTNodes.CommentThread; cursor?: ReplyCursor; replies: Map<string, CommentReplySnapshot> };
 Parser.setParserErrorHandler(() => {});
 
@@ -64,7 +64,7 @@ export function createCommentsService() {
     const session = createYouTubeSession(context, async () => {
       throw new Error('Unexpected network request from comments parser');
     });
-    // Keep the library's comment/reply cursors and initial token generation,
+    // Keep the library's comment cursor, endpoints and initial token generation,
     // but connect their actions directly to our JSON transport. No synthetic
     // fetch, request-body round trip or Response serialization is needed.
     session.actions.execute = (async (endpoint: string, args?: Record<string, any>) => {
@@ -91,7 +91,7 @@ export function createCommentsService() {
   }
   function hasReplies(entry: ThreadState) {
     if (entry.replies.size >= 100 || [...threads.values()].reduce((total, item) => total + item.replies.size, 0) >= 200) return false;
-    return entry.cursor ? entry.cursor.has_continuation : entry.thread.has_replies;
+    return !!entry.cursor?.endpoint;
   }
   function canReply(entry: ThreadState) {
     const dialog = entry.thread.comment?.reply_command?.dialog as YTNodes.CommentReplyDialog | undefined;
@@ -116,10 +116,10 @@ export function createCommentsService() {
         replies };
     });
   }
-  function collectReplies(entry: ThreadState, replies?: Iterable<YTNodes.CommentThread>) {
+  function collectReplies(entry: ThreadState, replies: Iterable<ReplyItem>) {
     let budget = 200 - entry.replies.size - [...threads.values()].reduce((total, item) => total + (item === entry ? 0 : item.replies.size), 0);
-    for (const reply of replies || []) {
-      const comment = reply.comment;
+    for (const reply of replies) {
+      const comment = reply.is(YTNodes.CommentThread) ? reply.comment : reply.is(YTNodes.CommentView) ? reply : undefined;
       if (budget <= 0 || entry.replies.size >= 100) break;
       if (comment?.comment_id && comment.content && !entry.replies.has(comment.comment_id)) {
         entry.replies.set(comment.comment_id, { key: comment.comment_id,
@@ -128,6 +128,14 @@ export function createCommentsService() {
         budget--;
       }
     }
+  }
+  function replyPage(entry: ThreadState, items: Iterable<ReplyItem>) {
+    // WEB responses use both flat CommentViews and CommentThreads. Follow the
+    // returned endpoint directly; continuation items need not have a button.
+    const list = [...items];
+    const continuation = list.find(item => item.is(YTNodes.ContinuationItem)) as YTNodes.ContinuationItem | undefined;
+    entry.cursor = { endpoint: continuation?.button?.endpoint || continuation?.endpoint };
+    collectReplies(entry, list);
   }
   async function request(key?: string) {
     const captured = state, controller = new AbortController();
@@ -139,9 +147,12 @@ export function createCommentsService() {
       if (key) {
         const entry = threads.get(key);
         if (!entry || !hasReplies(entry)) return;
-        const next = entry.cursor ? await entry.cursor.getContinuation() : await entry.thread.getReplies();
+        const next = await entry.cursor!.endpoint!.call(client().session.actions, { parse: true });
         if (captured !== state || captured.route !== route() || controller.signal.aborted || destroyed) return;
-        entry.cursor = next; collectReplies(entry, next.replies);
+        const action = next.on_response_received_endpoints?.find(item => 'contents' in item);
+        if (!action || !('contents' in action) || !action.contents)
+          throw new Error('Replies continuation unavailable');
+        replyPage(entry, action.contents.filterType(YTNodes.CommentThread, YTNodes.CommentView, YTNodes.ContinuationItem));
       } else {
         const target = parseWatchLink(captured.route) || parseShortLink(captured.route);
         if (!target) return;
@@ -152,7 +163,8 @@ export function createCommentsService() {
           const comment = thread.comment;
           if (!comment?.comment_id || !comment.content || threads.has(comment.comment_id) || threads.size >= 100) continue;
           const entry: ThreadState = { thread, replies: new Map() };
-          if (thread.replies) { entry.cursor = thread; collectReplies(entry, thread.replies); }
+          const data = thread.comment_replies_data;
+          if (data) replyPage(entry, [...data.contents, ...data.sub_threads]);
           threads.set(comment.comment_id, entry);
         }
         page = next; initialized = true;

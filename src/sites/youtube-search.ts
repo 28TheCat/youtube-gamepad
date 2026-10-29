@@ -1,6 +1,7 @@
 import { safeHomeFilterData, parseViewCount, parseDuration, parsePublishedAt } from '../shared/home-filter';
 import { contentRoots, continuationToken, parseYouTubePage, parsedChips, walkParsed, type ParsedPage } from './youtube-parser';
 import type { BrowseItem } from '../shared/browse-data';
+import { safePreviewThumbnail } from '../shared/browse-data';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import { playlistColor } from '../shared/playlist-colors';
 import { parsePlaylistLink } from '../shared/watch-link';
@@ -41,7 +42,7 @@ export function parseYouTubeJsBrowse(raw: Node) {
 export function parsedCards(roots: unknown): any[] {
   const cards: any[] = [];
   walkParsed(roots, node => {
-    if (['Video', 'GridVideo', 'CompactVideo', 'PlaylistVideo', 'PlaylistPanelVideo', 'Movie',
+    if (['Video', 'GridVideo', 'CompactVideo', 'PlaylistVideo', 'PlaylistPanelVideo', 'Movie', 'GridMovie',
       'Playlist', 'CompactPlaylist', 'Mix', 'CompactMix', 'LockupView', 'ReelItem', 'ShortsLockupView'].includes(node.type)) {
       cards.push(node); return false;
     }
@@ -68,7 +69,7 @@ export function browseItem(value: any, queuePlaylistId?: string): BrowseItem | u
   const lockup = value.type === 'LockupView';
   const playlist = ['Playlist', 'CompactPlaylist', 'Mix', 'CompactMix'].includes(value.type) ||
     (lockup && value.content_type === 'PLAYLIST');
-  const video = ['Video', 'GridVideo', 'CompactVideo', 'PlaylistVideo', 'PlaylistPanelVideo', 'Movie'].includes(value.type) ||
+  const video = ['Video', 'GridVideo', 'CompactVideo', 'PlaylistVideo', 'PlaylistPanelVideo', 'Movie', 'GridMovie'].includes(value.type) ||
     (lockup && ['VIDEO', 'MOVIE', 'SHORT'].includes(value.content_type));
   if (short || video || playlist) {
     const endpoint = value.endpoint || value.on_tap_endpoint || value.renderer_context?.command_context?.on_tap;
@@ -113,6 +114,10 @@ export function browseItem(value: any, queuePlaylistId?: string): BrowseItem | u
           .find((badge: any) => /^(?:\d+:){1,2}\d{2}$/.test(label(badge.text)))?.text);
       const avatars = [...(value.metadata?.image?.avatar?.image || []), ...(value.author?.thumbnails || [])];
       const overlays = [...(value.thumbnail_overlays || []), ...(image?.overlays || []), ...(image?.primary_thumbnail?.overlays || [])];
+      const previews = [...(Array.isArray(value.rich_thumbnail) ? value.rich_thumbnail : []),
+        ...overlays.filter((overlay: any) => overlay.type === 'AnimatedThumbnailOverlayView').flatMap((overlay: any) => overlay.thumbnail || [])];
+      const previewThumbnail = !playlist && previews.sort((a: any, b: any) => (b.width || 0) - (a.width || 0))
+        .map((image: any) => safePreviewThumbnail(image.url)).find(Boolean);
       const progress = overlays.find((overlay: any) => overlay.type === 'ThumbnailOverlayResumePlayback')?.percent_duration_watched ??
         overlays.find((overlay: any) => overlay.progress_bar)?.progress_bar?.start_percent;
       const watchedPercent = !playlist && typeof progress === 'number' && Number.isFinite(progress)
@@ -134,6 +139,7 @@ export function browseItem(value: any, queuePlaylistId?: string): BrowseItem | u
         ...(typeof value.subscribe_button?.subscribed === 'boolean' ? { subscribed: value.subscribe_button.subscribed } : {})
       });
       return { id: target.id, href: target.href, title, thumbnail, thumbnailFallback: fallback,
+        ...(previewThumbnail ? { previewThumbnail } : {}),
         ...(filterData ? { filterData } : {}),
         channel: label(value.author?.name) || label(value.short_byline_text) || label(value.author) ||
           (playlist || inlineByline || textRows.length > 1 || details.length === 1 ? textRows[0]?.[0] || '' : ''),

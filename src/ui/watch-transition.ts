@@ -7,12 +7,6 @@ export function createWatchTransition(readPlayerId: () => string | undefined, on
   let lastMedia: HTMLVideoElement | undefined;
   const frameReadiness = createMediaFrameReadiness();
   const video = () => document.querySelector<HTMLVideoElement>('#movie_player video');
-  function position(media: HTMLVideoElement | null) {
-    const rect = media?.getBoundingClientRect?.();
-    if (!host || !rect || rect.width <= 0 || rect.height <= 0) return;
-    for (const [name, value] of Object.entries({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }))
-      host.style.setProperty(name, `${value}px`, 'important');
-  }
   function clear() {
     ++version; frameReadiness.reset(); if (raf) cancelAnimationFrame(raf); raf = 0;
     host?.remove(); host = undefined; target = '';
@@ -30,14 +24,13 @@ export function createWatchTransition(readPlayerId: () => string | undefined, on
   function check() {
     if (!host) return;
     const media = video();
-    position(media);
     if (media && matches(media)) {
       const expected = version;
       if (frameReadiness.ready(media, target, () => {
         if (expected === version && host && matches(media)) reveal();
       })) { reveal(); return; }
     } else frameReadiness.reset();
-    if (Date.now() - started > 8000) {
+    if (Date.now() - started > 20000) {
       // Keep the last frame until the shell replaces it with an actionable error.
       frameReadiness.reset(); raf = 0; onTimeout?.(); return;
     }

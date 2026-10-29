@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { launchExtension } from './helpers/extension.mjs';
 import { ProtoUtils } from 'youtubei.js/web';
 
-function response(id, { initial = false, next, replies = false, translateTo } = {}) {
+function response(id, { initial = false, next, replies = false, translateTo, flat = false } = {}) {
   const token = value => ({ continuationItemRenderer: { continuationEndpoint: {
     continuationCommand: { token: value, request: 'CONTINUATION_REQUEST_TYPE_WATCH_NEXT' }
   } } });
@@ -11,8 +11,9 @@ function response(id, { initial = false, next, replies = false, translateTo } = 
     ...(translateTo ? { translateButton: { buttonRenderer: { serviceEndpoint: { performCommentActionEndpoint: {
       action: ProtoUtils.encodeCommentActionParams(22, { text: `Body ${id}`, target_language: translateTo })
     } } } } } : {}) } },
-    ...(replies ? { replies: { commentRepliesRenderer: { subThreads: [token('reply-parent')] } } } : {})
+    ...(replies ? { replies: { commentRepliesRenderer: { contents: [token('reply-parent')] } } } : {})
   } }, ...(next ? [token(next)] : [])];
+  if (flat) items[0] = items[0].commentThreadRenderer.commentViewModel;
   return { onResponseReceivedEndpoints: [
     ...(initial ? [{ reloadContinuationItemsCommand: { continuationItems: [] } }] : []),
     { appendContinuationItemsAction: { continuationItems: items } }
@@ -38,7 +39,7 @@ test('manifest comments service loads comments, replies and next page without na
       const body = route.request().postDataJSON();
       if (!body.continuation) { await route.fulfill({ json: {} }); return; }
       calls.push({ body, headers: await route.request().allHeaders() });
-      await route.fulfill({ json: body.continuation === 'reply-parent' ? response('reply')
+      await route.fulfill({ json: body.continuation === 'reply-parent' ? response('reply', { flat: true })
         : body.continuation === 'comments-next' ? response('second')
           : response('parent', { initial: true, next: 'comments-next', replies: true, translateTo: 'ja' }) });
     } else if (new URL(route.request().url()).pathname === '/youtubei/v1/comment/perform_comment_action') {

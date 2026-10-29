@@ -63,13 +63,13 @@ test('bundled channel adapter exposes tabs and sorting through the existing page
   assert.equal(first.ok, true);
   assert.equal(first.value.items[0].thumbnail, 'https://i.ytimg.com/vi/videos/large.jpg');
   const categories = await invoke({ operation: 'readBrowseCategories' });
-  assert.deepEqual(categories.value.map(item => item.label), ['All', 'videos', 'shorts', 'Sort · Popular']);
+  assert.deepEqual(categories.value.map(item => item.label), ['All', 'videos', 'shorts', 'Popular']);
   assert.equal(JSON.stringify(categories).includes('browseId'), false);
   const shorts = categories.value.find(item => item.label === 'shorts');
   const switched = await invoke({ operation: 'requestBrowse', category: shorts.id });
   assert.equal(switched.value.items[0].id, 'video:shorts');
   const updated = await invoke({ operation: 'readBrowseCategories' });
-  const popular = updated.value.find(item => item.label === 'Sort · Popular');
+  const popular = updated.value.find(item => item.label === 'Popular');
   const sorted = await invoke({ operation: 'requestBrowse', category: popular.id });
   assert.equal(sorted.value.items[0].id, 'video:popular');
   assert.notEqual(sorted.value.nextPage, 'private-next');

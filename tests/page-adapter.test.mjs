@@ -62,15 +62,16 @@ function fixture() {
   let player;
   let details;
   document.querySelector = () => player;
-  const context = { document, window, CustomEvent, URL, setTimeout, clearTimeout, crypto: { randomUUID: () => 'test' },
+  const context = { document, window, CustomEvent, URL, URLSearchParams, setTimeout, clearTimeout, crypto: { randomUUID: () => 'test' },
     history: { pushState() {}, replaceState() {} }, location: { pathname: '/', search: '' } };
   const languages = load('shared/comment-language', context);
   const protocol = load('bridge/page-protocol', context, { '../shared/watch-link': load('shared/watch-link', context), '../shared/comment-language': languages });
-  const sidebarData = load('shared/sidebar-data', context, { './explore-pages': load('shared/explore-pages', context) });
-  const modules = { './page-protocol': protocol, '../shared/watch-link': load('shared/watch-link', context), '../shared/sidebar-data': sidebarData, '../shared/comment-language': languages };
+  const sidebarData = load('shared/sidebar-data', context);
+  const modules = { '../sites/youtube-notifications': { notificationSnapshot: value => value, createNotificationService: () => ({ read: async () => ({}), destroy() {} }) }, './page-protocol': protocol, '../shared/watch-link': load('shared/watch-link', context), '../shared/sidebar-data': sidebarData, '../shared/comment-language': languages };
   const server = load('bridge/page-server', context, { ...modules,
     '../sites/youtube-shorts': { createShortsService: () => ({ read: async () => ({ ids: ['second'], hasMore: true }), destroy() {} }) },
-    '../sites/youtube-sidebar': { createSidebarService: () => ({ read: async () => sidebarData.defaultSidebar(), destroy() {} }) },
+    '../sites/youtube-sidebar': { createSidebarService: () => ({ read: async () => ({
+      sections: [{ id: 'primary', entries: [{ id: 'home', label: 'Home', href: '/', icon: 'home' }] }] }), destroy() {} }) },
     '../sites/youtube-account': { createAccountService: () => ({ read: async () => ({ signedIn: false, accounts: [] }), destroy() {} }) },
     '../sites/youtube-watch-data': { createWatchDataService: () => ({ routeChanged() {}, destroy() {} }) },
     '../sites/youtube-watch-info': { createWatchInfoService: () => ({ read: () => ({ route: '/', details }),
@@ -106,20 +107,39 @@ test('Shorts settings bridge bounds qualities, targets the current video and rej
   dispose();
 });
 
+test('display image URLs reject credentials and unsafe inputs while previews retain their own host and length limits', () => {
+  const { safeImageUrl } = load('shared/image-url', { URL });
+  const { safePreviewThumbnail } = load('shared/browse-data', { URL });
+  const signed = 'https://yt3.ggpht.com/avatar?token=a%2Fb&size=128';
+  assert.equal(safeImageUrl(signed), signed);
+  for (const value of [undefined, {}, '', '/avatar.png', 'http://example.com/avatar', 'javascript:alert(1)',
+    'data:image/png;base64,AAAA', 'https://user:secret@example.com/avatar', 'https://user@example.com/avatar',
+    `https://example.com/${'a'.repeat(4096)}`]) assert.equal(safeImageUrl(value), undefined);
+  assert.equal(safePreviewThumbnail(signed), undefined);
+  const preview = `https://i.ytimg.com/an_webp/video?token=${'a'.repeat(5000)}`;
+  assert.equal(safePreviewThumbnail(preview), preview);
+  assert.equal(safeImageUrl(preview), undefined);
+});
+
 test('sidebar bridge returns API snapshots and filters unsafe links and private fields', async () => {
   const f = fixture(); f.server.startPageServer();
   const sidebar = await f.client.readSidebar();
-  assert.equal(sidebar.personal.length, 5);
-  const data = load('shared/sidebar-data', f.context, { './explore-pages': load('shared/explore-pages', f.context) });
-  const value = data.sidebarSnapshot({ personal: [], explore: [
+  assert.deepEqual(JSON.parse(JSON.stringify(sidebar)), {
+    sections: [{ id: 'primary', entries: [{ id: 'home', label: 'Home', href: '/', icon: 'home' }] }] });
+  const data = load('shared/sidebar-data', f.context);
+  const value = data.sidebarSnapshot({ sections: [{ id: 'regional', label: 'Explore', entries: [
     { id: 'music', label: 'x'.repeat(900), href: '/gaming', icon: 'explore', token: 'private' },
     { id: 'evil', label: 'Bad', href: 'https://evil.example/gaming', icon: 'explore' },
     { id: 'credentials', label: 'Bad', href: 'https://user:secret@studio.youtube.com/', icon: 'videos' },
     { id: 'script', label: 'Bad', href: 'javascript:alert(1)', icon: 'explore' }
-  ] });
-  assert.equal(value.explore.length, 1); assert.equal(value.explore[0].label.length, 200);
+  ] }] });
+  assert.equal(value.sections.length, 1);
+  assert.equal(value.sections[0].entries.length, 1); assert.equal(value.sections[0].entries[0].label.length, 200);
   assert.equal(JSON.stringify(value).includes('private'), false);
-  assert.equal(data.sidebarSnapshot({ explore: [] }), undefined);
+  assert.equal(data.sidebarSnapshot({ personal: [], explore: [] }), undefined);
+  assert.equal(data.sidebarSnapshot({ sections: {} }), undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(data.sidebarSnapshot({ sections: [] }))), { sections: [] });
+  assert.deepEqual(JSON.parse(JSON.stringify(data.sidebarSnapshot({ sections: [], personal: [], explore: [] }))), { sections: [] });
   f.client.destroy();
 });
 
@@ -149,6 +169,9 @@ test('native playback identity is available independently of API metadata and re
   assert.equal(f.client.readPlayerVideoId(), 'current');
   f.context.location.pathname = '/watch'; f.context.location.search = '?v=next';
   assert.equal(f.client.readPlayerVideoId(), 'current', 'the URL alone cannot authorize a reused player');
+  f.setPlayer({ getVideoData: () => ({ video_id: 'current' }), getPlayerResponse: () => ({ videoDetails: { videoId: 'next' } }) });
+  assert.equal(f.client.readPlayerVideoId(), 'next', 'the destination response can arrive before getVideoData updates');
+  f.setPlayer({ getVideoData: () => ({ video_id: id }) });
   id = 'next';
   assert.equal(f.client.readPlayerVideoId(), 'next', 'ready media does not wait for API metadata');
   f.setPlayer({ getVideoData() { throw Error('unavailable'); }, getPlayerResponse: () => ({ videoDetails: { videoId: 'fallback', secret: 'hidden' } }) });
@@ -334,12 +357,20 @@ test('Shorts route failures never fall back to document navigation while switchi
   f.context.location.assign = href => destinations.push(href);
   f.setPlayer({ navigate_: endpoint => endpoints.push(endpoint) });
   const dispose = f.server.startPageServer();
-  assert.equal(f.client.openWatchVideo('/shorts/second'), true);
+  const open = href => {
+    let opened = false;
+    const receive = event => { const message = JSON.parse(event.detail); if (message.id === 'short-route') opened = message.value === true; };
+    f.document.addEventListener(f.protocol.PAGE_RESPONSE, receive);
+    f.document.dispatchEvent(new CustomEvent(f.protocol.PAGE_REQUEST, { detail: JSON.stringify({ version: 1, id: 'short-route', operation: 'openBrowseVideo', href }) }));
+    f.document.removeEventListener(f.protocol.PAGE_RESPONSE, receive);
+    return opened;
+  };
+  assert.equal(open('/shorts/second'), true);
   assert.equal(endpoints[0].reelWatchEndpoint.videoId, 'second');
   f.setPlayer({ navigate_() { throw new Error('Router unavailable'); } });
-  assert.equal(f.client.openWatchVideo('/shorts/third'), false);
+  assert.equal(open('/shorts/third'), false);
   f.setPlayer({});
-  assert.equal(f.client.openWatchVideo('/shorts/third'), false);
+  assert.equal(open('/shorts/third'), false);
   assert.deepEqual(destinations, []);
   dispose();
 });
@@ -461,4 +492,51 @@ test('already cancelled startup never contacts the page', async () => {
   controller.abort();
   assert.equal(await f.waitForPageServer({ ping() { throw new Error('Must not request'); } }, controller.signal), false);
   assert.equal(f.timers.size, 0);
+});
+
+
+test('watch switching preserves the document and sends playlist context through in-page navigation', () => {
+  const f = fixture(), endpoints = [];
+  const app = new EventTarget();
+  app.addEventListener('yt-navigate', event => endpoints.push(event.detail.endpoint));
+  f.setPlayer(app);
+  const dispose = f.server.startPageServer();
+  const href = '/watch?v=second&list=PLtest&index=2';
+  const document = f.document;
+  assert.equal(f.client.openWatchVideo(href), true);
+  assert.equal(f.document, document);
+  assert.equal(endpoints.length, 1);
+  assert.equal(endpoints[0].watchEndpoint.videoId, 'second');
+  assert.equal(endpoints[0].watchEndpoint.playlistId, 'PLtest');
+  assert.equal(endpoints[0].watchEndpoint.index, 1);
+  assert.equal(f.client.openWatchVideo('https://evil.test/watch?v=second'), false);
+  assert.equal(endpoints.length, 1);
+  const responses = [];
+  f.document.addEventListener(f.protocol.PAGE_RESPONSE, event => responses.push(JSON.parse(event.detail)));
+  f.document.dispatchEvent(new CustomEvent(f.protocol.PAGE_REQUEST, {
+    detail: JSON.stringify({ version: 1, id: 'browse-event-only', operation: 'openBrowseVideo', href })
+  }));
+  assert.equal(responses.at(-1).ok, false, 'browse entry requires the native router even when event dispatch is available');
+  assert.equal(endpoints.length, 1);
+  app.navigate_ = endpoint => endpoints.push(endpoint);
+  assert.equal(f.client.openWatchVideo(href), true);
+  assert.equal(endpoints.length, 2, 'native routing must not also dispatch the fallback event');
+  assert.deepEqual(endpoints[1], endpoints[0]);
+  app.navigate_ = () => { throw new Error('Router unavailable'); };
+  assert.equal(f.client.openWatchVideo(href), false);
+  assert.equal(endpoints.length, 2, 'a throwing native router must not trigger the event fallback');
+  f.setPlayer(null);
+  assert.equal(f.client.openWatchVideo(href), false);
+  dispose();
+});
+
+test('recommendation filter snapshots retain bounded display fields without commands', () => {
+  const f = fixture();
+  const value = f.protocol.watchNextSnapshot({ route: '/watch?v=fixture', recommendations: [], queue: [], filters: [
+    { key: 'filter:1', label: 'x'.repeat(500), selected: true, endpoint: { token: 'private' } },
+    { key: 'arbitrary-command', label: 'Invalid', selected: true }
+  ] });
+  assert.equal(value.filters.length, 1); assert.equal(value.filters[0].label.length, 200);
+  assert.equal(JSON.stringify(value).includes('private'), false);
+  assert.deepEqual(Object.keys(value.filters[0]), ['key', 'label', 'selected']);
 });

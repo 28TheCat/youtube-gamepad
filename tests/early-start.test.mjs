@@ -101,7 +101,7 @@ test('synchronous extension invalidation clears early startup without throwing',
 
 
 test('native account flows do not install a startup cover', () => {
-  for (const route of ['/signin', '/channel_switcher', '/logout']) {
+  for (const route of ['/account', '/signin', '/channel_switcher', '/logout']) {
     const f = fixture(false, false, route);
     assert.equal(f.children.size, 0);
     assert.equal(f.attributes.size, 0);

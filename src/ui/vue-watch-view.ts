@@ -5,7 +5,7 @@ import PlaybackMetadata from './PlaybackMetadata.vue';
 import PlaybackRecommendations from './PlaybackRecommendations.vue';
 import PlaybackHints from './PlaybackHints.vue';
 import Timeline from '../playback/Timeline.vue';
-import type { WatchView, WatchViewDependencies, WatchSnapshot, RecommendationSnapshot } from '../../types/ports';
+import type { WatchView, WatchViewDependencies, WatchSnapshot, RecommendationFilter, RecommendationSnapshot } from '../../types/ports';
 import type { PlaybackMetadata as Metadata, PlaybackControlState, PlaybackPresenter } from './playback-presentation';
 import { sameRecommendations } from './playback-presentation';
 import { createPlaybackModel } from '../playback/playback-model';
@@ -38,9 +38,12 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
   const dialog = make('div', 'dialog'); dialog.hidden = true; dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', 'Video description');
   const sheet = make('section', 'sheet'), panelTitle = make('h2', '', 'Video description'), description = make('div', 'description'), close = make('button', 'control', 'Back');
   controllerStyle.bind(close, 'Back'); controllerStyle.bind(panelTitle, 'Video description'); controllerStyle.bind(dialog, 'Video description', 'aria-label');
+  let observedLayout = document.documentElement.dataset.ytgPlaybackLayout;
   const languageObserver = new MutationObserver(records => {
     host.lang = currentLanguage();
-    if (records.some(record => record.attributeName === 'data-ytg-playback-layout')) {
+    const nextLayout = document.documentElement.dataset.ytgPlaybackLayout;
+    if (records.some(record => record.attributeName === 'data-ytg-playback-layout') && nextLayout !== observedLayout) {
+      observedLayout = nextLayout;
       if (!windowed()) { collectionOpen = false; surface.classList.remove('fullscreen-collection-open'); }
       else if (hasCollection()) collectionOpen = true;
       paintProgress(); paintControls(); paintRecommendations(); if (sidePositions.has(sideKey())) restoreSideScroll(); else revealCollectionCurrent();
@@ -56,16 +59,23 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
   let metadata: Metadata = { title: '', channel: '' };
   let playbackControls: PlaybackControlState | undefined;
   let selected = '', adjusting = false, row: WatchSnapshot['row'] = 'controls', commentsOpen = false;
-  let recommendations: readonly RecommendationSnapshot[] = [], recommendationsFailed = false;
+  let recommendations: readonly RecommendationSnapshot[] = [], recommendationsFailed = false, recommendationsLoading = true;
+  let recommendationFilters: readonly RecommendationFilter[] = [];
   let queue: readonly RecommendationSnapshot[] = [], playlistTitle = '', playlistTotal: number | undefined, collectionOpen = false;
   const windowed = () => document.documentElement.dataset.ytgPlaybackLayout === 'windowed';
-  const hasCollection = () => queue.length > 0;
+  const collectionRoute = (route: string) => {
+    try { const url = new URL(route, 'https://www.youtube.com'); return url.pathname === '/watch' && !!url.searchParams.get('list'); }
+    catch { return false; }
+  };
+  let expectsCollection = collectionRoute(location.href);
+  const hasCollection = () => expectsCollection || queue.length > 0;
+  collectionOpen = expectsCollection && windowed();
   let collectionFrame: number | undefined;
   let cardCache: HTMLButtonElement[] = [], selectedNode: HTMLElement | undefined;
   const controlNodes = new Map<string, HTMLButtonElement>(), recommendationNodes = new Map<string, HTMLButtonElement>();
   const openVideo = (key: string) => { if (!windowed() && collectionOpen) closeFullCollection(); model.request('recommendation:' + key); };
   const sidePositions = new Map<string, { id: string; index: number; top: number }>();
-  const sideKey = () => collectionOpen ? 'collection' : 'recommendations';
+  const sideKey = () => collectionOpen ? 'collection' : 'recommendations:' + (recommendationFilters.find(item => item.selected)?.key || '');
   function rememberSide() {
     if (!windowed() || row !== 'recommendations') return;
     const index = cardCache.findIndex(node => node.dataset.focusId === selected);
@@ -100,7 +110,7 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
     return keys.length === Object.keys(right).length && keys.every(key => Object.is(left[key], right[key]));
   };
   function paintSelection() {
-    const node = selected.startsWith('tab:') ? controlsRoot.querySelectorAll<HTMLButtonElement>('.watch-tab')[Number(selected.slice(4))] : selected === 'player' ? player : selected === 'metadata' ? headingRoot.querySelector<HTMLElement>('[data-focus-id="metadata"]') || undefined : controlNodes.get(selected) || recommendationNodes.get(selected);
+    const node = selected.startsWith('filter:') ? Array.from(recommendationsRoot.querySelectorAll<HTMLButtonElement>('[data-filter-key]')).find(node => node.dataset.filterKey === selected) : selected.startsWith('tab:') ? controlsRoot.querySelectorAll<HTMLButtonElement>('.watch-tab')[Number(selected.slice(4))] : selected === 'player' ? player : selected === 'metadata' ? headingRoot.querySelector<HTMLElement>('[data-focus-id="metadata"]') || undefined : controlNodes.get(selected) || recommendationNodes.get(selected);
     if (selectedNode !== node) selectedNode?.classList.remove('selected');
     node?.classList.add('selected'); selectedNode = node;
   }
@@ -116,9 +126,9 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
   }
   function paintRecommendations() {
     collectionBackdrop.hidden = windowed() || !surface.classList.contains('fullscreen-collection-open');
-    render(h(PlaybackRecommendations, { items: recommendations, queue, playlistTitle, playlistTotal, collectionOpen: collectionOpen && (windowed() || surface.classList.contains('fullscreen-collection-open')),
+    render(h(PlaybackRecommendations, { filters: recommendationFilters, selectFilter: (key: string) => { rememberSide(); model.request('recommendationFilter:' + key); }, items: recommendations, queue, playlistTitle, playlistTotal, collectionLoading: expectsCollection && !queue.length && !recommendationsFailed, collectionOpen: collectionOpen && (windowed() || surface.classList.contains('fullscreen-collection-open')),
       fullscreenCollection: !windowed() && collectionOpen, closeCollection: () => { if (closeFullCollection()) activate('collectionClosed'); },
-      splitQueue: windowed(), failed: recommendationsFailed, openVideo }), recommendationsRoot);
+      splitQueue: windowed(), loading: recommendationsLoading, failed: recommendationsFailed, openVideo }), recommendationsRoot);
     cardCache = Array.from(recommendationsRoot.querySelectorAll<HTMLButtonElement>('.card')).filter(node => !node.disabled);
     recommendationNodes.clear();
     for (const node of cardCache) recommendationNodes.set(node.dataset.focusId!, node);
@@ -156,8 +166,12 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
     page(value, features) {
       if (destroyed) return;
       const hadCollection = hasCollection(), nextQueue = value.queue || [];
-      const queueChanged = !sameRecommendations(queue, nextQueue) || playlistTitle !== (value.playlistTitle || '') || playlistTotal !== value.playlistTotal;
-      queue = nextQueue; playlistTitle = value.playlistTitle || ''; playlistTotal = value.playlistTotal;
+      const nextExpectsCollection = collectionRoute(value.key);
+      const queueChanged = expectsCollection !== nextExpectsCollection || !sameRecommendations(queue, nextQueue) || playlistTitle !== (value.playlistTitle || '') || playlistTotal !== value.playlistTotal;
+      expectsCollection = nextExpectsCollection;
+      // Keep the last rendered queue independent of later updates to API arrays.
+      // Otherwise an in-place arrival looks unchanged and skips the collection tab.
+      queue = nextQueue.map(item => ({ ...item })); playlistTitle = value.playlistTitle || ''; playlistTotal = value.playlistTotal;
       if (!hasCollection()) { collectionOpen = false; collectionBackdrop.hidden = true; surface.classList.remove('fullscreen-collection-open'); }
       else if (!hadCollection && windowed()) collectionOpen = true;
       const next: Metadata = { title: value.title, channel: value.channel, viewCount: value.viewCount, metadataFailed: value.metadataFailed,
@@ -167,9 +181,17 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
       metadata = next;
       if (headingChanged) render(h(PlaybackMetadata, { page: metadata, activate }), headingRoot);
       if (controlsChanged || queueChanged) paintControls();
+      const previousFilter = recommendationFilters.find(item => item.selected)?.key;
+      const filtersChanged = JSON.stringify(recommendationFilters) !== JSON.stringify(value.recommendationFilters || []);
+      recommendationFilters = (value.recommendationFilters || []).map(item => ({ ...item }));
       const failed = features.recommendations === 'failed';
-      if (!sameRecommendations(recommendations, value.recommendations) || failed !== recommendationsFailed || queueChanged) {
-        recommendations = value.recommendations; recommendationsFailed = failed; paintRecommendations();
+      const loading = value.recommendationsLoading === true;
+      if (!sameRecommendations(recommendations, value.recommendations) || failed !== recommendationsFailed || loading !== recommendationsLoading || queueChanged || filtersChanged) {
+        recommendations = value.recommendations; recommendationsFailed = failed; recommendationsLoading = loading; paintRecommendations();
+        if (previousFilter !== recommendationFilters.find(item => item.selected)?.key && !collectionOpen) {
+          const container = recommendationsRoot.querySelector<HTMLElement>('.recommendations');
+          if (container) container.scrollTop = sidePositions.get(sideKey())?.top || 0;
+        }
         if (queueChanged) revealCollectionCurrent();
       }
     },
@@ -185,8 +207,9 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
     cards() { return cardCache; },
     reset() {
       if (destroyed) return;
-      model.reset(); selected = ''; adjusting = false; row = 'controls'; recommendations = []; recommendationsFailed = false;
-      queue = []; playlistTitle = ''; playlistTotal = undefined; collectionOpen = false; collectionBackdrop.hidden = true; surface.classList.remove('fullscreen-collection-open'); sidePositions.clear(); paintControls();
+      model.reset(); selected = ''; adjusting = false; row = 'controls'; recommendationFilters = []; recommendations = []; recommendationsFailed = false; recommendationsLoading = true;
+      metadata = { title: '', channel: '' }; render(h(PlaybackMetadata, { page: metadata, activate }), headingRoot);
+      queue = []; playlistTitle = ''; playlistTotal = undefined; expectsCollection = collectionRoute(location.href); collectionOpen = expectsCollection && windowed(); collectionBackdrop.hidden = true; surface.classList.remove('fullscreen-collection-open'); sidePositions.clear(); paintControls();
       paintProgress(); updatePlaybackControls(); paintRecommendations(); paintHints();
     },
     destroy() {
@@ -216,6 +239,7 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
       return index >= 0 ? index : Math.max(0, Math.min(saved.index, cardCache.length - 1));
     },
     restoreSideScroll,
+    get filters() { return Array.from(recommendationsRoot.querySelectorAll<HTMLButtonElement>('[data-filter-key]')); },
     get tabs() { return Array.from(controlsRoot.querySelectorAll<HTMLButtonElement>('.watch-tab')); },
     get progress() { return surface.querySelector<HTMLButtonElement>('.progress') || undefined; },
     get controls() { return [...controlNodes.values()]; }, recommendations: node('.recommendations'),

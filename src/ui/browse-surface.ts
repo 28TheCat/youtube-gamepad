@@ -244,7 +244,7 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
     }
     // API categories sit above the grid even before the native chip bar mounts.
     const categoryHeight = parseFloat(getComputedStyle(host).getPropertyValue('--ytg-client-categories')) || 56;
-    if (store.categories.length) top = Math.max(top, mastheadBottom + categoryHeight);
+    if (host.querySelector('#ytg-browse-categories')) top = Math.max(top, mastheadBottom + categoryHeight);
     const value = `${top}px`;
     if (host.style.getPropertyValue('--ytg-browse-top') !== value) host.style.setProperty('--ytg-browse-top', value);
   }
@@ -299,7 +299,7 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
   }
   // Category presence changes the grid inset; card selection and pagination
   // do not. Observe Vue state directly rather than rediscovering it from DOM.
-  lifecycle.cleanup(watch(() => store.categories.length > 0, scheduleLayout, { flush: 'post' }));
+  lifecycle.cleanup(watch(() => [store.snapshot.route, store.categories], scheduleLayout, { flush: 'post' }));
   lifecycle.cleanup(watch(gridSettings, scheduleLayout, { deep: true, flush: 'post' }));
   const source = lifecycle.observer(() => syncVisibility());
   source.observe(document.documentElement,
@@ -352,6 +352,9 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
         browseMode.state.mode !== 'gamepad' || !document.documentElement.classList.contains('ytg-theater')) return;
     const link = event.composedPath().find(node => node instanceof HTMLAnchorElement) as HTMLAnchorElement | undefined;
     if (!link || link.hasAttribute('download') || link.target && link.target !== '_self') return;
+    // The channel panel records its browsing context before navigating. Let its
+    // own handler run so channel changes keep the panel mounted.
+    if (link.closest('#ytg-subscription-channels')) return;
     let url: URL;
     try { url = new URL(link.href, location.origin); } catch { return; }
     if (url.origin !== location.origin || !['http:', 'https:'].includes(url.protocol) ||

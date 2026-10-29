@@ -54,6 +54,46 @@ function fixture(pathname = '/@creator/videos', handler) {
   return { ...sandbox.ChannelFixture, calls, location };
 }
 
+test('channel header comes from API and continuation does not invent a different header', async () => {
+  const s = fixture('/@wangzhian', (url, body) => {
+    if (url.endsWith('resolve_url')) return { endpoint: endpoint('featured') };
+    if (body.continuation) return { onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: [video('second')] } }] };
+    return { ...page(), header: { c4TabbedHeaderRenderer: {
+      title: '王志安', channelId: 'UCcreator',
+      avatar: { thumbnails: [{ url: 'https://example.com/avatar.jpg' }] },
+      banner: { thumbnails: [{ url: 'https://example.com/banner.jpg' }] },
+      subscriberCountText: { simpleText: '100万位订阅者' }
+    } } };
+  });
+  const service = s.createYouTubeFeedService();
+  const first = await service.request('all');
+  assert.equal(first.channelHeader.title, '王志安');
+  assert.equal(first.channelHeader.avatar, 'https://example.com/avatar.jpg');
+  assert.equal(first.channelHeader.banner, 'https://example.com/banner.jpg');
+  assert.match(first.channelHeader.metadata, /100万/);
+  const second = await service.request('all', first.nextPage);
+  assert.equal(second.channelHeader, undefined);
+  service.cancel();
+});
+
+test('modern channel header keeps title, banner, avatar and metadata', async () => {
+  const s = fixture('/@creator', url => url.endsWith('resolve_url') ? { endpoint: endpoint('featured') } : {
+    ...page(), header: { pageHeaderRenderer: { pageTitle: 'Creator', content: { pageHeaderViewModel: {
+      title: { dynamicTextViewModel: { text: { content: 'Creator' }, maxLines: 1 } },
+      image: { decoratedAvatarViewModel: { avatar: { avatarViewModel: { image: { sources: [{ url: 'https://example.com/avatar.png' }] } } } } },
+      banner: { imageBannerViewModel: { image: { sources: [{ url: 'https://example.com/banner.png' }] } } },
+      metadata: { contentMetadataViewModel: { metadataRows: [{ metadataParts: [{ text: { content: '@creator' } }, { text: { content: '100 subscribers' } }] }] } }
+    } } } }
+  });
+  const service = s.createYouTubeFeedService();
+  const result = await service.request('all');
+  assert.equal(result.channelHeader.title, 'Creator');
+  assert.equal(result.channelHeader.avatar, 'https://example.com/avatar.png');
+  assert.equal(result.channelHeader.banner, 'https://example.com/banner.png');
+  assert.equal(result.channelHeader.metadata, '@creator · 100 subscribers');
+  service.cancel();
+});
+
 for (const path of ['/@creator/videos', '/channel/UCcreator/shorts', '/c/Creator/streams', '/user/Creator'])
 test(`library channel endpoint parsing preserves resolved tab parameters for ${path}`, async () => {
   const s = fixture(path);
@@ -65,7 +105,7 @@ test(`library channel endpoint parsing preserves resolved tab parameters for ${p
   assert.equal(first.items.length, 1, 'hidden tab contents must be excluded');
   assert.equal(first.items[0].thumbnail, 'https://i.ytimg.com/vi/videos/large.jpg');
   assert.equal(first.nextPage === 'videos-next', false);
-  assert.deepEqual(Array.from(service.categories(), item => item.label), ['All', 'videos', 'shorts', 'playlists', 'Sort · Latest', 'Sort · Popular']);
+  assert.deepEqual(Array.from(service.categories(), item => item.label), ['All', 'videos', 'shorts', 'playlists', 'Latest', 'Popular']);
   const second = await service.request('all', first.nextPage);
   assert.equal(second.items[0].id, 'video:second');
   assert.equal(s.calls[2].body.continuation, 'videos-next');
@@ -88,7 +128,7 @@ test('tab switch, modern chip sorting and continuation retain their own server p
   const shorts = service.categories().find(item => item.label === 'shorts');
   await service.request(shorts.id);
   assert.equal(s.calls.at(-1).body.params, 'shorts');
-  const popular = service.categories().find(item => item.label === 'Sort · Popular');
+  const popular = service.categories().find(item => item.label === 'Popular');
   const sorted = await service.request(popular.id);
   assert.equal(sorted.items[0].id, 'video:popular');
   assert.equal(s.calls.at(-1).body.params, 'shorts-Popular');
@@ -148,7 +188,7 @@ for (const modern of [false, true]) test(`single-column channel API data retains
   const service = s.createYouTubeFeedService();
   const result = await service.request('all');
   assert.deepEqual(Array.from(result.items, item => item.id), ['video:shorts']);
-  assert.ok(service.categories().some(item => item.label === 'Sort · Popular'));
+  assert.ok(service.categories().some(item => item.label === 'Popular'));
 });
 
 test('sort discovery excludes hidden tabs and uses the selected tab submenu', async () => {
@@ -162,8 +202,8 @@ test('sort discovery excludes hidden tabs and uses the selected tab submenu', as
   });
   const service = s.createYouTubeFeedService();
   await service.request('all');
-  assert.equal(service.categories().some(item => item.label === 'Sort · Hidden sort'), false);
-  const popular = service.categories().find(item => item.label === 'Sort · Popular');
+  assert.equal(service.categories().some(item => item.label === 'Hidden sort'), false);
+  const popular = service.categories().find(item => item.label === 'Popular');
   await service.request(popular.id);
   assert.equal(s.calls.at(-1).body.params, 'shorts-Popular');
 });
@@ -188,7 +228,7 @@ test('dropdown filter items use parsed renderer-context browse endpoints', async
   });
   const service = s.createYouTubeFeedService();
   await service.request('all');
-  const oldest = service.categories().find(item => item.label === 'Sort · Oldest');
+  const oldest = service.categories().find(item => item.label === 'Oldest');
   assert.ok(oldest);
   await service.request(oldest.id);
   assert.equal(s.calls.at(-1).body.params, 'dropdown-Oldest');

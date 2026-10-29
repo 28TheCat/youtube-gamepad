@@ -14,6 +14,21 @@ import { sidebarBrowseEndpoint } from '../shared/explore-pages';
 import { createWatchInfoService } from '../sites/youtube-watch-info';
 import { createShortsService } from '../sites/youtube-shorts';
 
+function navigateWatchVideo(href: unknown, allowEventFallback: boolean): boolean {
+  const target = parseWatchLink(href);
+  if (!target || target.href !== href) return false;
+  try {
+    const app = document.querySelector('ytd-app') as (HTMLElement & { navigate_?: (endpoint: object) => void }) | null;
+    if (!app) return false;
+    const endpoint = { commandMetadata: { webCommandMetadata: { url: target.href, webPageType: 'WEB_PAGE_TYPE_WATCH' } },
+      watchEndpoint: target.watchEndpoint };
+    if (typeof app.navigate_ === 'function') app.navigate_(endpoint);
+    else if (allowEventFallback) app.dispatchEvent(new CustomEvent('yt-navigate', { bubbles: true, composed: true, detail: { endpoint } }));
+    else return false;
+    return true;
+  } catch { return false; }
+}
+
 export function startPageServer() {
   const key = Symbol.for('yt-gamepad.page.dispose');
   const host = window as unknown as DisposerHost;
@@ -43,7 +58,7 @@ export function startPageServer() {
     if (destroyed || serving) return;
     const request = parsePageMessage((event as CustomEvent).detail);
     if (!request || typeof request.id !== 'string' || request.id.length > 100 ||
-        !['readNotifications', 'shortsRecommendations', 'playShorts', 'readShortsSettings', 'shortsSetting', 'readSidebar', 'readAccount', 'ping', 'readPlayerVideoId', 'readVideoDetails', 'readWatchInfo', 'watchAction', 'watchPlaylists', 'watchPlaylistToggle', 'showControls', 'hideControls', 'readBrowseCategories', 'requestBrowse', 'cancelBrowse', 'openBrowseVideo', 'openBrowseRoute', 'readWatchNext', 'moreWatchNext', 'readComments', 'moreComments', 'commentReplies', 'commentTranslate', 'commentPost', 'commentSort'].includes(request.operation as string)) return;
+        !['readNotifications', 'shortsRecommendations', 'playShorts', 'readShortsSettings', 'shortsSetting', 'readSidebar', 'readAccount', 'ping', 'readPlayerVideoId', 'readVideoDetails', 'readWatchInfo', 'watchAction', 'watchPlaylists', 'watchPlaylistToggle', 'showControls', 'hideControls', 'readBrowseCategories', 'requestBrowse', 'cancelBrowse', 'openBrowseVideo', 'openWatchVideo', 'openBrowseRoute', 'readWatchNext', 'moreWatchNext', 'selectRecommendationFilter', 'readComments', 'moreComments', 'commentReplies', 'commentTranslate', 'commentPost', 'commentSort'].includes(request.operation as string)) return;
     const reply = (ok: boolean, value?: unknown) => {
       if (!destroyed) document.dispatchEvent(new CustomEvent(PAGE_RESPONSE, { detail: JSON.stringify({ version: 1,
         id: request.id, operation: request.operation, ok, value }) }));
@@ -119,7 +134,10 @@ export function startPageServer() {
       void watchInfo.togglePlaylist(request.key).then(value => reply(true, value), () => reply(false)); return;
     }
     if (request.operation === 'readWatchNext') { try { reply(true, next.read()); } catch { reply(false); } return; }
-    if (request.operation === 'moreWatchNext') { try { reply(true, next.more()); } catch { reply(false); } return; }
+    if (request.operation === 'selectRecommendationFilter') {
+      try { reply(true, typeof request.key === 'string' && request.route === next.read().route && next.selectFilter(request.key)); } catch { reply(false); } return;
+    }
+    if (request.operation === 'moreWatchNext') { try { reply(true, next.more(request.kind === 'queue' || request.kind === 'recommendations' ? request.kind : undefined)); } catch { reply(false); } return; }
     if (request.operation === 'readComments') { try { reply(true, comments.read()); } catch { reply(false); } return; }
     if (request.operation === 'moreComments') { reply(true, comments.more(request.start === true)); return; }
     if (request.operation === 'commentReplies') {
@@ -146,6 +164,11 @@ export function startPageServer() {
         if (!endpoint || typeof app?.navigate_ !== 'function') { reply(false); return; }
         app.navigate_(endpoint); reply(true, true);
       } catch { reply(false); }
+      return;
+    }
+    if (request.operation === 'openWatchVideo') {
+      const opened = navigateWatchVideo(request.href, true);
+      reply(opened, opened ? true : undefined);
       return;
     }
     if (request.operation === 'openBrowseVideo') {
@@ -178,15 +201,8 @@ export function startPageServer() {
         }
         return;
       }
-      const target = parseWatchLink(request.href);
-      if (!target || target.href !== request.href) { reply(false); return; }
-      const app = document.querySelector('ytd-app') as (HTMLElement & { navigate_?: (endpoint: object) => void }) | null;
-      try {
-        if (typeof app?.navigate_ !== 'function') { reply(false); return; }
-        app.navigate_({ commandMetadata: { webCommandMetadata: { url: request.href, webPageType: 'WEB_PAGE_TYPE_WATCH' } },
-          watchEndpoint: target.watchEndpoint });
-        reply(true, true);
-      } catch { reply(false); }
+      const opened = navigateWatchVideo(request.href, false);
+      reply(opened, opened ? true : undefined);
       return;
     }
     if (request.operation === 'readBrowseCategories') { try { reply(true, feed.categories()); } catch { reply(false); } return; }
@@ -211,6 +227,14 @@ export function startPageServer() {
           // the native player's identity, including its old ID during SPA reuse.
           let id: unknown;
           try { id = player?.getVideoData?.()?.video_id; } catch { /* Try the response API. */ }
+          // The two native APIs can update on different ticks during playlist navigation.
+          const expected = new URLSearchParams(location.search).get('v');
+          if (location.pathname === '/watch' && id !== expected) {
+            try {
+              const responseId = player?.getPlayerResponse?.()?.videoDetails?.videoId;
+              if (responseId === expected) id = responseId;
+            } catch { /* Keep the native identity already available. */ }
+          }
           if (typeof id !== 'string' || !/^[\w-]{1,200}$/.test(id)) {
             try { id = player?.getPlayerResponse?.()?.videoDetails?.videoId; } catch { id = undefined; }
           }

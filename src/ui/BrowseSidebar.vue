@@ -1,103 +1,36 @@
 <script setup lang="ts">
 import InterfaceIcon from './InterfaceIcon.vue';
-import { resolveExplorePage } from '../shared/explore-pages';
+import SidebarLinks from './SidebarLinks.vue';
 import { useI18n } from '../shared/use-i18n';
-const { t } = useI18n();
-import { defaultSidebar, type SidebarEntry } from '../shared/sidebar-data';
-import { createPageClient } from '../bridge/page-client';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-const props = defineProps<{ route: string; refreshHome?: () => void }>();
+import type { SidebarEntry, SidebarSnapshot } from '../shared/sidebar-data';
+import { computed, watch } from 'vue';
+const props = defineProps<{ route: string; snapshot?: SidebarSnapshot; openRoute: (href: string) => boolean; refreshHome?: () => void }>();
 const emit = defineEmits<{ changed: []; settings: [] }>();
-type Entry = SidebarEntry;
-const personalOpen = ref(true), exploreOpen = ref(!!resolveExplorePage(props.route));
-const fallback = defaultSidebar();
-const personal = ref<Entry[]>(fallback.personal), explore = ref<Entry[]>(fallback.explore);
-const page = createPageClient();
-let disposed = false, generation = 0;
-const primary: Entry[] = [
-  { id: 'home', label: '首页', href: '/', icon: 'home' },
-  { id: 'subscriptions', label: '订阅', href: '/feed/subscriptions', icon: 'subscriptions' }
-];
-const current = computed(() => new URL(props.route || location.pathname + location.search, location.origin));
-function active(href: string) {
-  const target = new URL(href, location.origin);
-  const topic = resolveExplorePage(href);
-  if (topic && topic.id === resolveExplorePage(props.route)?.id) return true;
-  return target.origin === current.value.origin && target.pathname === current.value.pathname && target.search === current.value.search;
-}
-async function readLinks() {
-  const version = ++generation;
-  try {
-    const snapshot = await page.readSidebar?.();
-    if (disposed || version !== generation) return;
-    const value = snapshot || defaultSidebar();
-    personal.value = value.personal; explore.value = value.explore;
-    await nextTick(); if (!disposed) emit('changed');
-  } catch { /* Built-in links remain available while the API is unavailable. */ }
-}
-function open(entry: Pick<Entry, 'id' | 'href'>, event: MouseEvent) {
+const { t } = useI18n();
+const fallback = computed<SidebarSnapshot>(() => ({ sections: [{ id: 'primary', entries: [
+  { id: 'home', label: t('首页'), href: '/', icon: 'home' },
+  { id: 'subscriptions', label: t('Subscribed channels'), href: '/feed/subscriptions', icon: 'subscriptions' }
+] }] }));
+const sections = computed(() => (props.snapshot || fallback.value).sections.map(section => section.id === 'subscriptions' ? {
+  ...section, label: undefined, entries: [{ id: 'subscription-channels', label: t('Subscribed channels'),
+    href: '', icon: 'subscriptions', children: section.entries, expanded: false }]
+} : section));
+watch(sections, () => emit('changed'), { flush: 'post' });
+function open(entry: Pick<SidebarEntry, 'id' | 'href'>, event: MouseEvent) {
   if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
   if (entry.href.startsWith('https:')) return;
   if (entry.id === 'home') {
     props.refreshHome?.();
     if (location.pathname === '/' && props.refreshHome) { event.preventDefault(); return; }
   }
-  if (entry.href === location.pathname + location.search || page.openBrowseRoute?.(entry.href)) event.preventDefault();
+  if (entry.href === location.pathname + location.search || props.openRoute(entry.href)) event.preventDefault();
 }
-async function toggle(group: 'personal' | 'explore') {
-  if (group === 'personal') personalOpen.value = !personalOpen.value;
-  else exploreOpen.value = !exploreOpen.value;
-  await nextTick(); emit('changed');
-}
-const reload = () => { void readLinks(); };
-onMounted(() => {
-  reload();
-  document.addEventListener('yt-navigate-finish', reload);
-  document.addEventListener('yt-page-data-updated', reload);
-  window.addEventListener('focus', reload);
-});
-watch(() => props.route, () => { if (resolveExplorePage(props.route)) exploreOpen.value = true; });
-onBeforeUnmount(() => {
-  disposed = true; ++generation; page.destroy?.();
-  document.removeEventListener('yt-navigate-finish', reload);
-  document.removeEventListener('yt-page-data-updated', reload);
-  window.removeEventListener('focus', reload);
-});
 </script>
 <template>
   <nav id="ytg-browse-sidebar" :aria-label="t('侧边目录')" @transitionend.self="emit('changed')">
-    <a v-for="entry in primary" :key="entry.id" :href="entry.href" :data-sidebar-id="entry.id"
-      :aria-label="t(entry.label)" :title="t(entry.label)" :aria-current="active(entry.href) ? 'page' : undefined" @click="open(entry, $event)">
-      <InterfaceIcon :name="entry.icon" :filled="active(entry.href)" /><span>{{ t(entry.label) }}</span>
-    </a>
-    <section>
-      <button id="ytg-sidebar-personal" data-sidebar-id="personal" type="button" :aria-expanded="personalOpen"
-        :aria-label="t('我的频道')" :title="t('我的频道')" aria-controls="ytg-sidebar-personal-links" @click="toggle('personal')">
-        <InterfaceIcon name="person" :filled="personalOpen" /><span>{{ t("我的频道") }}</span>
-        <InterfaceIcon name="right" class="sidebar-chevron" :class="{ expanded: personalOpen }" />
-      </button>
-      <div id="ytg-sidebar-personal-links" class="sidebar-group" :data-open="personalOpen"
-        :inert="!personalOpen" :aria-hidden="!personalOpen" @transitionend.self="emit('changed')"><div class="sidebar-group-content">
-        <a v-for="entry in personal" :key="entry.id" :href="entry.href" :data-sidebar-id="entry.id"
-          :target="entry.href.startsWith('https://studio.') ? '_blank' : undefined" rel="noopener"
-          :aria-label="t(entry.label)" :title="t(entry.label)" :aria-current="active(entry.href) ? 'page' : undefined" @click="open(entry, $event)">
-          <InterfaceIcon :name="entry.icon" :filled="active(entry.href)" /><span>{{ t(entry.label) }}</span>
-        </a>
-      </div></div>
-    </section>
-    <section>
-      <button id="ytg-sidebar-explore" data-sidebar-id="explore" type="button" :aria-expanded="exploreOpen"
-        :aria-label="t('探索')" :title="t('探索')" aria-controls="ytg-sidebar-explore-links" @click="toggle('explore')">
-        <InterfaceIcon name="explore" :filled="exploreOpen" /><span>{{ t("探索") }}</span>
-        <InterfaceIcon name="right" class="sidebar-chevron" :class="{ expanded: exploreOpen }" />
-      </button>
-      <div id="ytg-sidebar-explore-links" class="sidebar-group" :data-open="exploreOpen"
-        :inert="!exploreOpen" :aria-hidden="!exploreOpen" @transitionend.self="emit('changed')"><div class="sidebar-group-content">
-        <a v-for="entry in explore" :key="entry.id" :href="entry.href" :data-sidebar-id="entry.id"
-          :aria-label="t(entry.label)" :title="t(entry.label)" :aria-current="active(entry.href) ? 'page' : undefined" @click="open(entry, $event)">
-          <InterfaceIcon name="explore" :filled="active(entry.href)" /><span>{{ t(entry.label) }}</span>
-        </a>
-      </div></div>
+    <section v-for="section in sections" :key="section.id" :data-sidebar-section="section.id">
+      <h3 v-if="section.label" class="sidebar-section-title">{{ section.label }}</h3>
+      <SidebarLinks :entries="section.entries" :route="props.route" @open="open" @changed="emit('changed')" />
     </section>
     <section>
       <button id="ytg-sidebar-settings" data-sidebar-id="settings" type="button"

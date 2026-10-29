@@ -16,7 +16,7 @@ export const explorePages: readonly ExplorePageDefinition[] = [
   { id: 'live', label: 'Live', description: 'Discover live streams and broadcasts.',
     href: '/channel/UC4R8DWoMoI7CAwX8_LjQHig', browseId: 'UC4R8DWoMoI7CAwX8_LjQHig', aliases: ['/live', '/feed/live'] },
   { id: 'gaming', label: 'Gaming', description: 'Discover gaming videos and creators.',
-    href: '/gaming', browseId: 'FEgaming' },
+    href: '/gaming', browseId: 'UCOpNcN46UbXVtpKMrmU4Abg' },
   { id: 'news', label: 'News', description: 'Explore news and current events.',
     href: '/channel/UCYfdidRxbB8Qhf0Nx7ioOYw', browseId: 'UCYfdidRxbB8Qhf0Nx7ioOYw', aliases: ['/feed/news'] },
   { id: 'sports', label: 'Sports', description: 'Discover sports and highlights.',
@@ -69,10 +69,10 @@ export function isInnerTubeBrowseRoute(route: string): boolean {
 }
 
 
-/** Account authentication and account selection remain owned by YouTube. */
+/** Account settings, authentication and account selection remain owned by YouTube. */
 export function isNativeFlowRoute(route: string): boolean {
   try {
     const url = new URL(route, 'https://www.youtube.com');
-    return url.origin === 'https://www.youtube.com' && /^\/(?:signin|logout|channel_switcher)(?:\/|$)/.test(url.pathname);
+    return url.origin === 'https://www.youtube.com' && /^\/(?:account|signin|logout|channel_switcher)(?:\/|$)/.test(url.pathname);
   } catch { return false; }
 }

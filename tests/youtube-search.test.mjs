@@ -47,6 +47,20 @@ function fixture({ handler, authenticated = false, pathname = '/results', search
 }
 const plain = value => JSON.parse(JSON.stringify(value));
 
+test('native hover previews retain signed moving-thumbnail URLs and reject unrelated image hosts', async () => {
+  const urls = ['https://i.ytimg.com/an_webp/preview/mqdefault_6s.webp?sqp=abc&rs=signed',
+    'https://example.com/preview.webp', 'http://i.ytimg.com/preview.webp'];
+  const cards = urls.map((url, index) => {
+    const item = video(`preview-${index}`);
+    item.videoRenderer.richThumbnail = { movingThumbnailRenderer: { movingThumbnailDetails: { thumbnails: [{ url, width: 320, height: 180 }] } } };
+    return item;
+  });
+  const result = await fixture({ handler: () => response(cards) }).createYouTubeFeedService().request('all');
+  assert.equal(result.items[0].previewThumbnail, urls[0]);
+  assert.equal(result.items[1].previewThumbnail, undefined);
+  assert.equal(result.items[2].previewThumbnail, undefined);
+});
+
 test('legacy video author thumbnails reach browse cards and skip unusable avatar URLs', async () => {
   const withAvatar = video('avatar');
   withAvatar.videoRenderer.channelThumbnailSupportedRenderers = { channelThumbnailWithLinkRenderer: {

@@ -6,6 +6,44 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { modernVideo } from './helpers/modern-video.mjs';
 import { guideData } from './helpers/sidebar-data.mjs';
 
+test('channel page renders API profile inside the scrollable video feed', { timeout: 30000 }, async t => {
+  const page = await browserPage(t);
+  await page.route('https://www.youtube.com/**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/resolve_url')) return route.fulfill({ json: { endpoint: { browseEndpoint: { browseId: 'UCcreator' } } } });
+    if (url.pathname.includes('/youtubei/')) return route.fulfill({ json: {
+      header: { c4TabbedHeaderRenderer: { title: '王志安',
+        avatar: { thumbnails: [{ url: 'https://example.com/avatar.png' }] },
+        banner: { thumbnails: [{ url: 'https://example.com/banner.png' }] },
+        subscriberCountText: { simpleText: '100万位订阅者' } } },
+      contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { title: '视频', selected: true,
+        endpoint: { browseEndpoint: { browseId: 'UCcreator' } },
+        content: { richGridRenderer: { contents: [{ videoRenderer: { videoId: 'channel1234', title: { simpleText: '频道视频' } } }] } }
+      } }] } }
+    } });
+    return route.fulfill({ contentType: 'text/html', body: '<html><body><ytd-page-manager></ytd-page-manager></body></html>' });
+  });
+  await page.route('https://example.com/**', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="200"><rect width="1200" height="200" fill="#738b96"/></svg>' }));
+  await page.goto('https://www.youtube.com/@wangzhian');
+  await page.evaluate(() => { window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientName: 'WEB', clientVersion: 'test' } } : undefined }; });
+  await mainBundle(page);
+  const header = page.locator('[data-ytg-channel-header]');
+  await header.waitFor();
+  assert.equal(await header.locator('h1').innerText(), '王志安');
+  assert.match(await header.innerText(), /100万/);
+  await page.locator('[data-browse-id="video:channel1234"]').waitFor();
+  assert.equal(await header.locator('.channel-avatar').evaluate(node => getComputedStyle(node).borderRadius), '50%');
+  const avatar = header.locator('.channel-avatar');
+  assert.equal(await avatar.evaluate(node => getComputedStyle(node).width), '128px');
+  await avatar.locator('img').dispatchEvent('error');
+  assert.equal(await avatar.locator('[data-view="avatarFallback"]').innerText(), '王');
+  assert.equal(await avatar.locator('img').count(), 0);
+  await page.setViewportSize({ width: 600, height: 900 });
+  assert.equal(await avatar.evaluate(node => getComputedStyle(node).width), '72px');
+  mkdirSync('output/playwright', { recursive: true });
+  await page.screenshot({ path: 'output/playwright/channel-page.png' });
+});
+
 test('subscribed people stay beside videos and switch channels through the API', { timeout: 30000 }, async t => {
   const page = await browserPage(t);
   const guide = guideData();
@@ -21,9 +59,14 @@ test('subscribed people stay beside videos and switch channels through the API',
       if (url.pathname.endsWith('/resolve_url')) return route.fulfill({ json: { endpoint: {
         browseEndpoint: { browseId: 'UCsubscriber', params: 'api-videos-tab' }
       } } });
+      if (body.browseId === 'UCsubscriber') return route.fulfill({ json: {
+        contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { title: 'Videos', selected: true,
+          endpoint: { browseEndpoint: { browseId: 'UCsubscriber', params: 'api-videos-tab' } },
+          content: { richGridRenderer: { contents: [{ videoRenderer: { videoId: 'creator1234', title: { simpleText: 'Creator video' } } }] } }
+        } }] } }
+      } });
       return route.fulfill({ json: { contents: [{ videoRenderer: {
-        videoId: body.browseId === 'UCsubscriber' ? 'creator1234' : 'subscriptions123',
-        title: { simpleText: body.browseId === 'UCsubscriber' ? 'Creator video' : 'All subscriptions' }
+        videoId: 'subscriptions123', title: { simpleText: 'All subscriptions' }
       } }] } });
     }
     return route.fulfill({ contentType: 'text/html', body: '<html><body><ytd-app></ytd-app><ytd-page-manager></ytd-page-manager></body></html>' });
@@ -38,15 +81,14 @@ test('subscribed people stay beside videos and switch channels through the API',
     };
   });
   await mainBundle(page, guide);
-  const channel = page.locator('[data-sidebar-id="subscription:UCsubscriber"]');
+  const channel = page.locator('[data-subscription-id="UCsubscriber"]');
   await channel.waitFor();
   await page.locator('[data-browse-id="video:subscriptions123"]').waitFor();
   await page.waitForFunction(() => {
-    const sidebar = window.__pageDOM.querySelector('#ytg-browse-sidebar');
-    const grid = window.__pageDOM.querySelector('#ytg-browse-grid');
-    return Math.abs(sidebar.getBoundingClientRect().width - 270) < 1 && Math.abs(grid.getBoundingClientRect().left - 270) < 1;
+    const sidebar = window.__pageDOM.querySelector('#ytg-subscription-channels');
+    return Math.abs(sidebar.getBoundingClientRect().width - 270) < 1;
   });
-  await channel.locator('.sidebar-channel-initial').waitFor();
+  await channel.locator('[data-view="avatarFallback"]').waitFor();
   await channel.click();
   await page.locator('[data-browse-id="video:creator1234"]').waitFor();
   assert.equal(new URL(page.url()).pathname, '/channel/UCsubscriber/videos');
@@ -87,39 +129,34 @@ test('channel badges use Material icons and retain identity across the feed brid
   assert.equal(await page.locator('[data-browse-id="video:none"] .channel-badge').count(), 0);
 });
 
-test('mouse card previews wait for hover, stay single and stop immediately for gamepad input', { timeout: 30000 }, async t => {
+test('mouse card previews use native animated thumbnails across the feed bridge and stop on input changes', { timeout: 45000 }, async t => {
   const page = await browserPage(t);
-  await page.addInitScript(() => {
-    window.__previewApiCalls = [];
-    window.addEventListener('message', event => {
-      if (!event.source || event.source === window) return;
-      const message = JSON.parse(event.data);
-      if (message.event !== 'preview-test-command') return;
-      window.__previewApiCalls.push(message.func === 'playVideo' ? 'play' : message.func === 'stopVideo' ? 'destroy' : message.func);
-    });
+  let previews = 0, failPreviews = false, embeds = 0;
+  const previewUrl = id => 'https://i.ytimg.com/an_webp/' + id + '/mqdefault_6s.webp?signed=keep-me';
+  await page.route('https://i.ytimg.com/**', route => {
+    if (route.request().url().includes('/an_webp/')) {
+      previews++;
+      if (failPreviews) return route.abort();
+    }
+    return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="green"/></svg>' });
   });
-  let embeds = 0;
-  let failEmbeds = false;
+  const modern = modernVideo('dQw4w9WgXcQ');
+  modern.lockupViewModel.contentImage.thumbnailViewModel.overlays.push({ animatedThumbnailOverlayViewModel: {
+    thumbnail: { sources: [{ url: previewUrl('dQw4w9WgXcQ'), width: 320, height: 180 }] }
+  } });
   await page.route('https://www.youtube.com/**', route => {
     const url = new URL(route.request().url());
-    if (url.pathname.startsWith('/embed/')) {
-      embeds++;
-      return route.fulfill({ contentType: 'text/html', body: `<html><body><script>
-        window.addEventListener('message', event => {
-          if (event.source !== parent) return;
-          const message = JSON.parse(event.data);
-          const send = value => parent.postMessage(JSON.stringify(value), 'https://www.youtube.com');
-          if (message.event === 'listening') send({ event: ${failEmbeds ? "'onError'" : "'onReady'"} });
-          if (message.event === 'command' && ['mute', 'playVideo', 'stopVideo'].includes(message.func)) {
-            send({ event: 'preview-test-command', func: message.func });
-            if (message.func === 'playVideo') send({ event: 'onStateChange', info: 1 });
-          }
-        });
-      </script></body></html>` });
-    }
-    return route.fulfill(url.pathname.includes('/youtubei/') ? { json: { contents: ['M7lc1UVf-VE', 'dQw4w9WgXcQ'].map(videoId => ({
-      videoRenderer: { videoId, title: { simpleText: videoId } }
-    })) } } : { contentType: 'text/html', body: '<html><body><ytd-page-manager></ytd-page-manager></body></html>' });
+    if (url.pathname.startsWith('/embed/')) embeds++;
+    return route.fulfill(url.pathname.includes('/youtubei/') ? { json: { contents: [{ videoRenderer: {
+      videoId: 'M7lc1UVf-VE', title: { simpleText: 'Native moving thumbnail' },
+      richThumbnail: { movingThumbnailRenderer: { movingThumbnailDetails: { thumbnails: [
+        { url: previewUrl('M7lc1UVf-VE'), width: 320, height: 180 }
+      ] } } }
+    } }, modern, { videoRenderer: { videoId: 'no-preview1', title: { simpleText: 'Without preview' } } },
+    { videoRenderer: { videoId: 'failpreview', title: { simpleText: 'Broken preview' }, richThumbnail: {
+      movingThumbnailRenderer: { movingThumbnailDetails: { thumbnails: [{ url: previewUrl('failpreview'), width: 320, height: 180 }] } }
+    } } }] } }
+      : { contentType: 'text/html', body: '<html><body><ytd-page-manager></ytd-page-manager></body></html>' });
   });
   await page.goto('https://www.youtube.com/');
   await page.evaluate(() => { window.ytcfg = { get: () => ({ client: { clientName: 'WEB', clientVersion: 'test' } }) }; });
@@ -130,53 +167,58 @@ test('mouse card previews wait for hover, stay single and stop immediately for g
   await card.waitFor();
   const mode = value => page.evaluate(value => {
     document.documentElement.dataset.ytgInputMode = value;
-    document.documentElement.classList.toggle('ytg-gamepad-input', value === 'gamepad');
     window.dispatchEvent(new CustomEvent('yt-gamepad-input-mode', { detail: { mode: value } }));
   }, value);
   const enter = node => node.dispatchEvent('pointerenter', { pointerType: 'mouse' });
-  await mode('mouse');
-  await enter(card);
+  await mode('mouse'); await enter(card);
   await page.waitForTimeout(150);
-  assert.equal(await preview.count(), 0, 'brief hover does not create a player');
+  assert.equal(await preview.count(), 0, 'brief hover does not load a preview');
   await mode('gamepad');
   await page.waitForTimeout(700);
-  assert.equal(embeds, 0, 'switching to gamepad cancels a pending preview');
+  assert.equal(previews, 0, 'gamepad cancels the pending preview');
   await card.focus(); await enter(card);
   await page.waitForTimeout(700);
-  assert.equal(await preview.count(), 0, 'a focused gamepad card never starts a preview');
-  await mode('mouse'); await enter(card);
-  await preview.waitFor();
-  await card.locator('iframe.ready').waitFor();
-  const src = new URL(await preview.getAttribute('src'));
-  assert.equal(src.pathname, '/embed/M7lc1UVf-VE');
-  for (const key of ['autoplay', 'mute', 'cc_load_policy', 'controls']) assert.equal(src.searchParams.get(key), '1');
-  assert.equal(src.searchParams.get('enablejsapi'), '1');
-  assert.deepEqual(await page.evaluate(() => window.__previewApiCalls), ['mute', 'play']);
+  assert.equal(await preview.count(), 0, 'gamepad focus never starts preview');
+  await mode('mouse');
+  await card.hover();
+  await card.locator('img.card-video-preview.ready').waitFor();
+  assert.equal(await preview.getAttribute('src'), previewUrl('M7lc1UVf-VE'));
+  const geometry = await card.locator('.card-cover').evaluate(node => {
+    const cover = node.getBoundingClientRect(), preview = node.querySelector('.card-video-preview').getBoundingClientRect();
+    return { width: Math.abs(cover.width - preview.width), height: Math.abs(cover.height - preview.height), pointerEvents: getComputedStyle(node.querySelector('.card-video-preview')).pointerEvents };
+  });
+  assert.ok(geometry.width < 1 && geometry.height < 1, 'preview fits the original cover');
+  assert.equal(geometry.pointerEvents, 'none', 'clicks continue to reach the video card');
+  await page.mouse.move(1, 1);
   await mode('gamepad');
-  assert.equal(await preview.count(), 0, 'gamepad takeover removes the playing iframe');
+  assert.equal(await preview.count(), 0, 'gamepad takeover removes the preview');
   await mode('mouse'); await enter(card); await preview.waitFor();
   await enter(second);
-  assert.equal(await preview.count(), 0, 'moving to a different card stops the old player before waiting');
-  await second.locator('iframe').waitFor();
-  assert.equal(await preview.count(), 1, 'only one card can preview');
+  assert.equal(await preview.count(), 0, 'moving to another card stops the previous preview');
+  await second.locator('img.card-video-preview.ready').waitFor();
+  assert.equal(await preview.count(), 1);
+  assert.equal(await preview.getAttribute('src'), previewUrl('dQw4w9WgXcQ'), 'modern animated thumbnail survives the bridge');
   await second.dispatchEvent('pointerleave', { pointerType: 'mouse' });
-  assert.equal(await preview.count(), 0, 'leaving a card stops playback');
+  assert.equal(await preview.count(), 0);
   await enter(card); await preview.waitFor();
-  await page.evaluate(() => window.dispatchEvent(new Event('scroll')));
-  assert.equal(await preview.count(), 0, 'scrolling stops playback');
+  await card.evaluate(node => node.getRootNode().querySelector('[data-ytg-browse-grid]').dispatchEvent(new Event('scroll')));
+  assert.equal(await preview.count(), 0);
   await enter(card); await preview.waitFor();
-  await page.evaluate(() => window.dispatchEvent(new Event('yt-navigate-start')));
-  assert.equal(await preview.count(), 0, 'navigation stops playback');
-  failEmbeds = true;
-  const beforeFailure = embeds;
-  const failedRequest = page.waitForRequest('**/embed/**');
-  await enter(card);
-  await failedRequest;
-  await preview.waitFor({ state: 'detached' });
-  assert.equal(embeds, beforeFailure + 1, 'an unavailable embed falls back to the thumbnail');
-  await card.dispatchEvent('pointermove', { pointerType: 'mouse' });
+  await page.evaluate(() => document.dispatchEvent(new Event('yt-navigate-start')));
+  assert.equal(await preview.count(), 0, 'real document navigation stops preview');
+  await enter(page.locator('[data-browse-id="video:no-preview1"]'));
   await page.waitForTimeout(700);
-  assert.equal(embeds, beforeFailure + 1, 'a failed preview does not reload on every pointer movement');
+  assert.equal(await preview.count(), 0, 'missing preview keeps the cover');
+  failPreviews = true;
+  const failedCard = page.locator('[data-browse-id="video:failpreview"]');
+  const failedRequest = page.waitForRequest('**/an_webp/**');
+  await enter(failedCard); await failedRequest;
+  await preview.waitFor({ state: 'detached' });
+  const beforeRetry = previews;
+  await failedCard.dispatchEvent('pointermove', { pointerType: 'mouse' });
+  await page.waitForTimeout(700);
+  assert.equal(previews, beforeRetry, 'failure does not retry on every mouse movement');
+  assert.equal(embeds, 0, 'previews never request the blocked embedded player');
 });
 
 test('video cards size their content and hover surface independently while keeping rows aligned and creator avatars visible', { timeout: 30000 }, async t => {
@@ -1684,22 +1726,24 @@ test('subscriptions uses the YouTube router without clicking guide links and ren
   assert.equal(await page.locator('#ytg-browse-sidebar [data-sidebar-id="subscriptions"]').getAttribute('aria-current'), 'page');
 });
 
-test('sidebar has the requested sections, expands Explore and retains focus despite native card changes', { timeout: 30000 }, async t => {
+test('sidebar has API sections, expands Explore and retains focus despite native card changes', { timeout: 30000 }, async t => {
   const feedFixture = { contents: Array.from({ length: 16 }, (_, i) => ({ videoRenderer: {
       videoId: `sidebar${i}`, title: { simpleText: `视频 ${i + 1}` }, ownerText: { simpleText: '频道名称' }
     } })) };
 
 
+  const guide = guideData();
+  guide.items[2] = { guideSectionRenderer: { items: [{ guideCollapsibleEntryRenderer: {
+    expanderItem: { guideEntryRenderer: { formattedTitle: { simpleText: '探索' } } },
+    expandableItems: [['游戏', '/gaming'], ['新闻', '/feed/news']].map(([label, href]) => ({
+      guideEntryRenderer: { formattedTitle: { simpleText: label },
+        navigationEndpoint: { commandMetadata: { webCommandMetadata: { url: href } }, browseEndpoint: { browseId: 'FEfixture' } } }
+    }))
+  } }] } };
   const page = await browserPage(t);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.route('https://i.ytimg.com/**', route => route.abort());
   await page.route('https://www.youtube.com/**', route => {
-    if (route.request().url().includes('/youtubei/v1/guide')) return route.fulfill({ json: { items: [
-      { guideSectionRenderer: { items: [['游戏', '/gaming', 'GAMING'], ['新闻', '/feed/news', 'NEWS']].map(([label, href, icon]) => ({
-        guideEntryRenderer: { formattedTitle: { simpleText: label }, icon: { iconType: icon },
-          navigationEndpoint: { commandMetadata: { webCommandMetadata: { url: href } }, browseEndpoint: { browseId: 'FEfixture' } } }
-      })) } }
-    ] } });
     if (route.request().url().includes('/youtubei/v1/browse')) return route.fulfill({ json: feedFixture });
  return route.fulfill({ contentType: 'text/html', body:
     `<html><head><meta charset="utf-8"></head><body><ytd-masthead style="display:block;height:56px"><input id="search" placeholder="搜索"></ytd-masthead>
@@ -1715,18 +1759,19 @@ test('sidebar has the requested sections, expands Explore and retains focus desp
   });
   for (const stylesheet of ['src/ui/theme.css', 'src/app/browse.css'])
     await page.addStyleTag({ content: readFileSync(new URL(`../${stylesheet}`, import.meta.url), 'utf8') });
-  await mainBundle(page);
+  await mainBundle(page, guide);
   const sidebar = page.locator('#ytg-browse-sidebar');
   await sidebar.waitFor();
-  assert.deepEqual(await sidebar.locator(':scope > a > span,:scope > section > button > span').allTextContents(), ['首页', '订阅', '我的频道', '探索', '设置']);
-  assert.deepEqual(await sidebar.locator('#ytg-sidebar-personal-links a span').allTextContents(), ['历史记录', '播放列表', '稍后观看', '赞过的视频', '我的视频']);
+  await sidebar.locator('[data-sidebar-id="home"]').waitFor();
+  assert.equal(await sidebar.locator('[data-sidebar-section]').count(), 4);
+  assert.equal(await sidebar.locator('[data-sidebar-id="history"]').getAttribute('href'), '/feed/history');
   assert.equal(await sidebar.locator('[data-sidebar-id="home"]').getAttribute('aria-current'), 'page');
   const expand = sidebar.getByRole('button', { name: '探索', exact: true });
   assert.equal(await expand.getAttribute('aria-expanded'), 'false');
   await expand.focus();
   await page.evaluate(() => window.YTGamepad.act('confirm'));
   await sidebar.getByRole('link', { name: '游戏', exact: true }).waitFor();
-  await page.waitForFunction(() => window.__pageDOM.querySelector('#ytg-sidebar-explore-links a')?.textContent.trim() === '游戏');
+  assert.equal(await expand.getAttribute('aria-expanded'), 'true');
   assert.equal(await sidebar.getByRole('link', { name: '游戏', exact: true }).getAttribute('href'), '/gaming');
   await page.evaluate(() => window.YTGamepad.act('down'));
   assert.equal(await page.evaluate(() => window.__pageDOM.activeElement.textContent.trim()), '游戏');
@@ -1736,7 +1781,7 @@ test('sidebar has the requested sections, expands Explore and retains focus desp
     window.YTGamepad.act('confirm');
   });
   assert.equal(await page.evaluate(() => window.__exploreClicks), 1);
-  assert.equal(await page.evaluate(() => window.__exploreTarget), 'FEgaming');
+  assert.equal(await page.evaluate(() => window.__exploreTarget), 'UCOpNcN46UbXVtpKMrmU4Abg');
   await page.evaluate(() => {
     const item = document.createElement('ytd-rich-item-renderer');
     const link = document.createElement('a'); link.id = 'thumbnail'; link.href = '/watch?v=appended'; link.textContent = 'Appended'; item.append(link);
@@ -1745,9 +1790,10 @@ test('sidebar has the requested sections, expands Explore and retains focus desp
   assert.equal(await page.locator('[data-browse-id="video:appended"]').count(), 0, 'native changes cannot overwrite the API list');
   assert.equal(await page.evaluate(() => window.__pageDOM.activeElement.textContent.trim()), '游戏');
   await expand.focus(); await page.evaluate(() => window.YTGamepad.act('confirm'));
-  assert.equal(await sidebar.locator('#ytg-sidebar-explore-links').getAttribute('aria-hidden'), 'true');
-  assert.equal(await sidebar.locator('#ytg-sidebar-explore-links').evaluate(node => node.inert), true);
-  await sidebar.locator('#ytg-sidebar-explore-links').waitFor({ state: 'hidden' });
+  const exploreLinks = sidebar.locator(`[id="${await expand.getAttribute('aria-controls')}"]`);
+  assert.equal(await exploreLinks.getAttribute('aria-hidden'), 'true');
+  assert.equal(await exploreLinks.evaluate(node => node.inert), true);
+  await exploreLinks.waitFor({ state: 'hidden' });
   assert.equal(await expand.getAttribute('aria-expanded'), 'false');
   await sidebar.locator('[data-sidebar-id="home"]').focus();
   await page.evaluate(() => window.YTGamepad.act('right'));
@@ -2031,9 +2077,9 @@ test(`opening an API card and returning restores ${browseId}`, { timeout: 30000 
   await card.waitFor();
   assert.equal(await page.locator(`#ytg-browse-sidebar [data-sidebar-id="${sidebarId}"]`).getAttribute('aria-current'), 'page');
   await card.focus();
-  await page.evaluate(() => window.YTGamepad.act('right'));
+  await page.evaluate(direction => window.YTGamepad.act(direction), ['FEhistory', 'VLWL'].includes(browseId) ? 'down' : 'right');
   assert.ok((await page.evaluate(() => window.__pageDOM.activeElement?.getAttribute('data-browse-id'))).endsWith(':other'));
-  await page.evaluate(() => window.YTGamepad.act('left'));
+  await page.evaluate(direction => window.YTGamepad.act(direction), ['FEhistory', 'VLWL'].includes(browseId) ? 'up' : 'left');
   assert.equal(await page.evaluate(() => window.__pageDOM.activeElement?.getAttribute('data-browse-id')), identity);
   await card.click();
   await page.waitForURL(browseId === 'VLWL' ? '**/watch?v=cached&list=WL' : '**/watch?v=cached');
@@ -2234,11 +2280,12 @@ test('Home sidebar and YouTube brand each request a fresh recommendation batch',
   });
   await page.goto('https://www.youtube.com/');
   await page.evaluate(() => { window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined }; });
-  await mainBundle(page);
+  await mainBundle(page, guideData());
   await page.locator('[data-browse-id="video:batch1"]').waitFor();
   await page.locator('[data-sidebar-id="home"]').click();
   await page.locator('[data-browse-id="video:batch2"]').waitFor();
   assert.equal(await page.locator('[data-browse-id="video:batch1"]').count(), 0);
+  await page.waitForFunction(() => getComputedStyle(window.__pageDOM.querySelector('[data-ytg-browse-grid] .cards')).opacity === '1');
   await page.evaluate(() => {
     window.__retainedHomeCard = window.__pageDOM.querySelector('[data-browse-id="video:batch2"]');
     window.__homeRefreshFrames = [];

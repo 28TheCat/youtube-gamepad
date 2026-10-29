@@ -68,6 +68,14 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
     get status() { return window.YTGamepadCoordinator.adaptation.status; } };
 }
 
+test('watch shell becomes visible while the player contract is still loading', () => {
+  const s = setup({ missing: 'player' });
+  assert.equal(s.status, 'waiting');
+  assert.equal(s.port.state.surfaceReady, false);
+  assert.equal(s.port.state.shellVisible, true);
+  assert.equal(setup({ pathname: '/' }).port.state.shellVisible, false);
+});
+
 test('rejected playback preserves controls and diagnostics and permits another play attempt', async () => {
   const s = setup({ missing: '.ytp-play-button' }), entries = [];
   s.window.YTGamepadDiagnostics.record = (module, operation, error) => entries.push({ module, operation, error });
