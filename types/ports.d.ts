@@ -37,9 +37,11 @@ export interface RecommendationSnapshot {
   readonly isPlaylist?: boolean;
 }
 export interface WatchPageSnapshot extends RouteSnapshot {
+  readonly metadataFailed?: boolean;
   readonly channelBadge?: 'verified' | 'artist';
   readonly queue?: readonly RecommendationSnapshot[];
   readonly playlistTitle?: string;
+  readonly playlistTotal?: number;
   readonly title: string; readonly channel: string; readonly description: string;
   readonly recommendations: readonly RecommendationSnapshot[];
   // Optional because the existing degraded read returns a minimal page snapshot.
@@ -62,7 +64,7 @@ export interface CommentSnapshot extends CommentReplySnapshot {
 export type WatchFeatures = Readonly<Partial<Record<'metadata' | 'recommendations' | 'comments'
   | 'channel' | 'captions' | 'settings' | 'subscribe' | 'like' | 'dislike' | 'save' | 'nativeLayers', Capability>>>;
 export interface AdaptationSnapshot { readonly status: 'inactive' | 'waiting' | 'ready' | 'fallback'; readonly reason: string; readonly route?: string }
-export interface CoordinatorSnapshot { readonly mode: Mode; readonly enabled: boolean; readonly surfaceReady: boolean; readonly navigating: boolean }
+export interface CoordinatorSnapshot { readonly mode: Mode; readonly enabled: boolean; readonly surfaceReady: boolean; readonly transitioning?: boolean; readonly navigating: boolean }
 export interface Settings extends Partial<HomeFilterSettings> { seekStep?: number; shortsSeekStep?: number; volumeStep?: number; playbackLayout?: 'fullscreen' | 'windowed'; rightHandMode?: boolean; enabled: boolean; theater: boolean; deadzone: number; repeatDelay: number; repeatInterval: number; bindings?: Record<string, number>; bindingLayouts?: Record<string, Record<string, number>>; shortcutLayouts?: Record<string, Record<string, string>> }
 export type SearchTarget = HTMLInputElement | null;
 export type OperationResult = boolean | void;
@@ -96,7 +98,15 @@ export interface WatchRequest {
   (type: 'comments', value?: boolean): OperationResult;
   (type: 'settings' | 'backSettings' | 'channel'): OperationResult;
 }
+export interface NativePlayerControlsPort {
+  read(): readonly { id: string }[];
+  focus(id: string): boolean;
+  activate(id: string): boolean;
+  clear(): void;
+  observeFocus(listener: (id: string) => void): Dispose;
+}
 export interface WatchPort extends WatchDataPort {
+  readonly nativePlayer?: NativePlayerControlsPort;
   readonly state: CoordinatorSnapshot; readonly navigating: boolean;
   request: WatchRequest;
   observePlayback(playback: PlaybackSnapshot): void;
@@ -128,9 +138,10 @@ export interface AppSnapshot {
   readonly adaptation?: AdaptationSnapshot;
 }
 export interface WatchSnapshot {
-  readonly row: 'player' | 'metadata' | 'controls' | 'progress' | 'recommendations'; readonly index: number;
+  readonly row: 'player' | 'metadata' | 'tabs' | 'controls' | 'progress' | 'recommendations'; readonly index: number;
   readonly controlIndex: number; readonly recommendationIndex: number; readonly adjusting: boolean;
   readonly panel: '' | 'description' | 'comments' | 'playlists' | 'subscription'; readonly panelIndex: number; readonly playIndex: number;
+  readonly commentsParked?: boolean;
 }
 export interface MenuSnapshot {
   readonly opened: boolean; readonly view: 'main' | 'search'; readonly openedFrom: 'quickMenu' | 'pageSearch' | null;
@@ -163,7 +174,7 @@ export type InteractionEvent = RouteEvent
   | { type: 'WATCH_PANEL'; panel: WatchSnapshot['panel'] }
   | { type: 'WATCH_PANEL_COUNT'; count: number }
   | { type: 'WATCH_EMPTY' }
-  | { type: 'WATCH_INPUT'; action: Action; windowed?: boolean; scrollDelta?: number; commentCount: number; recommendationKey?: string; controlAction?: string; cardColumns?: number; cardCount: number; controlCount: number; availableControls?: number[]; canSeek?: boolean }
+  | { type: 'WATCH_INPUT'; action: Action; windowed?: boolean; scrollDelta?: number; commentCount: number; recommendationKey?: string; controlAction?: string; cardColumns?: number; cardCount: number; controlCount: number; availableControls?: number[]; playerControls?: number[]; canSeek?: boolean }
   | { type: 'MENU_OPEN' | 'MENU_CLOSE' | 'MENU_SHIFT' | 'MENU_MAIN' | 'MENU_BACK' }
   | { type: 'MENU_SEARCH'; selected: number }
   | { type: 'MENU_SET_LANGUAGE'; value: MenuSnapshot['language'] }
@@ -246,6 +257,7 @@ export interface WatchModule {
   handleInput(action: Action): Disposition; refresh(): void; destroy(): void;
   scroll?(delta: number): void;
   mediaFeedback(action: Action, seekDelta?: number): void;
+  feedback?(text: string): void;
   seekPreview?(value: import('../src/ui/playback-presentation').SeekPreview | null): void;
 }
 export interface ActionContext { current?: HTMLElement | null; scope: Document | Element }
@@ -264,6 +276,7 @@ export interface NavigationPolicy {
   onSettingsClosed(): void; pageBack(): void; readonly navigating: boolean; readonly mode: Mode;
 }
 export interface SitePort extends WatchDataPort, SearchDataPort {
+  readonly nativePlayer?: NativePlayerControlsPort;
   configurePlayback?(values: Partial<import('../src/shared/playback-settings').PlaybackParameters>): void;
   temporarySpeed(held: boolean): number | false;
   hasNativeLayer(): boolean; perform(action: Action): OperationResult | Promise<OperationResult>;
@@ -374,9 +387,12 @@ export interface WatchPanels {
 }
 export type WatchView = Record<'host' | 'surface' | 'recommendations' | 'dialog' | 'sheet' | 'panelTitle'
   | 'description' | 'close' | 'status', HTMLElement> & {
-    controls: HTMLButtonElement[]; progress: HTMLButtonElement; player?: HTMLButtonElement; metadata?: HTMLElement;
+    controls: HTMLButtonElement[]; progress?: HTMLButtonElement; player?: HTMLButtonElement; metadata?: HTMLElement;
     root: ShadowRoot; make: MakeNode;
-    cycleTab?(direction: number): boolean;
+    toggleFullCollection?(): boolean; closeFullCollection?(): boolean;
+    sideIndex?(): number;
+    restoreSideScroll?(): void;
+    readonly tabs?: readonly HTMLButtonElement[];
     updateHint(row: WatchSnapshot['row'], adjusting: boolean, canSeek?: boolean): void;
     presentation: import('../src/ui/playback-presentation').PlaybackPresenter;
   };

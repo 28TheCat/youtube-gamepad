@@ -1,3 +1,4 @@
+import { isNativeFlowRoute } from '../shared/explore-pages';
 import type { BrowseDependencies, ModuleFactory } from '../../types/ports';
 export let YTGamepadBrowseModule!: ModuleFactory<BrowseDependencies,{destroy():void}>;
 // Synchronize the custom browse surface with mode and route changes.
@@ -10,7 +11,7 @@ export let YTGamepadBrowseModule!: ModuleFactory<BrowseDependencies,{destroy():v
     const enabled = document.documentElement.classList.contains('ytg-theater') &&
       !['youtube', 'loading'].includes(document.documentElement.getAttribute('data-ytg-browse-mode') || '') &&
       !document.documentElement.hasAttribute('data-ytg-native') &&
-      location.pathname !== '/watch' && !location.pathname.startsWith('/shorts/');
+      !isNativeFlowRoute(location.pathname) && location.pathname !== '/watch' && !location.pathname.startsWith('/shorts/');
     if (document.documentElement.classList.contains('ytg-browse') !== enabled)
       document.documentElement.classList.toggle('ytg-browse', enabled);
   }

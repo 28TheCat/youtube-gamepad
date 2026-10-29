@@ -2,8 +2,9 @@
 import InterfaceIcon from '../ui/InterfaceIcon.vue';
 import { nextTick, ref } from 'vue';
 import { useI18n } from '../shared/use-i18n';
+import SearchDiscovery from './SearchDiscovery.vue';
 const { t } = useI18n();
-defineProps<{ modelValue: string; voiceAvailable?: boolean }>();
+defineProps<{ modelValue: string; voiceAvailable?: boolean; recent?: readonly string[] }>();
 const emit = defineEmits<{
   'update:modelValue': [value: string];
   search: [query: string];
@@ -12,6 +13,11 @@ const emit = defineEmits<{
 }>();
 const input = ref<HTMLInputElement>();
 const composing = ref(false);
+const expanded = ref(false);
+function leave(event: FocusEvent) {
+  if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)) expanded.value = false;
+}
+function select(query: string) { expanded.value = false; emit('search', query); }
 function update(event: Event) { emit('update:modelValue', (event.currentTarget as HTMLInputElement).value); }
 function handleEnter(event: KeyboardEvent) { if (event.isComposing || composing.value) event.preventDefault(); }
 function submit() {
@@ -27,6 +33,7 @@ async function clear() {
 </script>
 
 <template>
+  <div class="ytg-search-container" @focusin="expanded = true" @focusout="leave" @keydown.esc="expanded = false">
   <div class="ytg-search-bar">
     <form role="search" class="ytg-search-form" @submit.prevent="submit">
       <div class="ytg-search-field">
@@ -44,5 +51,7 @@ async function clear() {
     <button v-if="voiceAvailable" type="button" class="ytg-search-voice" :aria-label="t('Voice search')" @click="emit('voice')">
       <InterfaceIcon name="mic" />
     </button>
+  </div>
+  <SearchDiscovery v-if="expanded && !composing" :query="modelValue" :recent="recent || []" @search="select" />
   </div>
 </template>

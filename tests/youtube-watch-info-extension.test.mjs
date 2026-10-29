@@ -63,15 +63,16 @@ test('destination frames release video loading while metadata requests are still
   await card.click({ force: true });
   await page.waitForURL('**/watch?v=second');
   try {
-    await page.waitForFunction(() => document.documentElement.dataset.ytgAdaptation === 'ready' && document.querySelector('#ytg-watch-loading')?.hidden);
+    await page.waitForFunction(() => document.documentElement.dataset.ytgAdaptation === 'ready');
   } catch (error) {
     t.diagnostic(await page.evaluate(() => JSON.stringify({ route: location.pathname + location.search,
       adaptation: document.documentElement.dataset.ytgAdaptation, nativeId: window.nativeVideoId,
-      loading: document.querySelector('#ytg-watch-loading')?.hidden, text: document.querySelector('#ytg-fallback-notice')?.textContent,
+      loading: !!document.querySelector('#ytg-watch-loading'), text: document.querySelector('#ytg-fallback-notice')?.textContent,
       video: { readyState: document.querySelector('video')?.readyState, width: document.querySelector('video')?.videoWidth } })));
     throw error;
   }
   assert.ok(held.length > 0, 'metadata transport has not completed');
+  assert.equal(await page.locator('#ytg-watch-loading').count(), 0);
   t.diagnostic(`Controls available with ${held.length} metadata requests pending; observed ${await page.evaluate(() => Math.round(performance.now() - window.switchStartedAt))} ms after navigation in this local fixture.`);
   assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).opacity), '1');
   assert.equal(await page.evaluate(() => Boolean(document.querySelector('video')?.videoWidth)), true);
@@ -141,4 +142,56 @@ test('manifest watch metadata, reactions, subscription and playlist choices use 
   assert.equal(calls.at(-1).headers['x-goog-authuser'], '2');
   assert.equal(await page.locator('#movie_player').count(), 0, 'metadata does not need the page player object');
   assert.deepEqual(errors, []);
+});
+
+
+test('subscription remains usable when the player metadata API rejects an otherwise identified channel', { timeout: 45000 }, async t => {
+  const { context } = await launchExtension(t);
+  await context.addCookies([{ name: 'SAPISID', value: 'fixture', domain: '.youtube.com', path: '/', secure: true }]);
+  await context.addInitScript(() => { window.ytcfg = { get: key => ({
+    INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: 'fixture' }, user: {} }, LOGGED_IN: true, SESSION_INDEX: 2
+  })[key] }; });
+  let subscribed = false;
+  const writes = [];
+  await context.route('https://www.youtube.com/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.startsWith('/youtubei/v1/')) {
+      if (path.endsWith('/player')) return route.fulfill({ json: { playabilityStatus: { status: 'LOGIN_REQUIRED' } } });
+      if (path.endsWith('/next')) {
+        const data = next();
+        data.contents.twoColumnWatchNextResults.results.results.contents[1].videoSecondaryInfoRenderer.subscribeButton.subscribeButtonRenderer.subscribed = subscribed;
+        return route.fulfill({ json: data });
+      }
+      if (path.includes('/subscription/')) {
+        writes.push({ path, body: route.request().postDataJSON() });
+        subscribed = path.endsWith('/subscribe');
+      }
+      return route.fulfill({ json: { success: true } });
+    }
+    return route.fulfill({ contentType: 'text/html', body: '<html><body><ytd-app></ytd-app></body></html>' });
+  });
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/watch?v=first');
+  const invoke = fields => page.evaluate(fields => new Promise(resolve => {
+    const id = crypto.randomUUID();
+    const receive = event => {
+      const response = JSON.parse(event.detail);
+      if (response.id !== id) return;
+      document.removeEventListener('ytg-page-response-v1', receive); resolve(response.value);
+    };
+    document.addEventListener('ytg-page-response-v1', receive);
+    document.dispatchEvent(new CustomEvent('ytg-page-request-v1', { detail: JSON.stringify({ version: 1, id, ...fields }) }));
+  }), fields);
+  for (let i = 0; i < 100; i++) {
+    const state = await invoke({ operation: 'readWatchInfo' });
+    if (state.canSubscribe) break;
+    await page.waitForTimeout(30);
+  }
+  assert.equal((await invoke({ operation: 'readWatchInfo' })).canSubscribe, true);
+  assert.equal(await invoke({ operation: 'watchAction', action: 'subscribe' }), true);
+  assert.equal((await invoke({ operation: 'readWatchInfo' })).subscribed, true);
+  assert.equal(await invoke({ operation: 'watchAction', action: 'subscribe' }), true);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].body.channelIds, ['UCcreator']);
+  assert.equal(subscribed, true);
 });

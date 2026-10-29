@@ -17,6 +17,8 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     const descriptionHeader = port.make('header', 'panel-heading');
     let commentKey = '', commentButtons: HTMLElement[] = [];
     let commentRoute = '';
+    let renderedPanel = '';
+    let savedComments: { route: string; top: number; index: number; id: string; thread: string; limit: number } | undefined;
     const comments = createCommentOperations({
       records: () => port.controller.readComments(), status: () => port.controller.readCommentsStatus?.(),
       replies: key => { port.controller.request('replies', key); }
@@ -107,6 +109,10 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     function togglePlaylist(key: string) { return playlist.toggle(key); }
     function unmount() { renderer?.dispose(); renderer = undefined; commentButtons = []; commentKey = ''; }
   function clearPanel() {
+    if (renderedPanel === 'comments') savedComments = { route: commentRoute, top: sheet.scrollTop,
+      index: watchState().panelIndex, id: commentButtons[watchState().panelIndex - 1]?.dataset.focusId || '',
+      thread: comments.state.thread, limit: comments.state.limit };
+    renderedPanel = '';
     comments.reset();
     subscription.reset();
     playlist.reset();
@@ -136,7 +142,11 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
   function back() {
     if (backCommentComposer(description)) return true;
     if (destroyed || watchState().panel !== 'comments' || !comments.state.thread) return false;
-    return drawer.backDetail();
+    if (drawer.backDetail()) return true;
+    comments.reset(); commentKey = ''; readComments();
+    controllerStyle.bind(close, 'Back'); controllerStyle.bind(panelTitle, 'Comments'); controllerStyle.bind(dialog, 'Comments', 'aria-label');
+    send({ type: 'WATCH_FOCUS', region: 'panel', index: 0 }); focus();
+    return true;
   }
   function loadReplies() {
     if (destroyed || watchState().panel !== 'comments' || !comments.state.thread || port.controller.readCommentsStatus?.()?.loading) return;
@@ -175,7 +185,11 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
   function open(action: string) {
     if (destroyed || (action !== 'description' && action !== 'playlists' && action !== 'comments' && action !== 'subscription')) return;
     if (action === 'comments' && back()) return;
+    if (renderedPanel && renderedPanel !== action) drawer.close(false);
     comments.reset();
+    const saved = action === 'comments' && savedComments?.route === port.controller.readRoute().key ? savedComments : undefined;
+    if (saved) { commentRoute = saved.route; comments.state.thread = saved.thread; comments.state.limit = saved.limit; }
+    renderedPanel = action;
     // Choose the incoming geometry before state updates can reveal or measure it.
     dialog.classList.toggle('comments', action === 'comments');
     dialog.classList.toggle('description-panel', action === 'description');
@@ -207,6 +221,14 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
       document.documentElement.classList.add('ytg-comments');
       port.controller.request('comments', true);
       readComments(); focus();
+      if (saved) {
+        if (comments.state.thread) {
+          controllerStyle.bind(close, 'Back to comments'); controllerStyle.bind(panelTitle, 'Replies'); controllerStyle.bind(dialog, 'Replies', 'aria-label');
+        }
+        const index = saved.id ? commentButtons.findIndex(button => button.dataset.focusId === saved.id) : -1;
+        send({ type: 'WATCH_FOCUS', region: 'panel', index: index >= 0 ? index + 1 : Math.min(saved.index, commentButtons.length) });
+        focus(); sheet.scrollTop = saved.top;
+      }
     }
   }
   function hide() {

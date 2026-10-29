@@ -29,12 +29,13 @@ icons = {
     'bell': 'social/notifications', 'bell-all': 'social/notifications_active',
     'bell-off': 'social/notifications_off', 'down': 'navigation/expand_more',
     'fullscreen': 'navigation/fullscreen',
+    'live': 'action/sensors', 'new-content': 'image/lens',
 }
 
 def extract(item):
     name, path, variant, directory = item
     source = base + f'assets/svg/core/{directory}/{path}.svg'
-    if name in ('subscriptions', 'verified', 'artist', 'bell', 'bell-all', 'bell-off', 'down', 'more', 'close', 'volume', 'muted', 'fullscreen'):
+    if name in ('subscriptions', 'verified', 'artist', 'bell', 'bell-all', 'bell-off', 'down', 'more', 'close', 'volume', 'muted', 'fullscreen', 'live', 'new-content'):
         style = 'materialiconsoutlined' if variant == 'line' else 'materialicons'
         material_path = 'av/subscriptions' if name == 'subscriptions' else path
         source = f'https://raw.githubusercontent.com/google/material-design-icons/737e3324305806514d7909874fa1818ae1808232/src/{material_path}/{style}/24px.svg'

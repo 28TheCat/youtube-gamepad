@@ -1,6 +1,6 @@
 import { mingcuteIcons } from './mingcute-icons';
 
-const materialIcons = new Set(['subscriptions', 'verified', 'artist', 'bell', 'bell-all', 'bell-off', 'down', 'more', 'close', 'volume', 'muted', 'fullscreen']);
+const materialIcons = new Set(['subscriptions', 'verified', 'artist', 'bell', 'bell-all', 'bell-off', 'down', 'more', 'close', 'volume', 'muted', 'fullscreen', 'live', 'new-content']);
 
 export function interfaceIcon(name: string, filled = false) {
   const key = `${name}-${filled ? 'fill' : 'line'}`;

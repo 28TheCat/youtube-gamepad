@@ -209,39 +209,32 @@ test('browse shoulders reach inner category buttons and update the native select
   assert.equal(await selected(), '音乐');
 });
 
-test('watch loading leaves native media visible and applies player layout before navigation finishes', { skip: !chromium }, async t => {
+test('watch navigation leaves native media visible without a loading banner', { skip: !chromium }, async t => {
   const page = await setup(t);
   await page.evaluate(() => {
     const anchor = document.querySelector('a[href="/watch?v=b"]');
-    anchor.addEventListener('click', event => {
-      event.preventDefault();
-      window.loadingBeforeNavigation = document.elementFromPoint(640, 450)?.id === 'ytg-watch-loading';
-      document.dispatchEvent(new Event('yt-navigate-start'));
-      const player = document.createElement('div'); player.id = 'movie_player';
-      player.getPlayerResponse = () => ({ videoDetails: { videoId: 'old' } });
-      const video = document.createElement('video'); video.className = 'html5-main-video';
-      const container = document.createElement('div'); container.className = 'html5-video-container';
-      container.append(video); player.append(container); document.body.append(player);
-      history.pushState({}, '', anchor.href);
-      window.playerAtRouteChange = player.getBoundingClientRect().toJSON();
-      const below = document.createElement('div'); below.id = 'below'; below.textContent = 'Desktop details';
-      const secondary = document.createElement('div'); secondary.id = 'secondary'; secondary.textContent = 'Desktop recommendations';
-      document.body.append(below, secondary);
-      document.dispatchEvent(new Event('yt-navigate-finish'));
-    });
-    window.YTGamepad.act('confirm');
+    window.YTGamepadCoordinator.prepareVideo('/watch?v=b');
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    const player = document.createElement('div'); player.id = 'movie_player';
+    player.getPlayerResponse = () => ({ videoDetails: { videoId: 'old' } });
+    const video = document.createElement('video'); video.className = 'html5-main-video';
+    const container = document.createElement('div'); container.className = 'html5-video-container';
+    container.append(video); player.append(container); document.body.append(player);
+    history.pushState({}, '', anchor.href);
+    window.playerAtRouteChange = player.getBoundingClientRect().toJSON();
+    const below = document.createElement('div'); below.id = 'below'; below.textContent = 'Desktop details';
+    const secondary = document.createElement('div'); secondary.id = 'secondary'; secondary.textContent = 'Desktop recommendations';
+    document.body.append(below, secondary);
+    document.dispatchEvent(new Event('yt-navigate-finish'));
   });
-  assert.equal(await page.evaluate(() => window.loadingBeforeNavigation), false);
   assert.equal(await page.evaluate(() => document.elementFromPoint(640, 450)?.closest('#movie_player')?.id), 'movie_player');
-  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 48, width: 1280, height: 852 });
+  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 56, width: 820, height: 667 });
   assert.deepEqual(await page.evaluate(() => {
     const { x, y, width, height } = window.playerAtRouteChange; return { x, y, width, height };
-  }), { x: 0, y: 48, width: 1280, height: 852 }, 'layout changes synchronously with the URL, before SPA finish');
-  const banner = await page.locator('#ytg-watch-loading').boundingBox();
-  assert.equal(banner.y + banner.height, 48, 'status strip ends where the player begins');
+  }), { x: 0, y: 56, width: 820, height: 667 }, 'layout changes synchronously with the URL, before SPA finish');
+  assert.equal(await page.locator('#ytg-watch-loading').count(), 0, 'navigation does not create a status strip');
   assert.equal(await page.locator('#movie_player video').isVisible(), true);
   assert.equal(await page.locator('#movie_player video').evaluate(video => video.muted), false, 'loading does not alter native audio');
-  assert.equal(await page.locator('#ytg-watch-loading').textContent(), 'Loading video…');
   assert.equal(await page.evaluate(() => window.YTGamepadCoordinator.adaptation.status), 'waiting');
   await page.evaluate(() => {
     const player = document.querySelector('#movie_player');
@@ -249,13 +242,13 @@ test('watch loading leaves native media visible and applies player layout before
     player.querySelector('video').dispatchEvent(new Event('playing'));
   });
   await page.waitForFunction(() => window.YTGamepadCoordinator.adaptation.status === 'ready');
-  assert.equal(await page.locator('#ytg-watch-loading').isVisible(), false);
+  assert.equal(await page.locator('#ytg-watch-loading').count(), 0);
   assert.equal(await page.locator('#below').evaluate(node => {
     const style = getComputedStyle(node);
     return style.display === 'none' || style.opacity === '0';
   }), true, 'desktop details remain unpainted even during comment preloading');
   assert.equal(await page.locator('#secondary').isVisible(), false);
-  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 0, width: 1280, height: 900 });
+  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 56, width: 820, height: 667 });
 });
 
 test('playing destination is visible while YouTube detail navigation is still pending', { skip: !chromium }, async t => {
@@ -268,20 +261,20 @@ test('playing destination is visible while YouTube detail navigation is still pe
     Object.defineProperties(video, { readyState: { value: 3, configurable: true }, videoWidth: { value: 1280, configurable: true } });
     video.dispatchEvent(new Event('playing'));
   });
-  assert.equal(await page.locator('#ytg-watch-loading').isVisible(), true, 'status remains while destination identity is pending');
-  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 48, width: 1280, height: 852 });
+  assert.equal(await page.locator('#ytg-watch-loading').count(), 0);
+  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 56, width: 820, height: 667 });
   assert.equal(await page.locator('#movie_player video').isVisible(), true, 'player stays visible before destination readiness');
   await page.evaluate(() => {
     document.querySelector('#movie_player').getPlayerResponse = () => ({ videoDetails: { videoId: 'next' } });
     document.querySelector('#movie_player video').dispatchEvent(new Event('playing'));
   });
-  assert.equal(await page.locator('#ytg-watch-loading').isVisible(), false, 'playing event reveals picture without waiting for page completion or polling');
-  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 0, width: 1280, height: 900 });
+  assert.equal(await page.locator('#ytg-watch-loading').count(), 0);
+  assert.deepEqual(await page.locator('#movie_player').boundingBox(), { x: 0, y: 56, width: 820, height: 667 });
   assert.equal(await page.locator('#movie_player video').isVisible(), true);
   assert.equal(await page.evaluate(() => window.YTGamepadCoordinator.navigating), true);
   await page.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));
   assert.equal(await page.evaluate(() => window.YTGamepadCoordinator.navigating), false);
-  assert.equal(await page.locator('#ytg-watch-loading').isVisible(), false);
+  assert.equal(await page.locator('#ytg-watch-loading').count(), 0);
 });
 
 async function nativeDialog(page) {

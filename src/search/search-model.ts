@@ -1,6 +1,8 @@
 import type { SearchInstance, SearchPort, SearchTarget, PinyinCandidate, KeyboardKey, Action, Disposition } from '../../types/ports.js';
 import { createSearchText } from './search-text';
 import type { MountSearch, SearchRenderer, SearchView } from './search-view';
+import { readLocalStorage, writeLocalStorage } from './local-storage';
+import { readSearchHistory, rememberSearch } from './search-history';
 
 /** Search policy and state; the injected renderer owns all markup. */
 export function createSearchModel(port: SearchPort, mount: MountSearch): SearchInstance {
@@ -12,15 +14,11 @@ export function createSearchModel(port: SearchPort, mount: MountSearch): SearchI
   
   let searchTarget: SearchTarget = null, recent: string[] = [];
   let candidates: readonly PinyinCandidate[] = [];
-  // Page storage is untrusted and readable by YouTube scripts; it is not an
-  // extension-private database. Bound persisted input before using it in UI.
-  const maxQueryLength = 256;
-  const sanitizeRecent = (value: unknown): string[] => Array.isArray(value)
-    ? [...new Set(value.slice(0, 5).filter((item): item is string => typeof item === 'string' && item.length <= maxQueryLength).map(item => item.trim()).filter(Boolean))] : [];
-  try { send({ type: 'MENU_SET_LANGUAGE', value: localStorage.getItem('ytg-keyboard-language') === 'zh-CN' ? 'zh-CN' : 'en' }); } catch (_) {}
+  const storedLanguage = readLocalStorage('ytg-keyboard-language');
+  if (storedLanguage !== undefined) send({ type: 'MENU_SET_LANGUAGE', value: storedLanguage === 'zh-CN' ? 'zh-CN' : 'en' });
   function setLanguage(value: 'en' | 'zh-CN') {
     send({ type: 'MENU_SET_LANGUAGE', value }); candidates = [];
-    try { localStorage.setItem('ytg-keyboard-language', value); } catch (_) {}
+    writeLocalStorage('ytg-keyboard-language', value);
   }
   function snapshot(): SearchView {
     const state = menuState();
@@ -80,10 +78,6 @@ export function createSearchModel(port: SearchPort, mount: MountSearch): SearchI
     else feedback('No candidates. Use the typed text or edit your pinyin.');
   }
 
-  try {
-    const raw = localStorage.getItem('ytg-recent-searches');
-    if (raw && raw.length <= 8192) recent = sanitizeRecent(JSON.parse(raw));
-  } catch (_) {}
   function inputElement() { return root.querySelector<HTMLInputElement>('#query'); }
   function rememberCursor() {
     const input = inputElement();
@@ -132,8 +126,7 @@ export function createSearchModel(port: SearchPort, mount: MountSearch): SearchI
     if (!query) { feedback('Enter a search query'); return; }
     const submitted = port.controller.submitSearch(searchTarget, query, () => {
       // Commit history when the adapter accepts a validated search destination.
-      recent = sanitizeRecent([query, ...recent.filter(item => item !== query)]);
-      try { localStorage.setItem('ytg-recent-searches', JSON.stringify(recent)); } catch (_) {}
+      recent = rememberSearch(query);
       port.close();
     });
     if (!submitted) feedback('YouTube search is unavailable. Please try again shortly.');
@@ -141,6 +134,7 @@ export function createSearchModel(port: SearchPort, mount: MountSearch): SearchI
   function unmount() { renderer?.dispose(); renderer = undefined; }
   function render(section: HTMLElement) {
     unmount();
+    recent = readSearchHistory();
     renderer = mount(section, snapshot(), {
       input() { rememberCursor(); syncSearch(); updateView(); },
       focus(button) { port.selected = buttons().indexOf(button); },
@@ -172,8 +166,9 @@ export function createSearchModel(port: SearchPort, mount: MountSearch): SearchI
             const next = action === 'right' ? list.find(key => Number(key.dataset.row) === Math.min(row, 4) && Number(key.dataset.column) === 0) : history[Math.max(0, Math.min(history.length - 1, row + (action === 'up' ? -1 : action === 'down' ? 1 : 0)))];
             port.selected = next ? list.indexOf(next) : port.selected; focus(); return 'handled';
           }
-          if (action === 'left' && column === 0 && recent.length && !menuState().composing) {
-            port.selected = list.findIndex(key => Number(key.dataset.column) === -1 && Number(key.dataset.row) === Math.min(row, recent.length - 1)); focus(); return 'handled';
+          if (action === 'left' && column === 0 && list.some(key => key.dataset.column === '-1') && !menuState().composing) {
+            const choices = list.filter(key => key.dataset.column === '-1');
+            port.selected = list.indexOf(choices[Math.min(row, choices.length - 1)]!); focus(); return 'handled';
           }
           const rowKeys = list.filter(key => Number(key.dataset.row) === targetRow && Number(key.dataset.column) >= 0);
           const targetColumn = Math.max(0, Math.min(rowKeys.length - 1, column + (action === 'left' ? -1 : action === 'right' ? 1 : 0)));

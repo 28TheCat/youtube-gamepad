@@ -62,6 +62,26 @@ test('isolated application reads MAIN-only metadata and follows MAIN history wit
   assert.deepEqual(errors, []);
 });
 
+test('application shell and page surfaces survive document navigation', { timeout: 60000 }, async t => {
+  const { page } = await setup(t);
+  await page.waitForSelector('#ytg-app-content #ytg-watch', { state: 'attached' });
+  await page.evaluate(() => {
+    window.testShell = document.querySelector('#ytg-app-shell');
+    window.testBrowse = document.querySelector('#ytg-browse-root');
+    window.testWatch = document.querySelector('#ytg-watch');
+  });
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-app-content').contains(window.testBrowse)), true);
+  for (const route of ['/results?search_query=test', '/watch?v=test', '/']) {
+    await page.evaluate(route => {
+      document.dispatchEvent(new Event('yt-navigate-start'));
+      history.pushState({}, '', route);
+      document.dispatchEvent(new Event('yt-navigate-finish'));
+    }, route);
+    assert.equal(await page.evaluate(() => window.testShell === document.querySelector('#ytg-app-shell') &&
+      window.testBrowse === document.querySelector('#ytg-browse-root') && window.testWatch === document.querySelector('#ytg-watch')), true);
+  }
+});
+
 async function setup(t) {
   const env = await launchExtension(t);
   await env.context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: fixture }));

@@ -18,6 +18,7 @@ export interface WatchInfoSnapshot {
   loading: boolean; failed: boolean; working: boolean;
 }
 type Node = Record<string, any>;
+type VideoInfo = Awaited<ReturnType<Innertube['getInfo']>>;
 const empty = (route: string): WatchInfoSnapshot => ({ route, avatar: '', subscribed: false, liked: false,
   disliked: false, canLike: false, canSubscribe: false, canSave: false, loading: false, failed: false, working: false });
 Parser.setParserErrorHandler(() => {});
@@ -78,7 +79,26 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
     captured.loading = true;
     pending = (async () => {
       try {
-        const info = await client().getInfo(target.videoId);
+        let info: { basic_info: Partial<VideoInfo['basic_info']>; secondary_info?: VideoInfo['secondary_info'] };
+        try {
+          info = await client().getInfo(target.videoId);
+          if (info.basic_info.id !== target.videoId) throw Error('Video details unavailable');
+        }
+        catch {
+          // The native player may be playable even when a separate player API
+          // request is rejected. Channel actions only need the authenticated next response.
+          const next = await client().actions.execute('/next', { videoId: target.videoId, parse: true });
+          const secondary = next.contents_memo?.getType(YTNodes.VideoSecondaryInfo)?.[0];
+          const primary = next.contents_memo?.getType(YTNodes.VideoPrimaryInfo)?.[0];
+          const owner = secondary?.owner?.author;
+          const button = secondary?.subscribe_button;
+          const channel = button?.is(YTNodes.SubscribeButton) ? button.channel_id : owner?.id;
+          const responseId = next.current_video_endpoint?.payload?.videoId;
+          if (!channel || !/^UC[\w-]+$/.test(channel) || responseId && responseId !== target.videoId) throw Error('Channel information unavailable');
+          info = { basic_info: { id: target.videoId, channel_id: channel, title: primary?.title?.toString() || '',
+            author: owner?.name || '', short_description: secondary?.description?.toString() || '',
+            view_count: undefined, is_live: undefined, is_liked: undefined, is_disliked: undefined, allow_ratings: undefined }, secondary_info: secondary };
+        }
         if (captured !== state || destroyed) return;
         const basic = info.basic_info;
         if (basic.id !== target.videoId) throw Error('Mismatched video details');
@@ -134,9 +154,10 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
         current.notificationPreference = preference;
       } else if (action === 'subscribe' || action === 'unsubscribe') {
         if (!state.canSubscribe) return false;
-        if (action === 'unsubscribe' && !state.subscribed) return true;
-        await (state.subscribed ? interaction.unsubscribe(channelId) : interaction.subscribe(channelId));
-        current.subscribed = !current.subscribed;
+        const subscribed = action === 'subscribe';
+        if (state.subscribed === subscribed) return true;
+        await (subscribed ? interaction.subscribe(channelId) : interaction.unsubscribe(channelId));
+        current.subscribed = subscribed;
         current.notificationPreference = undefined;
       } else {
         if (!state.canLike) return false;

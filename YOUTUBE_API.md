@@ -10,8 +10,11 @@
 
 | 功能 | 库接口 / 解析能力 | 当前接入 |
 | --- | --- | --- |
-| 首页、搜索、订阅、历史 | `getHomeFeed`、`search`、`getSubscriptionsFeed`、`getHistory` | 同源 browse/search 请求与库卡片解析；首屏、分类、分页不读取页面启动 JSON |
-| 频道分类、排序、分页 | `getChannel`、Channel 标签及排序节点 | 已由现有频道适配器处理 |
+| 首页 | `getHomeFeed()` | 首页“全部”首屏直接调用高层方法；分类及续页复用同源 browse 请求与库解析，保留返回恢复 |
+| 订阅动态 | `getSubscriptionsFeed()` | “全部”首屏直接调用高层方法；分类及续页保留同源 browse 请求与库解析，支持返回恢复 |
+| 观看历史 | `getHistory()` | “全部”首屏直接调用高层方法；分类及续页保留同源 browse 请求与库解析，支持返回恢复 |
+| 搜索 | `search(query)` | 首屏及筛选结果调用高层方法；保留分享地址和接口分类中的原始筛选参数，续页沿用同源 search 请求与库解析及返回恢复 |
+| 频道分类、排序、分页 | `resolveURL()`、`getChannel()`、`ChannelListContinuation.getContinuation()`、`call()` | 频道首屏和标签调用高层方法；排序通过公开 endpoint API 处理部分响应，续页恢复库游标；账号认证、取消和返回恢复沿用现有机制 |
 | 视频及 Shorts 详情 | `getInfo`、`getBasicInfo`、`getShortsVideoInfo` | 当前详情服务复用 player/next；Shorts 标题、作者只使用接口快照，缺失时显示通用占位 |
 | 推荐、队列 | VideoInfo / next 节点 | 已通过 next 接口及库解析处理 |
 | 评论、回复分页 | `getComments`、Comments continuation、线程回复 | 已接入现有评论面板 |
@@ -19,8 +22,12 @@
 | 保存到已有播放列表 | `PlaylistAddToOption` 的增删 endpoint | 已接入选择面板；界面只得到临时句柄 |
 | 账号资料 | `account.getInfo(true)` | 已接入账号视图 |
 | 侧栏 | `getGuide()` | 已接入，失败保留内置入口 |
+| 搜索建议 | `getSearchSuggestions(query)` | 已接入顶部搜索框及手柄键盘；库构建请求并解析响应，同源传输保留取消、超时及长度限制 |
+| 播放列表目录及单个列表 | `getPlaylists()`、`getPlaylist(id)`、`Feed/Playlist.getContinuation()` | 首屏及续页统一调用高层方法；由保存的 token 恢复库分页游标，保留目录卡片、空列表及返回恢复机制 |
 
 搜索栏和手柄键盘不再读写原生搜索框或点击原生提交按钮。输入只保存在扩展自己的界面中；提交生成有界、经过校验的搜索 endpoint，优先交给原站路由，路由不可用时导航至同源搜索地址，结果继续走 API。语音入口仍委托原生语音功能。顶部首页入口同样通过已校验的路由打开。
+
+搜索建议使用 YouTube.js 的 `getSearchSuggestions()` 构建参数及解析响应。它属于 completion 服务，传输适配器将库生成的固定地址映射到同源 `/complete/search`，浏览器负责凭据，不向库传递 Cookie。该只读服务在搜索界面侧使用仅含语言和地区的 Session，不经过 InnerTube 的 POST 请求入口。输入防抖为 250 毫秒，旧请求及关闭后的请求会取消；空输入无返回时显示“暂无搜索建议”。
 
 ## 可以进一步新增的功能
 
@@ -29,8 +36,6 @@
 | 可新增功能 | 接口 | 接入时需要处理 |
 | --- | --- | --- |
 | 订阅频道目录 | `getChannelsFeed()` | 频道卡片、分页与打开频道 |
-| 我的播放列表目录 | `getPlaylists()`、`getPlaylist(id)` | 聚合目录路由、无首视频的列表卡片、空列表；已有单个播放列表的视频分页不等于完整目录 |
-| 搜索联想 | `getSearchSuggestions(query)` | 防抖、取消旧查询、输入法组合态与请求方式适配 |
 | 通知列表及未读数量 | `getNotifications()`、`getUnseenNotificationsCount()` | 登录、分页、通知目标验证 |
 | 字幕文本面板 | `VideoInfo.getTranscript()`、`TranscriptInfo.selectLanguage()` | 字幕是否存在、语言选择与按时间跳转；该接口读取字幕文本，不控制原生字幕开关 |
 | 新建及管理播放列表 | `playlist.create/setName/setDescription/addVideos/removeVideos` | 对应编辑界面、目标列表验证与写入成功确认；删除不默认开放 |

@@ -6,6 +6,7 @@ import type { AccountSnapshot } from '../sites/youtube-account';
 import type { WatchInfoSnapshot, SavedPlaylist } from '../sites/youtube-watch-info';
 import { parseWatchLink } from '../shared/watch-link';
 import type { SidebarSnapshot } from '../shared/sidebar-data';
+import type { NotificationSnapshot } from '../sites/youtube-notifications';
 
 export const PAGE_REQUEST = 'ytg-page-request-v1';
 export const PAGE_RESPONSE = 'ytg-page-response-v1';
@@ -13,8 +14,9 @@ export const PAGE_HISTORY = 'ytg-page-history-v1';
 export const PAGE_WATCH_NEXT = 'ytg-watch-next-updated-v1';
 export const PAGE_COMMENTS = 'ytg-comments-updated-v1';
 export const PAGE_WATCH_INFO = 'ytg-watch-info-updated-v1';
-export type PageOperation = 'shortsRecommendations' | 'playShorts' | 'readShortsSettings' | 'shortsSetting' | 'readSidebar' | 'readAccount' | 'ping' | 'readPlayerVideoId' | 'readVideoDetails' | 'readWatchInfo' | 'watchAction' | 'watchPlaylists' | 'watchPlaylistToggle' | 'showControls' | 'hideControls' | 'readWatchNext' | 'moreWatchNext' | 'openBrowseVideo' | 'openBrowseRoute' | 'readComments' | 'moreComments' | 'commentReplies' | 'commentTranslate' | 'commentPost' | 'commentSort';
+export type PageOperation = 'readNotifications' | 'shortsRecommendations' | 'playShorts' | 'readShortsSettings' | 'shortsSetting' | 'readSidebar' | 'readAccount' | 'ping' | 'readPlayerVideoId' | 'readVideoDetails' | 'readWatchInfo' | 'watchAction' | 'watchPlaylists' | 'watchPlaylistToggle' | 'showControls' | 'hideControls' | 'readWatchNext' | 'moreWatchNext' | 'openBrowseVideo' | 'openBrowseRoute' | 'readComments' | 'moreComments' | 'commentReplies' | 'commentTranslate' | 'commentPost' | 'commentSort';
 export interface PageAccess {
+  readNotifications?(mode: 'count' | 'list' | 'more'): Promise<NotificationSnapshot | undefined>;
   shortsRecommendations?(videoId: string, reset?: boolean): Promise<{ ids: string[]; hasMore: boolean } | undefined>;
   playShorts?(videoId: string): boolean;
   readShortsSettings?(): ShortsSettings | undefined;
@@ -136,7 +138,8 @@ export function watchNextSnapshot(raw: unknown): WatchNextSnapshot | undefined {
       duration: typeof item.duration === 'string' ? item.duration.slice(0, 40) : '', isPlaylist: item.isPlaylist === true, queue: item.queue === true, selected: item.selected === true }];
   });
   return { route: value.route, recommendations: items(value.recommendations), queue: items(value.queue), loading: value.loading === true, failed: value.failed === true,
-    ...(typeof value.playlistTitle === 'string' ? { playlistTitle: value.playlistTitle.slice(0, 2000) } : {}) };
+    ...(typeof value.playlistTitle === 'string' ? { playlistTitle: value.playlistTitle.slice(0, 2000) } : {}),
+    ...(typeof value.playlistTotal === 'number' && Number.isSafeInteger(value.playlistTotal) && value.playlistTotal > 0 ? { playlistTotal: value.playlistTotal } : {}) };
 }
 
 // All data crossing the page boundary is untrusted, including private API output.

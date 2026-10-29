@@ -7,9 +7,9 @@
 #ytg-browse-grid .shorts-navigation svg{width:24px;height:24px}
 #ytg-browse-grid .shorts-row{display:flex;gap:16px;overflow-x:auto;padding:10px 10px 16px;margin:-10px -10px 0;scroll-padding:10px;overscroll-behavior-x:contain;scrollbar-width:none}
 #ytg-browse-grid .shorts-row::-webkit-scrollbar{display:none}
-#ytg-browse-grid .shorts-row .shorts-card{width:var(--ytg-shorts-card-width,194px);flex:none;align-self:start;flex-direction:column;gap:0;scroll-snap-align:none;scroll-snap-stop:normal}
-#ytg-browse-grid .shorts-card .card-cover{position:relative;aspect-ratio:2/3}
-#ytg-browse-grid .shorts-card .card-cover img,#ytg-browse-grid .shorts-card .thumbnail-placeholder{height:100%;aspect-ratio:2/3}
+#ytg-browse-grid .shorts-row .shorts-card{width:var(--ytg-shorts-card-width,288px);flex:none;align-self:start;flex-direction:column;gap:0;scroll-snap-align:none;scroll-snap-stop:normal}
+#ytg-browse-grid .shorts-card .card-cover{position:relative;aspect-ratio:9/16}
+#ytg-browse-grid .shorts-card .card-cover img,#ytg-browse-grid .shorts-card .thumbnail-placeholder{height:100%;aspect-ratio:9/16;object-fit:cover;object-position:center}
 #ytg-browse-grid .shorts-card .card-copy{margin-top:8px}
 #ytg-browse-grid .shorts-card strong{margin:0;font-size:16px;line-height:22px}
 #ytg-browse-grid .shorts-view-count{margin-top:4px;color:var(--ytg-muted);font-size:14px;line-height:20px}

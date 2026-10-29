@@ -16,7 +16,7 @@ import { browseHostId, pageActiveElement } from '../shared/page-dom';
 import themeCss from './theme.css?inline';
 import { mountBrowseMode } from './browse-mode';
 import { shortsQueueKey } from '../shared/shorts-route';
-import { isInnerTubeBrowseRoute } from '../shared/explore-pages';
+import { isInnerTubeBrowseRoute, isNativeFlowRoute } from '../shared/explore-pages';
 import modeCss from './browse-mode.css?inline';
 import accountCss from './account-page.css?inline';
 import playlistCss from './playlist-card.css?inline';
@@ -26,7 +26,7 @@ import { YTGamepadControllerStyle } from '../input/controller-style';
 import { videoGridDefaults, normalizeVideoGrid } from '../shared/video-grid';
 import type { ApplicationChannel } from '../../types/ports';
 
-export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, prepareVideo }: BrowseDependencies, channel?: ApplicationChannel) {
+export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, prepareVideo }: BrowseDependencies, channel?: ApplicationChannel, mountChrome?: (node: HTMLElement) => void) {
   const lifecycle = runtime.scope('browse-surface');
   const browseMode = mountBrowseMode(runtime, core);
   lifecycle.cleanup(browseMode.destroy);
@@ -59,7 +59,7 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
   const returnViews = new Map<string, NonNullable<typeof returnView>>();
   const feedController = createBrowseFeedController({
     store, feed, getFilters: () => filters, getSubscriptions: () => subscriptions,
-    unavailable: () => browseMode.unavailable(),
+    unavailable: () => { /* The grid renders request errors with its retry action. */ },
     getRoute: () => location.pathname + location.search,
     isVisible: () => !lifecycle.destroyed && document.documentElement.classList.contains('ytg-browse'),
     isRestoring: () => core.restoring,
@@ -95,13 +95,13 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
     style.textContent += YTGamepadControllerStyle.css;
     lifecycle.cleanup(YTGamepadControllerStyle.register(shadow));
   }
-  host.append(mount); shadow.append(style, host); document.documentElement.append(shell);
+  host.append(mount); shadow.append(style, host); if (mountChrome) mountChrome(shell); else document.documentElement.append(shell);
   let retryTimer: number | undefined, pendingRoute = false, focusWanted = false;
   let browseVisible = false, headerVisible = false, layoutPending = false;
   let revision = 0;
   let emptySnapshot: BrowseSnapshot = { route: '', items: [], canLoadMore: false };
   let lastSnapshot: BrowseSnapshot | undefined;
-  const sidebarHasFocus = () => Boolean(pageActiveElement()?.closest('#ytg-browse-sidebar') || core.current?.closest('#ytg-browse-sidebar'));
+  const sidebarHasFocus = () => Boolean(pageActiveElement()?.closest('#ytg-browse-sidebar,#ytg-subscription-channels') || core.current?.closest('#ytg-browse-sidebar,#ytg-subscription-channels'));
   const categoryHasFocus = () => Boolean(pageActiveElement()?.closest('#ytg-browse-categories') || core.current?.closest('#ytg-browse-categories'));
   const headerHasFocus = () => Boolean(pageActiveElement()?.closest('#ytg-browse-top') || core.current?.closest('#ytg-browse-top'));
   const ownsFocus = () => !sidebarHasFocus() && !categoryHasFocus() && !headerHasFocus() && !isMenuOpen() && !core.hasTemporaryLayer && !core.restoring &&
@@ -133,7 +133,13 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
     }
     void feedController.refreshHome();
   };
-  const app = createApp(BrowsePage, { refreshHome, browseMode, gridSettings, ownsFocus, more, openSettings, focusAccount: (node: HTMLElement) => core.focus(node), refreshNavigation: () => core.refresh(), changeCategory: (id: string) => { if (!pendingRoute) void feedController.changeCategory(id); }, open: (id: string) => {
+  const shellState = reactive({ unsupported: '', unavailable: false });
+  const retryFeed = () => {
+    shellState.unavailable = false; store.error = '';
+    if (feedController.active) void feedController.changeCategory(store.category);
+    else { awaitingRoute = ''; initializeFeed(); publishFeed(true); }
+  };
+  const app = createApp(BrowsePage, { shellState, retryFeed, openOriginal: () => { void browseMode.change('youtube'); }, refreshHome, browseMode, gridSettings, ownsFocus, more, openSettings, focusAccount: (node: HTMLElement) => core.focus(node), refreshNavigation: () => core.refresh(), changeCategory: (id: string) => { if (!pendingRoute) void feedController.changeCategory(id); }, open: (id: string) => {
     if (!pendingRoute && !isMenuOpen() && !core.hasTemporaryLayer) {
       if (feedController.active) {
         const item = store.snapshot.items.find(item => item.id === id);
@@ -151,7 +157,7 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
           const saved = feedController.captureReturnState(host.querySelector('[data-ytg-browse-grid]')?.scrollTop || 0);
           if (saved) { returnViews.set(saved.snapshot.route, saved); saveBrowseReturn(history, saved); }
           // Shorts keep YouTube's native player and do not enter the watch takeover.
-          if (!item.id.startsWith('short:') && prepareVideo && !prepareVideo(item.href)) return;
+          if (!item.href.startsWith('/playlist?') && !item.id.startsWith('short:') && prepareVideo && !prepareVideo(item.href)) return;
           if (!feed.openVideo(item.href)) location.assign(item.href);
         }
       }
@@ -174,7 +180,7 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
     const root = document.documentElement;
     const windowedWatch = root.dataset.ytgPlaybackLayout === 'windowed' &&
       (root.classList.contains('ytg-watch-layout') || root.classList.contains('ytg-player-primed'));
-    const headerEnabled = (windowedWatch || root.classList.contains('ytg-theater') && !root.hasAttribute('data-ytg-native') &&
+    const headerEnabled = (windowedWatch || root.classList.contains('ytg-theater') && (!root.hasAttribute('data-ytg-native') || root.dataset.ytgAdaptation === 'fallback') &&
       root.getAttribute('data-ytg-browse-mode') !== 'loading' && !root.classList.contains('ytg-watch-layout')) &&
       !root.classList.contains('ytg-shorts-player') &&
       !document.fullscreenElement && !location.pathname.startsWith('/shorts/');
@@ -206,13 +212,16 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
   function initializeFeed() {
     if (lifecycle.destroyed || !browseVisible || pendingRoute) return;
     lifecycle.clearTimeout(retryTimer); retryTimer = undefined;
+    if (!independentFeed()) { shellState.unsupported = location.pathname + location.search; return; }
+    shellState.unsupported = '';
     if (feedController.initialize()) {
+      shellState.unavailable = false;
       awaitingRoute = '';
       if (!document.documentElement.classList.contains('ytg-api-categories')) document.documentElement.classList.add('ytg-api-categories');
     } else if (independentFeed()) {
       const route = location.pathname + location.search;
       if (awaitingRoute !== route) { awaitingRoute = route; awaitingSince = Date.now(); }
-      if (Date.now() - awaitingSince >= 8000) { browseMode.unavailable(); return; }
+      if (Date.now() - awaitingSince >= 8000) { shellState.unavailable = true; store.loading = false; return; }
       // ytcfg can appear without a DOM mutation or a YouTube page event.
       // Retry only while the visible API feed has not been initialized.
       retryTimer = lifecycle.timeout(() => { retryTimer = undefined; initializeFeed(); publishFeed(); }, 100);
@@ -295,10 +304,29 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
   const source = lifecycle.observer(() => syncVisibility());
   source.observe(document.documentElement,
     { attributes: true, attributeFilter: ['class', 'data-ytg-native', 'data-ytg-browse-mode', 'data-ytg-playback-layout'] });
+  let browseSaveTimer: number | undefined;
+  const rememberBrowse = () => {
+    if (!browseVisible || pendingRoute || core.restoring) return;
+    const saved = feedController.captureReturnState(host.querySelector('[data-ytg-browse-grid]')?.scrollTop || 0);
+    if (saved) {
+      returnViews.set(saved.snapshot.route, saved);
+      lifecycle.clearTimeout(browseSaveTimer);
+      browseSaveTimer = lifecycle.timeout(() => {
+        if (saved.snapshot.route === location.pathname + location.search) saveBrowseReturn(history, saved);
+      }, 120);
+    }
+  };
+  lifecycle.listen(window, 'pagehide', () => {
+    const saved = feedController.captureReturnState(host.querySelector('[data-ytg-browse-grid]')?.scrollTop || 0);
+    if (saved) saveBrowseReturn(history, saved);
+  });
+  lifecycle.listen(shadow, 'scroll', rememberBrowse, true);
+  lifecycle.listen(shadow, 'focusin', () => { lifecycle.frame(rememberBrowse); });
   lifecycle.listen(document, 'yt-navigate-start', () => {
     const saved = feedController.captureReturnState(host.querySelector('[data-ytg-browse-grid]')?.scrollTop || 0);
     if (saved) {
       returnViews.set(saved.snapshot.route, saved);
+      saveBrowseReturn(history, saved);
       if (returnViews.size > 30) returnViews.delete(returnViews.keys().next().value!);
     }
     ++revision; pendingRoute = true;
@@ -307,12 +335,48 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
   });
   const finishNavigation = () => {
     if (pendingRoute || (feedController.snapshot && feedController.snapshot.route !== location.pathname + location.search)) resetFeed();
+    shellState.unsupported = ''; shellState.unavailable = false;
     pendingRoute = false; syncVisibility(); initializeFeed(); publishFeed(); scheduleLayout();
   };
   lifecycle.listen(document, 'yt-navigate-finish', () => { finishNavigation(); void readSubscriptions(); });
   lifecycle.listen(document, 'yt-page-data-updated', () => { void readSubscriptions(); });
   lifecycle.listen(document, 'yt-navigate-cancel', finishNavigation);
   lifecycle.listen(document, 'yt-navigate-error', finishNavigation);
+  lifecycle.listen(document, 'click', ((event: MouseEvent) => {
+    const exit = event.composedPath().find(node => node instanceof HTMLElement && node.hasAttribute('data-ytg-exit-shell')) as HTMLElement | undefined;
+    if (exit && exit.getRootNode() === document.getElementById('ytg-fallback-notice')?.shadowRoot) {
+      if (event.isTrusted) { event.preventDefault(); void browseMode.change('youtube'); }
+      return;
+    }
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.defaultPrevented ||
+        browseMode.state.mode !== 'gamepad' || !document.documentElement.classList.contains('ytg-theater')) return;
+    const link = event.composedPath().find(node => node instanceof HTMLAnchorElement) as HTMLAnchorElement | undefined;
+    if (!link || link.hasAttribute('download') || link.target && link.target !== '_self') return;
+    let url: URL;
+    try { url = new URL(link.href, location.origin); } catch { return; }
+    if (url.origin !== location.origin || !['http:', 'https:'].includes(url.protocol) ||
+        url.pathname === location.pathname && url.search === location.search && url.hash) return;
+    const href = url.pathname + url.search;
+    if (isNativeFlowRoute(href)) return;
+    event.preventDefault(); event.stopPropagation();
+    if (href === '/' && location.pathname === '/') { refreshHome(); return; }
+    if (href === location.pathname + location.search) return;
+    if (url.pathname === '/watch' || url.pathname.startsWith('/shorts/')) {
+      if (url.pathname === '/watch' && prepareVideo && !prepareVideo(href)) return;
+      if (!feed.openVideo(href)) location.assign(href);
+      return;
+    }
+    if (isInnerTubeBrowseRoute(href) && pageAccess.openBrowseRoute?.(href)) return;
+    // Keep unsupported destinations and router failures inside the mounted shell.
+    document.documentElement.dataset.ytgVirtualRoute = 'true';
+    if (location.pathname === '/watch' || location.pathname.startsWith('/shorts/')) {
+      // Browsing must not leave an invisible native video playing in the old document.
+      document.querySelectorAll<HTMLVideoElement>('video').forEach(video => video.pause());
+    }
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.pushState(null, '', href);
+    document.dispatchEvent(new Event('yt-navigate-finish'));
+  }) as EventListener, true);
   lifecycle.listen(window, 'resize', scheduleLayout);
   lifecycle.listen(document, 'fullscreenchange', syncVisibility);
   if (window.visualViewport) lifecycle.listen(window.visualViewport, 'resize', scheduleLayout);

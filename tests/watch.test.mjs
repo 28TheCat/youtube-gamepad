@@ -637,15 +637,16 @@ test('playback shoulders leave seeking to the media controller without opening a
   }
 });
 
-test('shoulders switch recommendations and comments without seeking, starting on recommendations', () => {
+test('shoulders keep seeking while controls are visible without switching panels', () => {
   const s = setup();
   s.watch.show();
   assert.equal(s.watch.state.panel, '');
   const time = s.video.currentTime;
   assert.equal(s.watch.handleInput('seekForward'), 'handled');
-  assert.equal(s.watch.state.panel, 'comments');
+  assert.equal(s.watch.state.panel, '');
+  assert.equal(s.video.currentTime, time + 10);
   assert.equal(s.watch.handleInput('seekBack'), 'handled');
   assert.equal(s.watch.state.panel, '');
-  assert.equal(s.watch.state.row, 'recommendations');
+  assert.equal(s.watch.state.row, 'controls');
   assert.equal(s.video.currentTime, time);
 });

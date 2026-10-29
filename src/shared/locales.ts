@@ -1,7 +1,12 @@
 // Each pair is [English, Simplified Chinese]. UI source strings are stable keys;
 // page content (titles, comments and search queries) is never translated.
 export const messages: readonly (readonly [string, string])[] = [
+  ['Video details unavailable', '视频详情暂不可用'],
+  ['Select an episode · B / Esc to close', '选择视频 · B / Esc 关闭'],
+  ['Notification center', '通知'], ['Could not load notifications.', '无法加载通知。'], ['Sign in to see notifications.', '登录后查看通知。'], ['No notifications yet.', '暂无通知。'],
+  ['Suggested searches', '建议搜索'], ['Search suggestions are unavailable', '暂时无法获取搜索建议'], ['No search suggestions', '暂无搜索建议'],
   ['Collection', '合集'], ['Now playing', '正在播放'], ['Playing item {index}', '正在播放第 {index} 项'],
+  ['Playing {index} / {total}', '正在播放 {index} / {total}'],
   ['Playback parameters', '播放参数'], ['Video seek step', '普通视频快进／快退步长'], ['Shorts seek step', '短视频快进／快退步长'], ['Volume step', '音量调整步长'],
   ['Choose the seek distance and volume change per press. Changes apply immediately.', '设置每次按键调整的进度秒数和音量百分比，修改后立即生效。'],
   ['Restore playback defaults', '恢复默认播放参数'], ['Rewind {seconds} seconds', '快退 {seconds} 秒'], ['Forward {seconds} seconds', '快进 {seconds} 秒'],
@@ -20,7 +25,7 @@ export const messages: readonly (readonly [string, string])[] = [
   ['Automatic extra pages stop at this limit. You can continue with Load more videos.', '达到补页上限后暂停自动加载，可点击“加载更多视频”继续。'],
   ['{count} videos hidden by home filters.', '首页过滤已隐藏 {count} 个视频。'],
   ['Automatic loading paused. Load more videos or adjust home filters.', '已暂停自动补页，请加载更多视频或调整首页过滤规则。'],
-  ['Video preview', '视频预览'],
+  ['Video preview', '视频预览'], ['New content', '有新内容'], ['Following channels', '关注频道'],
   ['Notifications', '通知设置'], ['All', '全部'], ['Personalized', '个性化'], ['None', '不接收'], ['Unsubscribe', '取消订阅'], ['Saving…', '正在保存…'],
   ['Could not update subscription. Try again.', '无法更新订阅设置，请重试。'],
   ['Toggle captions', '切换字幕'], ['Quality', '清晰度'], ['Auto', '自动'], ['High resolution', '高分辨率'],
@@ -131,6 +136,7 @@ export const messages: readonly (readonly [string, string])[] = [
   ['Right-hand preset', '右手单手操作预设'],
   ['Right stick · D-pad', '右摇杆 · 十字键'],
   ['Right stick navigates. A confirms, B goes back, X plays or pauses, Y searches, RB opens the menu. Turn off to restore your custom bindings.', '右摇杆移动选择；A 确认，B 返回，X 播放或暂停，Y 搜索，RB 打开菜单（以上按 Xbox 物理位置）。音量、进度及搜索功能均可通过界面选择。关闭后恢复原有自定义按键。'],
+  ['Player adaptation failed. Try again or choose the YouTube interface. Reason: {reason}', '播放器适配未通过，请重试或主动选择 YouTube 原版界面。原因：{reason}'],
   ['Player adaptation failed. Switched to the YouTube interface. Reason: {reason}', '播放器适配未通过，已切换到 YouTube 原生界面。原因：{reason}'],
   ['Try again', '重试'], ['Missing: {capabilities}', '尚未就绪：{capabilities}'],
   ['player', '播放器'], ['video playback', '视频播放功能'], ['page interface', '页面连接'], ['current video', '当前视频信息'], ['video frames', '视频画面'],

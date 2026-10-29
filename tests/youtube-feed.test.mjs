@@ -11,7 +11,7 @@ function load(file, context = {}) {
   const source = ts.transpileModule(readFileSync(new URL(`../src/${file}.ts`, import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
   }).outputText;
-  vm.runInNewContext(source, { exports, Headers, Request, Response, URL, URLSearchParams, structuredClone, require: name => name === 'youtubei.js/web' ? YouTubeJs : name === './youtube-request' ? load('sites/youtube-request', context) : modules[name], ...context });
+  vm.runInNewContext(source, { exports, Headers, Request, Response, URL, URLSearchParams, structuredClone, require: name => name === 'youtubei.js/web' ? YouTubeJs : name === './request-scope' ? load('sites/request-scope', context) : name === './youtube-request' ? load('sites/youtube-request', context) : modules[name], ...context });
   return exports;
 }
 modules['../shared/home-filter'] = load('shared/home-filter');
@@ -65,6 +65,41 @@ test('attributed metadata defaults command ranges without losing text or channel
   assert.equal(suffix.toString(), 'By Creator');
   assert.equal(suffix.runs[0].endpoint, undefined);
   assert.equal(suffix.runs[1].endpoint.payload.browseId, 'UCcreator');
+  assert.equal(warnings.mock.callCount(), 0);
+});
+
+test('collaborative video owners clip oversized command ranges to the displayed title', t => {
+  const warnings = t.mock.method(console, 'warn', () => {});
+  const content = '中国の夜 — リアルな中国のナイトライフ、MuMu and BingBing';
+  const data = { attributedTitle: { content,
+    commandRuns: [{ startIndex: 0, length: 76, onTap: { innertubeCommand: { showDialogCommand: {} } } }],
+    styleRuns: [{ startIndex: 0, length: 38 }, { startIndex: 0, length: 76, fontColor: 4279440147 }]
+  } };
+  const original = structuredClone(data);
+  const owner = YouTubeJs.Parser.parseItem({ videoOwnerRenderer: data });
+  assert.equal(owner.attributed_title.toString(), content);
+  assert.ok(owner.attributed_title.runs[0].endpoint.payload);
+  assert.equal(owner.attributed_title.runs[0].endpoint.name, 'showDialogCommand');
+  assert.deepEqual(data, original);
+  assert.equal(warnings.mock.callCount(), 0);
+});
+
+test('attributed commands keep only valid text intersections and retain channel links', t => {
+  const warnings = t.mock.method(console, 'warn', () => {});
+  const onTap = { browseEndpoint: { browseId: 'UCcreator' } };
+  for (const range of [{ startIndex: 3, length: 100 }, { startIndex: -2, length: 5 }]) {
+    const text = YouTubeJs.Misc.Text.fromAttributed({ content: 'abcdef', commandRuns: [{ ...range, onTap }] });
+    assert.equal(text.toString(), 'abcdef');
+    assert.equal(text.runs.find(run => run.endpoint)?.endpoint.payload.browseId, 'UCcreator');
+    assert.equal(text.runs.find(run => run.endpoint)?.text, range.startIndex === 3 ? 'def' : 'abc');
+  }
+  for (const range of [{ startIndex: 6, length: 2 }, { startIndex: -3, length: 2 },
+    { startIndex: 0, length: 0 }, { startIndex: 0, length: -1 },
+    { startIndex: 0.5, length: 2 }, { startIndex: 0, length: NaN }]) {
+    const text = YouTubeJs.Misc.Text.fromAttributed({ content: 'abcdef', commandRuns: [{ ...range, onTap }] });
+    assert.equal(text.toString(), 'abcdef');
+    assert.equal(text.runs[0].endpoint, undefined);
+  }
   assert.equal(warnings.mock.callCount(), 0);
 });
 
@@ -156,7 +191,10 @@ for (const [pathname, search, browseId] of [
 });
 
 for (const pathname of ['/@creator/videos', '/channel/UCcreator/shorts', '/c/Creator/streams', '/user/Creator'])
-test(`channel ${pathname} resolves its endpoint and tab params without native DOM`, async () => {
+test(`channel ${pathname} resolves its endpoint and tab params without native DOM`, async t => {
+  const resolved = t.mock.method(YouTubeJs.Innertube.prototype, 'resolveURL');
+  const high = t.mock.method(YouTubeJs.Innertube.prototype, 'getChannel');
+  const continuation = t.mock.method(YouTubeJs.YT.ChannelListContinuation.prototype, 'getContinuation');
   const calls = [];
   const video = id => ({ videoRenderer: { videoId: id, title: { simpleText: id } } });
   const { createYouTubeFeedService } = load('sites/youtube-feed', {
@@ -184,6 +222,10 @@ test(`channel ${pathname} resolves its endpoint and tab params without native DO
   assert.equal(next.items[0].id, 'video:second');
   assert.equal(calls[2].body.continuation, 'channel-next');
   assert.equal(calls.length, 3, 'pagination must not resolve the channel again');
+  assert.equal(resolved.mock.callCount(), 1);
+  assert.equal(high.mock.callCount(), 1);
+  assert.equal(high.mock.calls[0].arguments[0], 'UCcreator');
+  assert.equal(continuation.mock.callCount(), 1);
 });
 
 test('a channel navigation during URL resolution prevents a stale browse request', async () => {
@@ -346,7 +388,7 @@ test('cached pagination survives SPA return and cannot be used on a different ro
     window: { ytcfg: { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientName: 'WEB', clientVersion: 'test' } } : undefined },
       ytInitialData: { chipCloudChipRenderer: { text: { simpleText: 'All' }, isSelected: true } } },
     fetch: async (_url, options) => { bodies.push(JSON.parse(options.body)); return { ok: true, json: async () => ({
-      continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'cached-next' } } }
+      contents: { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'cached-next' } } } }
     }) }; }
   });
   const service = createYouTubeFeedService();
@@ -391,7 +433,8 @@ test('first page, filters and continuations only use API responses', async () =>
 });
 
 for (const [pathname, search, path] of [['/', '', 'browse'], ['/results', '?search_query=music&sp=original', 'search']]) {
-  test(`${path} first page, response filters and pagination never inspect native DOM`, async () => {
+  test(`${path} first page, response filters and pagination never inspect native DOM`, async t => {
+    const high = path === 'search' ? t.mock.method(YouTubeJs.Innertube.prototype, 'search') : undefined;
     const calls = [];
     const location = { pathname, search, origin: 'https://www.youtube.com' };
     const { createYouTubeFeedService } = load('sites/youtube-feed', {
@@ -401,13 +444,13 @@ for (const [pathname, search, path] of [['/', '', 'browse'], ['/results', '?sear
       window: { ytcfg: { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined } },
       fetch: async (url, options) => {
         const body = JSON.parse(options.body); calls.push({ url, body });
-        return { ok: true, json: async () => ({ contents: [
+        return { ok: true, json: async () => ({ contents: { sectionListRenderer: { contents: [
           { videoRenderer: { videoId: body.continuation ? 'second' : 'first', title: { simpleText: 'Video' } } },
           { chipCloudChipRenderer: { text: { simpleText: 'Music' }, navigationEndpoint: path === 'browse' ?
             { browseEndpoint: { browseId: 'music', params: 'filtered' } } :
             { searchEndpoint: { query: 'music', params: 'filtered' } } } },
           ...(!body.continuation ? [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'next' } } } }] : [])
-        ] }) };
+        ] } } }) };
       }
     });
     const service = createYouTubeFeedService();
@@ -419,10 +462,15 @@ for (const [pathname, search, path] of [['/', '', 'browse'], ['/results', '?sear
     assert.deepEqual(Array.from(service.categories(), item => item.id), ['all', 'music']);
     await service.request('music');
     assert.equal(calls[1].body.params, 'filtered');
+    if (high) {
+      assert.equal(high.mock.callCount(), 2, 'initial query and refinement both call search');
+      assert.equal(high.mock.calls[0].arguments[0], 'music');
+    }
     const second = await service.request('all', first.nextPage);
     assert.equal(second.items[0].id, 'video:second');
     assert.equal(calls[2].body.continuation, 'next');
     assert.equal(second.nextPage, undefined);
+    if (high) assert.equal(high.mock.callCount(), 2, 'restored pagination keeps its continuation');
     location.pathname = '/results'; location.search = '?search_query=different';
     assert.deepEqual(Array.from(service.categories(), item => item.id), ['all']);
     await assert.rejects(service.request('all', first.nextPage), /Category unavailable/);
@@ -431,7 +479,8 @@ for (const [pathname, search, path] of [['/', '', 'browse'], ['/results', '?sear
   });
 }
 
-test('home starts from session config without native data and discovers response filters', async () => {
+test('home starts through getHomeFeed and retains API filters and pagination', async t => {
+  const high = t.mock.method(YouTubeJs.Innertube.prototype, 'getHomeFeed');
   const bodies = [];
   const location = { pathname: '/', search: '', origin: 'https://www.youtube.com' };
   let context;
@@ -456,12 +505,14 @@ test('home starts from session config without native data and discovers response
   const first = await service.request('all');
   assert.equal(first.items[0].id, 'video:first');
   assert.equal(bodies[0].browseId, 'FEwhat_to_watch');
+  assert.equal(high.mock.callCount(), 1);
   assert.deepEqual(Array.from(service.categories(), item => item.id), ['all', 'music']);
   const second = await service.request('all', first.nextPage);
   assert.equal(second.items[0].id, 'video:second');
   assert.equal(bodies[1].continuation, 'next');
   await service.request('music');
   assert.equal(bodies[2].browseId, 'music');
+  assert.equal(high.mock.callCount(), 1, 'pagination and category endpoints retain their API requests');
   location.pathname = '/results';
   assert.equal(service.categories().length, 0, 'home bootstrap and filters must not leak to search');
 });
@@ -477,7 +528,7 @@ test('synthetic All does not reuse the native feed of a selected home filter', a
       { videoRenderer: { videoId: 'music', title: { simpleText: 'Music video' } } }
     ] } },
     fetch: async (_url, options) => { bodies.push(JSON.parse(options.body)); return { ok: true, json: async () => ({
-      videoRenderer: { videoId: 'home', title: { simpleText: 'Home video' } }
+      contents: { videoRenderer: { videoId: 'home', title: { simpleText: 'Home video' } } }
     }) }; }
   });
   const service = createYouTubeFeedService();
@@ -497,10 +548,10 @@ test('search without chips keeps filters and uses the search endpoint for contin
     window: { ytcfg: { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined } },
     fetch: async (url, options) => {
       calls.push({ url, body: JSON.parse(options.body) });
-      return { ok: true, json: async () => ({ contents: [
+      return { ok: true, json: async () => ({ contents: { sectionListRenderer: { contents: [
         { videoRenderer: { videoId: 'result', title: { simpleText: 'Result' } } },
         { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'same-next' } } } }
-      ] }) };
+      ] } } }) };
     }
   });
   const service = createYouTubeFeedService();
@@ -567,4 +618,142 @@ for (const [pathname, browseId] of [
   assert.equal(calls[1].continuation, 'explore-next');
   assert.equal(second.items[0].id, 'video:second');
   assert.equal(second.nextPage, undefined);
+});
+
+test('playlist directory uses getPlaylists and retains empty lists through pagination', async t => {
+  const high = t.mock.method(YouTubeJs.Innertube.prototype, 'getPlaylists');
+  const bodies = [];
+  const { createYouTubeFeedService } = load('sites/youtube-feed', {
+    location: { pathname: '/feed/playlists', search: '', origin: 'https://www.youtube.com' }, AbortController, setTimeout, clearTimeout,
+    document: { cookie: '', querySelector() { throw Error('No native data'); } },
+    window: { ytcfg: { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined } },
+    fetch: async (_url, options) => {
+      const body = JSON.parse(options.body); bodies.push(body);
+      return { ok: true, json: async () => ({ contents: [
+        { playlistRenderer: { playlistId: body.continuation ? 'PLsecond' : 'PLempty', title: { simpleText: 'Empty list' },
+          thumbnails: [{ thumbnails: [{ url: 'https://i.ytimg.com/example.jpg', width: 300 }] }] } },
+        ...(!body.continuation ? [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'playlist-next' } } } }] : [])
+      ] }) };
+    }
+  });
+  const service = createYouTubeFeedService();
+  const first = await service.request('all');
+  assert.equal(high.mock.callCount(), 1);
+  assert.equal(bodies[0].browseId, 'FEplaylist_aggregation');
+  assert.equal(first.items[0].id, 'playlist:PLempty');
+  assert.equal(first.items[0].href, '/playlist?list=PLempty');
+  assert.equal(first.items[0].isPlaylist, true);
+  const next = await service.request('all', first.nextPage);
+  assert.equal(bodies[1].continuation, 'playlist-next');
+  assert.equal(next.items[0].href, '/playlist?list=PLsecond');
+  assert.equal(next.nextPage, undefined);
+});
+
+test('single playlist uses getPlaylist with an unprefixed id and accepts an empty list', async t => {
+  const high = t.mock.method(YouTubeJs.Innertube.prototype, 'getPlaylist');
+  const bodies = [];
+  const { createYouTubeFeedService } = load('sites/youtube-feed', {
+    location: { pathname: '/playlist', search: '?list=PLempty', origin: 'https://www.youtube.com' }, AbortController, setTimeout, clearTimeout,
+    document: { cookie: '' },
+    window: { ytcfg: { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined } },
+    fetch: async (_url, options) => { bodies.push(JSON.parse(options.body)); return { ok: true, json: async () => ({
+      contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { selected: true, content: { sectionListRenderer: { contents: [] } } } }] } }
+    }) }; }
+  });
+  const result = await createYouTubeFeedService().request('all');
+  assert.equal(high.mock.callCount(), 1);
+  assert.equal(high.mock.calls[0].arguments[0], 'PLempty');
+  assert.equal(bodies[0].browseId, 'VLPLempty');
+  assert.equal(result.items.length, 0);
+  assert.equal(result.nextPage, undefined);
+});
+
+for (const [pathname, method, browseId] of [
+  ['/feed/subscriptions', 'getSubscriptionsFeed', 'FEsubscriptions'],
+  ['/feed/history', 'getHistory', 'FEhistory']
+]) test(`${method} retains page identity, filters and restored pagination`, async t => {
+  const high = t.mock.method(YouTubeJs.Innertube.prototype, method);
+  const calls = [];
+  const location = { pathname, search: '', origin: 'https://www.youtube.com' };
+  const state = {};
+  const settings = { INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: 'test' } }, SESSION_INDEX: 2, DELEGATED_SESSION_ID: 'brand' };
+  const dependencies = {
+    location, AbortController, setTimeout, clearTimeout,
+    history: { state, replaceState(next) { Object.assign(state, next); } },
+    document: { cookie: '', querySelector() { throw Error('Native DOM read'); } },
+    window: { ytcfg: { get: key => settings[key] }, get ytInitialData() { throw Error('Startup JSON read'); } },
+    fetch: async (url, options) => {
+      const body = JSON.parse(options.body); calls.push({ url, body, headers: options.headers });
+      return { ok: true, json: async () => ({ contents: [
+        { videoRenderer: { videoId: body.continuation ? 'second' : 'first', title: { simpleText: 'Subscription' } } },
+        { chipCloudChipRenderer: { text: { simpleText: 'Today' }, navigationEndpoint: { browseEndpoint: { browseId, params: 'today' } } } },
+        ...(!body.continuation ? [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'subscriptions-next' } } } }] : [])
+      ] }) };
+    }
+  };
+  const { createYouTubeFeedService } = load('sites/youtube-feed', dependencies);
+  const service = createYouTubeFeedService();
+  const first = await service.request('all');
+  assert.equal(high.mock.callCount(), 1);
+  assert.equal(first.items[0].id, 'video:first');
+  assert.equal(calls[0].body.browseId, browseId);
+  assert.equal(calls[0].headers['x-goog-authuser'], '2');
+  assert.equal(calls[0].headers['x-goog-pageid'], 'brand');
+  const filtered = service.categories().find(item => item.id !== 'all');
+  assert.ok(filtered);
+  await service.request(filtered.id);
+  assert.equal(calls[1].body.params, 'today');
+  assert.equal(high.mock.callCount(), 1);
+  location.pathname = '/';
+  await assert.rejects(service.request('all', first.nextPage), /Category unavailable/);
+  location.pathname = pathname;
+  const restored = createYouTubeFeedService();
+  const second = await restored.request('all', first.nextPage);
+  assert.equal(second.items[0].id, 'video:second');
+  assert.equal(calls[2].body.continuation, 'subscriptions-next');
+  assert.equal(second.nextPage, undefined);
+  assert.equal(high.mock.callCount(), 1, 'restored pagination does not restart the feed');
+});
+
+for (const directory of [true, false]) test(`playlist ${directory ? 'directory' : 'contents'} restores high-level pagination and retries the same page`, async t => {
+  const cursor = t.mock.method(directory ? YouTubeJs.Mixins.Feed.prototype : YouTubeJs.YT.Playlist.prototype, 'getContinuation');
+  const firstMethod = t.mock.method(YouTubeJs.Innertube.prototype, directory ? 'getPlaylists' : 'getPlaylist');
+  const location = { pathname: directory ? '/feed/playlists' : '/playlist', search: directory ? '' : '?list=PLone', origin: 'https://www.youtube.com' };
+  const state = {}, calls = [];
+  let fail = true;
+  const dependencies = {
+    location, AbortController, setTimeout, clearTimeout,
+    history: { state, replaceState(next) { Object.assign(state, next); } },
+    document: { cookie: '' },
+    window: { ytcfg: { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientName: 'WEB', clientVersion: 'test' } } : key === 'SESSION_INDEX' ? 2 : undefined } },
+    fetch: async (_url, options) => {
+      const body = JSON.parse(options.body); calls.push({ body, headers: options.headers });
+      if (body.continuation && fail) { fail = false; return { ok: false, status: 400 }; }
+      const id = body.continuation ? 'second' : 'first';
+      const card = directory ? { playlistRenderer: { playlistId: `PL${id}`, title: { simpleText: id }, thumbnails: [] } } :
+        { playlistVideoRenderer: { videoId: id, title: { simpleText: id }, isPlayable: true,
+          navigationEndpoint: { watchEndpoint: { videoId: id, playlistId: 'PLone' } } } };
+      return { ok: true, json: async () => ({ contents: [card,
+        { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'saved-page' } } } }
+      ] }) };
+    }
+  };
+  const { createYouTubeFeedService } = load('sites/youtube-feed', dependencies);
+  const service = createYouTubeFeedService();
+  const first = await service.request('all');
+  assert.ok(first.nextPage);
+  service.cancel();
+  const restored = createYouTubeFeedService();
+  await assert.rejects(restored.request('all', first.nextPage));
+  const second = await restored.request('all', first.nextPage);
+  assert.equal(cursor.mock.callCount(), 2);
+  assert.equal(firstMethod.mock.callCount(), 1, 'restoring does not refetch the first page');
+  assert.equal(calls.length, 3);
+  assert.equal(calls[1].body.continuation, 'saved-page');
+  assert.equal(calls[2].body.continuation, 'saved-page');
+  assert.equal(calls[2].headers['x-goog-authuser'], '2');
+  assert.match(second.items[0].id, /second/);
+  assert.equal(second.nextPage, undefined, 'a repeated continuation does not loop');
+  location.pathname = '/feed/history'; location.search = '';
+  await assert.rejects(restored.request('all', first.nextPage), /Category unavailable/);
 });

@@ -1,11 +1,12 @@
 import { createAccountService } from '../sites/youtube-account';
+import { createNotificationService, notificationSnapshot } from '../sites/youtube-notifications';
 import { createSidebarService } from '../sites/youtube-sidebar';
 import { sidebarSnapshot } from '../shared/sidebar-data';
 import { createWatchDataService } from '../sites/youtube-watch-data';
 import type { YouTubePlayer, DisposerHost } from '../../types/core';
 import { PAGE_REQUEST, PAGE_RESPONSE, PAGE_HISTORY, parsePageMessage, videoDetails, watchInfoSnapshot, accountSnapshot, playbackQualities } from './page-protocol';
 import { createYouTubeFeedService } from '../sites/youtube-feed';
-import { parseWatchLink, parseShortLink } from '../shared/watch-link';
+import { parseWatchLink, parseShortLink, parsePlaylistLink } from '../shared/watch-link';
 import { createWatchNextService } from '../sites/youtube-next';
 import { createCommentsService } from '../sites/youtube-comments';
 import { commentLanguage } from '../shared/comment-language';
@@ -21,6 +22,8 @@ export function startPageServer() {
   let serving = false;
   const cleanups: (() => void)[] = [];
   const account = createAccountService();
+  const notifications = createNotificationService();
+  cleanups.push(notifications.destroy);
   const sidebar = createSidebarService();
   cleanups.push(sidebar.destroy);
   cleanups.push(account.destroy);
@@ -40,7 +43,7 @@ export function startPageServer() {
     if (destroyed || serving) return;
     const request = parsePageMessage((event as CustomEvent).detail);
     if (!request || typeof request.id !== 'string' || request.id.length > 100 ||
-        !['shortsRecommendations', 'playShorts', 'readShortsSettings', 'shortsSetting', 'readSidebar', 'readAccount', 'ping', 'readPlayerVideoId', 'readVideoDetails', 'readWatchInfo', 'watchAction', 'watchPlaylists', 'watchPlaylistToggle', 'showControls', 'hideControls', 'readBrowseCategories', 'requestBrowse', 'cancelBrowse', 'openBrowseVideo', 'openBrowseRoute', 'readWatchNext', 'moreWatchNext', 'readComments', 'moreComments', 'commentReplies', 'commentTranslate', 'commentPost', 'commentSort'].includes(request.operation as string)) return;
+        !['readNotifications', 'shortsRecommendations', 'playShorts', 'readShortsSettings', 'shortsSetting', 'readSidebar', 'readAccount', 'ping', 'readPlayerVideoId', 'readVideoDetails', 'readWatchInfo', 'watchAction', 'watchPlaylists', 'watchPlaylistToggle', 'showControls', 'hideControls', 'readBrowseCategories', 'requestBrowse', 'cancelBrowse', 'openBrowseVideo', 'openBrowseRoute', 'readWatchNext', 'moreWatchNext', 'readComments', 'moreComments', 'commentReplies', 'commentTranslate', 'commentPost', 'commentSort'].includes(request.operation as string)) return;
     const reply = (ok: boolean, value?: unknown) => {
       if (!destroyed) document.dispatchEvent(new CustomEvent(PAGE_RESPONSE, { detail: JSON.stringify({ version: 1,
         id: request.id, operation: request.operation, ok, value }) }));
@@ -98,6 +101,10 @@ export function startPageServer() {
     if (request.operation === 'readAccount') {
       void account.read(request.refresh === true).then(value => reply(true, accountSnapshot(value)), () => reply(false)); return;
     }
+    if (request.operation === 'readNotifications') {
+      if (!['count', 'list', 'more'].includes(request.mode as string)) { reply(false); return; }
+      void notifications.read(request.mode as 'count' | 'list' | 'more').then(value => reply(true, notificationSnapshot(value)), () => reply(false)); return;
+    }
     if (request.operation === 'readWatchInfo') { reply(true, watchInfoSnapshot(watchInfo.read())); return; }
     if (request.operation === 'readVideoDetails') { reply(true, videoDetails(watchInfo.read().details)); return; }
     if (request.operation === 'watchAction') {
@@ -142,6 +149,16 @@ export function startPageServer() {
       return;
     }
     if (request.operation === 'openBrowseVideo') {
+      const playlist = parsePlaylistLink(request.href);
+      if (playlist && playlist.href === request.href) {
+        try {
+          const app = document.querySelector('ytd-app') as (HTMLElement & { navigate_?: (endpoint: object) => void }) | null;
+          const endpoint = sidebarBrowseEndpoint(playlist.href);
+          if (!endpoint || typeof app?.navigate_ !== 'function') { reply(false); return; }
+          app.navigate_(endpoint); reply(true, true);
+        } catch { reply(false); }
+        return;
+      }
       const short = parseShortLink(request.href);
       if (short && short.href === request.href) {
         try {

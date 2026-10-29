@@ -1,6 +1,7 @@
 import { PAGE_REQUEST, PAGE_RESPONSE, parsePageMessage, videoDetails, watchNextSnapshot, commentsSnapshot, watchInfoSnapshot, savedPlaylists, accountSnapshot, shortsSettingsSnapshot } from './page-protocol';
 import type { PageAccess, PageOperation } from './page-protocol';
 import { sidebarSnapshot } from '../shared/sidebar-data';
+import { notificationSnapshot } from '../sites/youtube-notifications';
 
 // DOM events cross Chrome worlds synchronously. JSON strings avoid sharing
 // objects/functions and preserve the existing synchronous site port contract.
@@ -48,6 +49,7 @@ export function createPageClient(): PageAccess {
     });
   }
   return {
+    readNotifications: async mode => notificationSnapshot(await asyncRequest('readNotifications', { mode })),
     shortsRecommendations: async (videoId, reset) => {
       const raw = await asyncRequest('shortsRecommendations', { videoId, refresh: reset === true }) as { ids?: unknown; hasMore?: unknown } | undefined;
       if (!raw || !Array.isArray(raw.ids)) return undefined;

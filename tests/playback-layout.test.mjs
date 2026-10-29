@@ -63,7 +63,7 @@ for (const layout of ['fullscreen', 'windowed']) test(`${layout} keeps its first
   assert.equal(result.before.left, 320, 'native layout reproduces the initial right offset');
   assert.equal(result.firstFrame.left, 0);
   assert.equal(result.firstFrame.top, layout === 'fullscreen' ? 0 : 56);
-  const [width, height] = layout === 'fullscreen' ? [1280, 900] : [1088, 612];
+  const [width, height] = layout === 'fullscreen' ? [1280, 900] : [820, 667];
   assert.ok(Math.abs(result.firstFrame.width - width) < 0.02);
   assert.ok(Math.abs(result.firstFrame.height - height) < 0.02);
   assert.deepEqual(result.pending, result.firstFrame, 'watch URL handoff keeps the same geometry');
@@ -71,7 +71,7 @@ for (const layout of ['fullscreen', 'windowed']) test(`${layout} keeps its first
   assert.deepEqual(result.canceled, result.before, 'canceling restores native layout');
 });
 
-test('windowed media maximizes its area and shares remaining width with the side panel', async t => {
+test('windowed regions remain stable across media ratios and reserve the information area', async t => {
   const page = await browserPage(t);
   await page.setContent('<html class="ytg-watch-layout" data-ytg-playback-layout="windowed"><body><div id="movie_player"></div></body></html>');
   await page.addStyleTag({ content: readFileSync(new URL('../src/app/theater.css', import.meta.url), 'utf8') });
@@ -83,10 +83,11 @@ test('windowed media maximizes its area and shares remaining width with the side
         const rect = document.querySelector('#movie_player').getBoundingClientRect();
         return { width: rect.width, height: rect.height };
       }, ratio);
-      const expectedWidth = Math.min(width * .85, (height - 56 - 96) * ratio);
-      assert.ok(Math.abs(bounds.width - expectedWidth) < .1, `maximal video width at ${width}, ratio ${ratio}`);
-      assert.ok(Math.abs(bounds.height - bounds.width / ratio) < .1, 'frame matches media without added letterboxing');
-      assert.ok(bounds.height + 56 + 96 <= height + .1, 'metadata and controls retain their space');
+      const side = width <= 700 ? Math.min(240, width * .4) : width <= 1050 ? 340 : 460;
+      const expectedWidth = width - side;
+      assert.ok(Math.abs(bounds.width - expectedWidth) < .1, `stable stage width at ${width}, ratio ${ratio}`);
+      assert.ok(Math.abs(bounds.height - (height - 56 - 177)) < .1, 'stage height is independent of media ratio');
+      assert.ok(Math.abs(height - bounds.height - 56 - 177) < .1, 'information area retains its fixed height');
     }
   }
 });
@@ -120,8 +121,8 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
   });
   await page.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: `
     <html><body style="margin:0"><ytd-masthead>Header</ytd-masthead><ytd-watch-flexy style="display:block;margin-left:320px">
-    <div id="movie_player" style="width:960px;height:540px;background:#111"><div class="html5-video-container"><video class="html5-main-video"></video></div><div class="ytp-chrome-bottom">
-    <button class="ytp-size-button">Theater</button><button class="ytp-play-button">Play</button></div></div>
+    <div id="movie_player" style="width:960px;height:540px;background:#111"><div class="html5-video-container"><video class="html5-main-video"></video></div><div class="ytp-chrome-bottom" style="position:absolute;bottom:0">
+    <div class="ytp-progress-bar" role="slider" tabindex="0" style="height:24px"></div><div class="ytp-chrome-controls"><button class="ytp-size-button">Theater</button><button class="ytp-play-button">Play</button><button class="ytp-fullscreen-button">Fullscreen</button></div></div></div>
     <div id="below">Metadata</div><div id="secondary">Recommendations</div></ytd-watch-flexy>
     <script>
     window.nativeSizeClicks = 0;
@@ -142,9 +143,9 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
   await effective('windowed');
   await page.locator('#ytg-watch').waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.classList.contains('ytg-watch-layout')), true);
-  assert.equal(await page.locator('.ytp-chrome-bottom').isVisible(), false, 'mouse uses custom gamepad playback controls');
+  assert.equal(await page.locator('.ytp-chrome-bottom').isVisible(), true, 'windowed playback retains the original YouTube control strip');
   assert.equal(await page.locator('#below').isVisible(), false);
-  assert.ok(Math.abs((await mediaBounds()).width - 1088) < 0.02);
+  assert.ok(Math.abs((await mediaBounds()).width - 820) < 0.02);
   const banner = page.locator('#ytg-browse-top');
   await banner.waitFor();
   const bannerBounds = await banner.boundingBox();
@@ -164,7 +165,7 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
   await page.locator('#ytg-account-page [data-account-close]').click();
   await page.locator('#ytg-account-page').waitFor({ state: 'hidden' });
   await page.evaluate(() => window.YTGamepadCoordinator.setMode('controls'));
-  const progress = page.locator('#ytg-watch .progress');
+  const progress = page.locator('#movie_player .ytp-progress-bar');
   await progress.waitFor();
   await page.evaluate(() => {
     const clock = Date.now;
@@ -178,10 +179,10 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
     expected: getComputedStyle(node.getRootNode().host).color
   }));
   assert.equal(descriptionColors.text, descriptionColors.expected, 'windowed buttons use readable page-theme text');
-  const enterFullscreen = page.locator('#ytg-watch [data-action="fullscreen"]');
+  const enterFullscreen = page.locator('#movie_player .ytp-fullscreen-button');
   assert.equal(await page.locator('#ytg-watch .transport-group').isVisible(), false);
   await enterFullscreen.click();
-  await page.waitForFunction(() => document.fullscreenElement === document.documentElement);
+  await page.waitForFunction(() => document.documentElement.dataset.ytgWatchExpanded === 'true');
   await effective('fullscreen');
   assert.equal(await enterFullscreen.isVisible(), false);
   await page.mouse.move(300, 200);
@@ -189,7 +190,7 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
   const fullBounds = await mediaBounds();
   assert.equal(fullBounds.width, await page.evaluate(() => innerWidth));
   assert.equal(fullBounds.height, await page.evaluate(() => innerHeight));
-  await page.evaluate(() => document.exitFullscreen());
+  await page.evaluate(() => window.YTGamepadCoordinator.request('fullscreen'));
   await effective('windowed');
   assert.equal(await enterFullscreen.isVisible(), true);
   assert.equal(await page.locator('#ytg-watch .transport-group').isVisible(), false);
@@ -214,19 +215,19 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
   await effective('windowed');
   await banner.waitFor();
   assert.equal(await page.evaluate(() => window.YTGamepadInput.mode), 'gamepad');
-  assert.ok(Math.abs((await mediaBounds()).width - 1088) < 0.02, 'saved windowed layout also applies to gamepad input');
+  assert.ok(Math.abs((await mediaBounds()).width - 820) < 0.02, 'saved windowed layout also applies to gamepad input');
   await page.evaluate(() => { history.pushState({}, '', '/watch?v=second'); document.dispatchEvent(new Event('yt-navigate-finish')); });
   await effective('windowed');
   await page.locator('#ytg-watch').waitFor();
   await banner.waitFor();
-  assert.equal(await page.locator('.ytp-chrome-bottom').isVisible(), false);
+  assert.equal(await page.locator('.ytp-chrome-bottom').isVisible(), true);
 
   await configure('fullscreen');
   await effective('fullscreen');
   await page.mouse.wheel(0, 1);
   await page.waitForFunction(() => window.YTGamepadInput.mode === 'mouse');
   await effective('windowed');
-  assert.ok(Math.abs((await mediaBounds()).width - 1088) < 0.02);
+  assert.ok(Math.abs((await mediaBounds()).width - 820) < 0.02);
   assert.equal(await page.evaluate(() => window.nativeSizeClicks), 0, 'custom layouts never toggle the removed native theater layout');
   await page.evaluate(() => window.postMessage({ source: 'yt-gamepad-settings', values: { enabled: false } }, location.origin));
   await page.waitForFunction(() => !document.documentElement.classList.contains('ytg-watch-layout'));

@@ -15,6 +15,7 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
       </div></ytd-masthead><ytd-page-manager><ytd-rich-item-renderer><a id="thumbnail" href="/watch?v=one">Video</a></ytd-rich-item-renderer></ytd-page-manager>
     </body></html>` }));
   await page.goto('https://www.youtube.com/results?search_query=existing');
+  await page.route('https://www.youtube.com/complete/search?**', route => route.fulfill({ contentType: 'application/json', body: '["",[]]' }));
   for (const file of ['src/ui/theme.css', 'src/app/browse.css'])
     await page.addStyleTag({ content: readFileSync(new URL(`../${file}`, import.meta.url), 'utf8') });
   await page.evaluate(() => {
@@ -40,10 +41,16 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
   await clear.click();
   assert.equal(await input.inputValue(), '');
   assert.equal(await clear.count(), 0);
+  const discovery = host.locator('.search-discovery');
+  assert.equal(await discovery.isVisible(), true);
+  assert.match(await discovery.textContent(), /Recent searches/);
+  assert.match(await discovery.textContent(), /Suggested searches/);
+  await discovery.getByText('No search suggestions', { exact: true }).waitFor();
   assert.equal(await page.locator('#search').inputValue(), 'existing');
   await input.press('Enter');
   assert.deepEqual(await page.evaluate(() => window.submissions), [], 'clearing must not submit or navigate');
   await input.fill('  component search  ');
+  assert.equal(await discovery.getByRole('group', { name: 'Recent searches' }).count(), 0, 'typing hides recent searches');
   assert.equal(await page.locator('#search').inputValue(), 'existing');
   await input.press('Enter');
   assert.deepEqual(await page.evaluate(() => window.submissions), ['component search']);
@@ -141,6 +148,12 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
   assert.equal(await page.evaluate(() => window.__pageDOM.activeElement === window.__pageDOM.querySelector('#ytg-search-host input') && window.YTGamepad.current === window.__pageDOM.activeElement), true, 'clearing returns controller focus to the surviving input');
   assert.equal(await page.evaluate(() => window.submissions.length), searchCount);
   assert.equal(page.url(), searchRoute);
+  assert.equal(await discovery.isVisible(), true);
+  const recentChoice = discovery.getByRole('button', { name: '↶ from gamepad keyboard', exact: true });
+  await recentChoice.click();
+  assert.equal(await page.evaluate(() => window.submissions.length), searchCount + 1, 'a recent query submits in one click');
+  assert.equal(await page.evaluate(() => window.submissions.at(-1)), 'from gamepad keyboard');
+  await clear.click();
   await page.evaluate(() => window.YTGamepad.act('right'));
   assert.equal(await host.locator('button[type=submit]').evaluate(node => window.YTGamepad.current === node), true, 'navigation skips the removed clear button');
   await input.fill('from gamepad keyboard');
@@ -175,6 +188,27 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
   await input.fill('手柄搜索');
   await host.getByRole('button', { name: '清空', exact: true }).waitFor();
   await host.screenshot({ path: 'output/search-bar/clear.png' });
+  const requested = [];
+  await page.route('https://www.youtube.com/complete/search?**', route => {
+    const url = new URL(route.request().url());
+    const query = url.searchParams.get('q'); requested.push(query);
+    assert.equal(url.searchParams.get('ds'), 'yt');
+    return route.fulfill({ contentType: 'text/javascript', body: `window.google.ac.h(${JSON.stringify([query,
+      [[query ? `${query} walkthrough` : 'Steam Deck', 0, [512]], ['<img onerror=alert(1)>', 0, []]]])})` });
+  });
+  await host.getByRole('button', { name: '清空', exact: true }).click();
+  await discovery.getByRole('button', { name: 'Steam Deck', exact: true }).waitFor();
+  assert.equal(await discovery.locator('img').count(), 0, 'API suggestions render as text');
+  assert.ok(requested.includes(''), 'empty input requests suggestions from the API');
+  await page.screenshot({ path: 'output/search-bar/discovery.png' });
+  await discovery.getByRole('button', { name: 'Steam Deck', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.submissions.at(-1)), 'Steam Deck');
+  await input.fill('elden');
+  const suggested = discovery.getByRole('button', { name: 'elden walkthrough', exact: true });
+  await suggested.waitFor();
+  assert.equal(await discovery.getByRole('group', { name: '最近搜索' }).count(), 0);
+  await suggested.click();
+  assert.equal(await page.evaluate(() => window.submissions.at(-1)), 'elden walkthrough');
   await page.evaluate(() => { document.querySelector('#center').append(...window.detachedSearch); window.YTGamepadRuntime.destroy(); });
   assert.equal(await host.count(), 0);
   assert.equal(await page.locator('#search').isVisible(), true);

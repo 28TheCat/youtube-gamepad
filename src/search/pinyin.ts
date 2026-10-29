@@ -1,5 +1,6 @@
 import type { Pinyin, PinyinCandidate } from '../../types/ports';
 
+import { readLocalStorage, writeLocalStorage } from './local-storage';
 import { YTGamepadPinyinData, YTGamepadPinyinKeys } from './pinyin-data.ts';
 export let YTGamepadPinyin!: Pinyin;
 (() => {
@@ -24,7 +25,7 @@ export let YTGamepadPinyin!: Pinyin;
     if (dictionary) return;
     dictionary = YTGamepadPinyinData;
     try {
-    const raw = localStorage.getItem('ytg-pinyin-ranking');
+    const raw = readLocalStorage('ytg-pinyin-ranking');
     if (raw && raw.length <= 131072) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -83,7 +84,7 @@ export let YTGamepadPinyin!: Pinyin;
       wordCache.delete(candidate.key);
       lookupCache.clear();
       if (Object.keys(learned).length > 500) delete learned[Object.keys(learned)[0]];
-      try { localStorage.setItem('ytg-pinyin-ranking', JSON.stringify(learned)); } catch (_) {}
+      writeLocalStorage('ytg-pinyin-ranking', JSON.stringify(learned));
     }
   };
 })();

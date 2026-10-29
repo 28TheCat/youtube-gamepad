@@ -31,6 +31,8 @@ Navigation, search, settings, on-screen keyboard and playback controls use MingC
 
 ## Google Material Icons
 
+Subscription channel status uses Google's `action/sensors` (live broadcast) and `image/lens` (new content dot), from revision `737e3324305806514d7909874fa1818ae1808232`. Original SVG geometry is preserved by `scripts/extract-mingcute.py`; colors follow `currentColor`. Licensed under the included Apache-2.0 license.
+
 Subscription controls use Google Material Icons `social/notifications`, `social/notifications_active`, `social/notifications_off`, and `navigation/expand_more` (outlined and filled), from revision `737e3324305806514d7909874fa1818ae1808232`. Original SVG geometry is preserved; colors follow `currentColor`. Licensed under Apache-2.0, included in `licenses/material-icons-LICENSE.txt`. Source: https://github.com/google/material-design-icons .
 
 Channel verification uses Google's `action/check_circle` icon; official artist channels use `image/music_note`, from revision `737e3324305806514d7909874fa1818ae1808232`, under the included Apache-2.0 license. Original SVG geometry is preserved by `scripts/extract-mingcute.py`.

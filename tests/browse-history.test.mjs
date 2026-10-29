@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reactive } from 'vue';
 import { importSettingsModel } from './helpers/settings-model.mjs';
-const { saveBrowseReturn, readBrowseReturn } = await importSettingsModel('src/app/browse-history.ts');
+const { saveBrowseReturn, readBrowseReturn, saveWatchReturn, readWatchReturn } = await importSettingsModel('src/app/browse-history.ts');
 const { createBrowseFeedController } = await importSettingsModel('src/app/browse-feed-controller.ts');
 
 const saved = () => ({ categories: [{ id: 'music', label: 'Music', selected: true }], category: 'music',
@@ -38,4 +38,30 @@ test('a new controller restores category, loaded pages, focus and continuation w
   assert.deepEqual(controller.captureReturnState(620), state);
   await controller.changeCategory('music', true);
   assert.equal(requestedPage, 'page-3');
+});
+
+
+test('each history entry owns its watch focus even when the same video is visited twice', () => {
+  const history = { state: { youtube: { index: 1 } }, replaceState(value) { this.state = structuredClone(value); } };
+  const first = { route: '/watch?v=one', target: { region: 'controls', itemKey: 'channel', index: 3 }, tab: 0, scrollTop: 320 };
+  saveWatchReturn(history, first);
+  const entry = history.state;
+  history.state = { youtube: { index: 2 } };
+  const second = { ...first, target: { region: 'recommendations', itemKey: 'video-two', index: 7 }, scrollTop: 900 };
+  saveWatchReturn(history, second);
+  assert.deepEqual(readWatchReturn(history, first.route), second);
+  history.state = entry;
+  assert.deepEqual(readWatchReturn(history, first.route), first);
+  assert.deepEqual(history.state.youtube, { index: 1 });
+  assert.equal(readWatchReturn(history, '/watch?v=other'), undefined);
+  history.state.ytGamepadWatchReturn.target.index = -1;
+  assert.equal(readWatchReturn(history, first.route), undefined);
+});
+
+test('browse return snapshots retain playlist cards alongside videos', () => {
+  const history = { state: {}, replaceState(value) { this.state = structuredClone(value); } };
+  const state = saved();
+  state.snapshot.items.push({ id: 'playlist:PLone', title: 'Playlist', channel: '', thumbnail: '', href: '/playlist?list=PLone' });
+  saveBrowseReturn(history, state);
+  assert.equal(readBrowseReturn(history, '/').snapshot.items.length, 3);
 });

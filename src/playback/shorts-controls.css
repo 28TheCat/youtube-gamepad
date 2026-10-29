@@ -60,15 +60,21 @@ button:focus-visible,button[data-selected]{outline-color:var(--ytg-shorts-text)}
 .drawer{background:var(--ytg-shorts-background);border-color:var(--ytg-shorts-button)}
 .drawer header{border-color:var(--ytg-shorts-button)}
 .drawer-message{color:var(--ytg-shorts-muted)}
-:host([data-panel]) .metadata{left:calc(var(--ytg-shorts-left) - var(--ytg-shorts-width)/2 + 16px);bottom:calc(100dvh - var(--ytg-shorts-top) - var(--ytg-shorts-height) + 28px);width:calc(var(--ytg-shorts-width) - 32px);max-width:none;color:#fff;text-shadow:0 1px 6px #000}
+:host([data-panel]) .metadata{left:calc(var(--ytg-shorts-left) - var(--ytg-shorts-width)/2 + 16px);bottom:calc(100dvh - var(--ytg-shorts-top) - var(--ytg-shorts-visible-height) + 28px);width:calc(var(--ytg-shorts-width) - 32px);max-width:none;color:#fff;text-shadow:0 1px 6px #000}
 @media(max-width:1300px),(max-aspect-ratio:3/2){
-  .metadata{left:calc(var(--ytg-shorts-left) - var(--ytg-shorts-width)/2 + 16px);bottom:calc(100dvh - var(--ytg-shorts-top) - var(--ytg-shorts-height) + 28px);width:calc(var(--ytg-shorts-width) - 32px);max-width:none;color:#fff;text-shadow:0 1px 6px #000}
+  .metadata{left:calc(var(--ytg-shorts-left) - var(--ytg-shorts-width)/2 + 16px);bottom:calc(100dvh - var(--ytg-shorts-top) - var(--ytg-shorts-visible-height) + 28px);width:calc(var(--ytg-shorts-width) - 32px);max-width:none;color:#fff;text-shadow:0 1px 6px #000}
   .identity{gap:6px}.author{font-size:13px}.title{font-size:15px;line-height:22px}.subscribe{min-height:36px;padding:0 12px}
 }
 @media(max-width:800px){
-  .back{top:16px;left:12px}.rail{left:calc(var(--ytg-shorts-left) + var(--ytg-shorts-width)/2 + 8px);bottom:calc(100dvh - var(--ytg-shorts-top) - var(--ytg-shorts-height) + 20px);gap:14px}
+  .back{top:16px;left:12px}.rail{left:calc(var(--ytg-shorts-left) + var(--ytg-shorts-width)/2 + 8px);bottom:calc(100dvh - var(--ytg-shorts-top) - var(--ytg-shorts-visible-height) + 20px);gap:14px}
   :host .rail button.media-action.control{width:44px;height:44px;min-width:44px;min-height:44px;padding:10px}
   .navigation{right:10px;top:auto;bottom:20px;transform:none;flex-direction:row}.navigation button{width:44px;height:44px}
   .hints{background:var(--ytg-shorts-background)}.metadata{left:calc(var(--ytg-shorts-left) - var(--ytg-shorts-width)/2 + 12px);width:calc(var(--ytg-shorts-width) - 24px)}
   .avatar{width:28px;height:28px}.identity{flex-wrap:wrap}.author{max-width:calc(100% - 40px)}
 }
+
+/* The whole media stage grows beyond the window; its surrounding controls stay fixed. */
+:host{overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.stage{height:var(--ytg-shorts-height);overflow:hidden;pointer-events:auto;touch-action:pan-y}
+.back,.metadata,.rail,.navigation,.feedback,.hints,.drawer{position:fixed}
+.stage-content{position:relative;width:100%;height:var(--ytg-shorts-height);pointer-events:none}

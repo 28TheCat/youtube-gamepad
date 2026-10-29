@@ -116,3 +116,33 @@ test('subscribed people include names and safe avatars in guide order without du
   assert.equal(value.subscriptions[1].avatar, undefined);
   f.service.destroy();
 });
+
+test('subscription status badges survive parsing, cache copies and refreshes without guessing missing states', async () => {
+  const f = fixture(count => {
+    const data = guideData(), items = data.items[3].guideSubscriptionsSectionRenderer.items;
+    const entry = items[0].guideEntryRenderer;
+    entry.navigationEndpoint.browseEndpoint.browseId = 'UCnew';
+    entry.badges = count === 1 ? [{ newContent: true }] : [];
+    for (const [id, badges] of [
+      ['UClive', { liveBroadcasting: true, newContent: true }],
+      ['UCrenderer', [{ liveBroadcastingBadgeRenderer: {} }, { newContentBadgeRenderer: {} }]],
+      ['UCnone', undefined], ['UCinvalid', [{ newContent: 'true', liveBroadcasting: 1 }]]
+    ]) {
+      const next = structuredClone(items[0]);
+      next.guideEntryRenderer.navigationEndpoint.browseEndpoint.browseId = id;
+      next.guideEntryRenderer.badges = badges;
+      items.push(next);
+    }
+    return data;
+  });
+  const value = await f.service.read();
+  assert.deepEqual(Array.from(value.subscriptions, item => [item.id, item.isLive, item.hasNewContent]), [
+    ['UCnew', false, true], ['UClive', true, true], ['UCrenderer', true, true],
+    ['UCnone', false, false], ['UCinvalid', false, false]
+  ]);
+  value.subscriptions[0].hasNewContent = false;
+  assert.equal((await f.service.read()).subscriptions[0].hasNewContent, true);
+  f.advance();
+  assert.equal((await f.service.read()).subscriptions[0].hasNewContent, false);
+  f.service.destroy();
+});

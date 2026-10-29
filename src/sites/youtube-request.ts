@@ -31,7 +31,8 @@ export async function createYouTubeHeaders(context: { client: { clientVersion?: 
 
 const readEndpoints = ['guide', 'browse', 'search', 'next', 'player', 'playlist/get_add_to_playlist',
   'reel/reel_item_watch', 'reel/reel_watch_sequence',
-  'navigation/resolve_url', 'account/accounts_list', 'comment/perform_comment_action'];
+  'navigation/resolve_url', 'account/accounts_list', 'comment/perform_comment_action',
+  'notification/get_unseen_count', 'notification/get_notification_menu'];
 const writeEndpoints = ['like/like', 'like/dislike', 'like/removelike', 'subscription/subscribe',
   'subscription/unsubscribe', 'notification/modify_channel_preference', 'browse/edit_playlist', 'comment/create_comment', 'comment/create_comment_reply'];
 
@@ -112,7 +113,9 @@ async function request(path: string, init: RequestInit, timeoutMs: number, mutat
           if ((raw as Record<string, unknown>).success === false) throw new YouTubeRequestError('response');
           return raw as Record<string, any>;
         }
-        if (!(path === 'guide' && Array.isArray((raw as Record<string, unknown>).items)) &&
+        if (!(path === 'notification/get_unseen_count' && ('unseenCount' in raw || 'actions' in raw)) &&
+          !(path === 'notification/get_notification_menu' && Array.isArray((raw as Record<string, unknown>).actions)) &&
+          !(path === 'guide' && Array.isArray((raw as Record<string, unknown>).items)) &&
           !(path === 'player' && ('videoDetails' in raw || 'playabilityStatus' in raw)) &&
           !(path === 'reel/reel_item_watch' && 'playerResponse' in raw) &&
           !(path === 'reel/reel_watch_sequence' && Array.isArray((raw as Record<string, unknown>).entries)) &&

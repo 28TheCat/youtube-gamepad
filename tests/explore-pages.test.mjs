@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { importSettingsModel } from './helpers/settings-model.mjs';
-const { explorePages, resolveExplorePage, isInnerTubeBrowseRoute, searchHref, sidebarBrowseEndpoint } = await importSettingsModel('src/shared/explore-pages.ts');
+const { explorePages, resolveExplorePage, isNativeFlowRoute, isInnerTubeBrowseRoute, searchHref, sidebarBrowseEndpoint } = await importSettingsModel('src/shared/explore-pages.ts');
 
 test('search navigation uses bounded queries and fixed search endpoints', () => {
   const href = searchHref('  中文 & music  ');
@@ -37,4 +37,10 @@ test('explore destinations resolve to separate reusable page definitions', () =>
   }
   for (const route of ['/', '/watch?v=music', '/results?search_query=音乐', 'https://evil.test/music', '/@creator'])
     assert.equal(resolveExplorePage(route), undefined);
+});
+
+
+test('only explicit account flows bypass the custom shell', () => {
+  for (const route of ['/signin?next=%2F', '/logout', '/channel_switcher']) assert.equal(isNativeFlowRoute(route), true);
+  for (const route of ['/account', '/results?search_query=signin', '/@signin', 'https://evil.test/signin']) assert.equal(isNativeFlowRoute(route), false);
 });

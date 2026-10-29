@@ -10,8 +10,10 @@ import InterfaceIcon from './InterfaceIcon.vue';
 import ChannelBadge from './ChannelBadge.vue';
 import ChannelAvatar from './ChannelAvatar.vue';
 import MediaActionButton from './MediaActionButton.vue';
-import { primaryPlaybackGroups as primaryGroups, secondaryPlaybackGroups as secondaryGroups } from './playback-control-config';
-const props = defineProps<{ page: PlaybackMetadata; playback: PlaybackControlState; commentsOpen: boolean; hasCollection?: boolean; collectionOpen?: boolean; activate: (action: string) => void; controllerStyle: ControllerStyle }>();
+import { primaryPlaybackGroups as primaryGroups, secondaryPlaybackGroups as secondaryGroups, windowedPlayerControlIds } from './playback-control-config';
+const props = defineProps<{ page: PlaybackMetadata; playback: PlaybackControlState; commentsOpen: boolean; hasCollection?: boolean; collectionOpen?: boolean; windowed?: boolean; activate: (action: string) => void; controllerStyle: ControllerStyle }>();
+const visiblePrimaryGroups = computed(() => props.windowed ? [primaryGroups[0]] : primaryGroups);
+const visibleSecondaryGroups = computed(() => secondaryGroups.map(group => group.filter(([action]) => !props.windowed || !windowedPlayerControlIds.includes(action))).filter(group => group.length));
 const vBadge: Directive<HTMLElement, string> = {
   mounted(node, binding) { props.controllerStyle.badge(node, binding.value); }
 };
@@ -31,7 +33,7 @@ function pressed(action: string) {
 </script>
 <template>
     <nav class="toolbar" :aria-label="t('Video controls')">
-        <div v-for="(group, groupIndex) in primaryGroups" :key="groupIndex" class="group" :class="{ 'channel-group': groupIndex === 0, 'transport-group': groupIndex === 1 }">
+        <div v-for="(group, groupIndex) in visiblePrimaryGroups" :key="groupIndex" class="group" :class="{ 'channel-group': groupIndex === 0, 'transport-group': groupIndex === 1 }">
           <button v-for="[action, symbol] in group" :key="action" class="control" :class="{ play: action === 'playPause', avatar: action === 'channel' }"
             :data-action="action" :data-focus-id="action" :title="action === 'channel' ? page.channel || t('Channel') : label(action)" :aria-label="label(action)" :aria-pressed="pressed(action)" :aria-haspopup="action === 'subscribe' && page.subscribed ? 'dialog' : undefined"
             :disabled="['seekBack', 'seekForward'].includes(action) && !canSeek" @click="activate(action)">
@@ -40,15 +42,14 @@ function pressed(action: string) {
             <InterfaceIcon v-else-if="symbol" :name="action === 'playPause' ? (video?.paused ? 'play' : 'pause') : symbol" :filled="action === 'playPause'" /><span v-else>{{ label(action) }}</span>
           </button>
         </div>
-        <button type="button" class="control windowed-fullscreen" data-action="fullscreen" data-focus-id="fullscreen"
-          :title="t('Enter fullscreen')" :aria-label="t('Enter fullscreen')" @click="activate('fullscreen')"><InterfaceIcon name="fullscreen" /></button>
         <div class="group right-group">
-          <div v-for="(group, index) in secondaryGroups" :key="index" class="cluster">
+          <button v-if="hasCollection && !windowed" class="control fullscreen-collection" data-action="collection" data-focus-id="collection" :aria-label="t('Collection')" :title="t('Collection')" :aria-expanded="!!collectionOpen" @click="activate('collection')"><InterfaceIcon name="playlists" filled /></button>
+          <div v-for="(group, index) in visibleSecondaryGroups" :key="index" class="cluster">
             <template v-for="[action, symbol] in group" :key="action">
-            <MediaActionButton v-if="action === 'like' || action === 'comments' || action === 'save' || action === 'mute'" :action="action"
+            <MediaActionButton v-if="action === 'like' || action === 'comments' || action === 'save' || action === 'mute'" :action="action" :class="{ 'player-option': action === 'mute' }"
               :active="action === 'like' ? !!page.liked : action === 'mute' ? video.muted : action === 'comments' ? commentsOpen : undefined"
               :data-action="action" :data-focus-id="action" @activate="activate(action)" />
-            <button v-else class="control" :data-action="action" :data-focus-id="action"
+            <button v-else class="control" :class="{ 'player-option': ['captions', 'settings', 'goLive'].includes(action) }" :data-action="action" :data-focus-id="action"
               :aria-label="label(action)" :title="label(action)" :aria-pressed="pressed(action)" :hidden="action === 'goLive' && !video.isLive" :disabled="action === 'goLive' && (!canSeek || video.atLiveEdge)" @click="activate(action)">
               <InterfaceIcon v-if="symbol" :name="symbol" :filled="pressed(action)" /><template v-else>{{ video.atLiveEdge ? t('Live') : t('Go live') }}</template>
             </button>
@@ -57,9 +58,9 @@ function pressed(action: string) {
         </div>
     </nav>
     <nav class="watch-tabs" role="tablist" :aria-label="t('Recommendations')">
-      <button v-if="hasCollection" class="watch-tab collection-tab" role="tab" :aria-selected="collectionOpen && !commentsOpen" @click="activate('collection')"><InterfaceIcon name="playlists" filled />{{ t('Collection') }}</button>
-      <button class="watch-tab" role="tab" :aria-selected="!collectionOpen && !commentsOpen" @click="activate('recommendations')"><InterfaceIcon name="play" filled />{{ t('Recommendations') }}</button>
-      <button class="watch-tab" role="tab" :aria-selected="!!commentsOpen" @click="activate('comments')"><InterfaceIcon name="comments" />{{ t('Comments') }}</button>
-      <span class="tab-hint key-controller-badge"><span v-badge="'LB'"></span><span aria-hidden="true">/</span><span v-badge="'RB'"></span></span>
+      <button v-if="hasCollection && windowed" class="watch-tab collection-tab" role="tab" data-focus-id="tab:0" :aria-selected="collectionOpen && !commentsOpen" @click="activate('collection')"><InterfaceIcon name="playlists" filled />{{ t('Collection') }}</button>
+      <button class="watch-tab" role="tab" :data-focus-id="`tab:${hasCollection ? 1 : 0}`" :aria-selected="!collectionOpen && !commentsOpen" @click="activate('recommendations')"><InterfaceIcon name="play" filled />{{ t('Recommendations') }}</button>
+      <button class="watch-tab" role="tab" :data-focus-id="`tab:${hasCollection ? 2 : 1}`" :aria-selected="!!commentsOpen" @click="activate('comments')"><InterfaceIcon name="comments" />{{ t('Comments') }}</button>
+      <span class="tab-hint key-controller-badge"><span v-badge="'LB'"></span><span aria-hidden="true">/</span><span v-badge="'RB'"></span><span>{{ t('Seek') }}</span></span>
     </nav>
 </template>

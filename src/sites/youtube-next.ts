@@ -13,6 +13,7 @@ export interface WatchNextSnapshot {
   loading: boolean;
   failed: boolean;
   playlistTitle?: string;
+  playlistTotal?: number;
 }
 type Node = Record<string, any>;
 // Scope the library's parsed response before converting presentation fields.
@@ -52,7 +53,10 @@ export function parseWatchNext(raw: Node, currentVideo: string, continuationKind
     }
     return items;
   }
-  return { recommendations: records(recommendationRoots, false), queue: records(queueRoots, true),
+  // YouTube.js does not expose this scalar playlist metadata yet.
+  const total = raw.contents?.twoColumnWatchNextResults?.playlist?.playlist?.totalVideos;
+  const playlistTotal = !watch?.playlist?.is_infinite && Number.isSafeInteger(total) && total > 0 ? total as number : undefined;
+  return { recommendations: records(recommendationRoots, false), queue: records(queueRoots, true), playlistTotal,
     playlistTitle: label(watch?.playlist?.title),
     recommendationContinuation: continuationToken(recommendationRoots), queueContinuation: continuationToken(queueRoots) };
 }
@@ -101,6 +105,7 @@ export function createWatchNextService(sharedData?: WatchDataService) {
       if (!append) {
         captured.recommendations = parsed.recommendations; captured.queue = parsed.queue;
         captured.playlistTitle = parsed.playlistTitle;
+        captured.playlistTotal = parsed.playlistTotal;
         tokens = parsed;
         if (captured.queue.length >= 120) tokens.queueContinuation = undefined;
         if (captured.recommendations.length >= 120) tokens.recommendationContinuation = undefined;

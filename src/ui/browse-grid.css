@@ -15,6 +15,15 @@
 .client-brand small{text-transform:uppercase;color:var(--ytg-muted)}
 #ytg-client-search{flex:1;margin:auto;min-width:0}
 #ytg-browse-top .client-account{display:grid;place-items:center;flex:none;width:48px;height:48px;padding:12px;background:var(--ytg-surface);border:0;border-radius:var(--ytg-pill-radius);color:var(--ytg-text);cursor:pointer}
+#ytg-browse-top .notification-entry{position:relative;display:grid;place-items:center;flex:none;width:40px;height:40px;padding:8px;border:0;border-radius:var(--ytg-pill-radius);background:var(--ytg-surface);color:var(--ytg-text);cursor:pointer;overflow:visible}
+.notification-entry svg{width:24px;height:24px}
+.notification-count{position:absolute;right:-3px;top:-4px;padding:1px 4px;min-width:14px;border-radius:10px;background:#c00;color:white;font:600 11px/16px Arial,sans-serif;text-align:center}
+#ytg-notifications-page{position:fixed;inset:0;z-index:2200;overflow:auto;overscroll-behavior:contain;background:var(--ytg-client-background);color:var(--ytg-text);padding:28px;box-sizing:border-box}
+.notification-layout{max-width:800px;margin:auto}.notification-heading{display:flex;align-items:center;gap:24px;margin-bottom:28px}.notification-heading h1{font-size:28px}
+#ytg-notifications-page button{font:inherit;color:inherit;cursor:pointer;border:0;border-radius:12px;background:var(--ytg-client-surface);padding:12px}
+#ytg-notifications-page button:is(:focus-visible,.ytg-selected){outline:var(--ytg-focus-width,4px) solid var(--ytg-focus-color);outline-offset:2px}
+.notification-list{display:grid;gap:8px}.notification-list .notification-item{display:flex;width:100%;align-items:center;gap:16px;text-align:left;min-height:76px}.notification-item.unread{background:var(--ytg-current-background)}
+.notification-avatar{width:44px;height:44px;flex:none;object-fit:cover;border-radius:50%;background:var(--ytg-surface)}.notification-text{flex:1;min-width:0;line-height:1.5;overflow-wrap:anywhere}.notification-text small{display:block;color:var(--ytg-muted);margin-top:4px}.notification-thumbnail{width:96px;aspect-ratio:16/9;object-fit:cover;border-radius:8px}
 .client-account svg{width:24px;height:24px;fill:none;stroke:none}
 .client-account img{display:block;width:100%;height:100%;object-fit:cover;border-radius:50%}
 #ytg-browse-top .client-account.has-avatar{padding:0;overflow:hidden}
@@ -178,22 +187,27 @@ html[dark] #ytg-browse-grid{
 #ytg-browse-sidebar :is(a,button){width:calc(100% - 8px);min-height:48px;margin:6px 4px;padding-block:12px;padding-inline:var(--ytg-sidebar-compact-padding,8px);border:0;border-radius:10px;font-weight:400}
 html:not([data-ytg-input-mode=mouse]) #ytg-browse-grid:has(#ytg-browse-sidebar:focus-within),html[data-ytg-input-mode=mouse] #ytg-browse-grid:has(#ytg-browse-sidebar:hover){--ytg-sidebar-compact-padding:12px}
 #ytg-browse-sidebar [aria-current=page]{color:var(--ytg-text);font-weight:500}
-/* Keep subscribed people beside their videos, including when focus enters the feed. */
-#ytg-browse-grid:has(#ytg-browse-sidebar[data-subscription-page]){
-  --ytg-sidebar-width:270px;--ytg-sidebar-expanded-width:270px;
-  --ytg-sidebar-label-display:block;--ytg-sidebar-justify:flex-start;
-  --ytg-sidebar-gap:10px;--ytg-sidebar-compact-padding:12px;
-}
-#ytg-browse-sidebar .sidebar-channel-avatar{display:block;flex:none;width:40px;height:40px;border-radius:50%;object-fit:cover}
-#ytg-browse-sidebar .sidebar-channel-initial{display:flex;align-items:center;justify-content:center;background:var(--ytg-surface);font-size:18px}
-#ytg-browse-sidebar .sidebar-subscriptions a{min-height:50px;padding-block:5px}
-#ytg-browse-sidebar .sidebar-subscriptions [aria-current=page]{background:var(--ytg-client-active);color:var(--ytg-text);font-weight:600}
-@media(max-width:900px){
-  #ytg-browse-grid:has(#ytg-browse-sidebar[data-subscription-page]){--ytg-sidebar-width:210px;--ytg-sidebar-expanded-width:210px}
-}
-@media(max-width:600px){
-  #ytg-browse-grid:has(#ytg-browse-sidebar[data-subscription-page]){--ytg-sidebar-width:80px;--ytg-sidebar-expanded-width:210px;--ytg-sidebar-label-display:none;--ytg-sidebar-justify:center;--ytg-sidebar-gap:0px;--ytg-sidebar-compact-padding:8px}
-}
+/* Followed channels belong to the subscription content, separate from global navigation. */
+.browse-page-content{display:flex;height:100%;min-width:0;overflow:hidden}
+.browse-page-feed{flex:1;min-width:0;height:100%}
+#ytg-subscription-channels{flex:none;width:64px;height:100%;padding:8px;border-right:1px solid var(--ytg-border);overflow-y:auto;overscroll-behavior:contain;scroll-padding:8px;background:var(--ytg-client-surface)}
+#ytg-subscription-channels[data-expanded=true]{width:270px}
+#ytg-subscription-channels :is(a,button){display:flex;align-items:center;gap:10px;width:100%;min-height:50px;padding:5px 8px;margin:0 0 4px;border:0;border-radius:8px;background:transparent;color:var(--ytg-text);font:inherit;text-align:left;text-decoration:none;cursor:pointer}
+#ytg-subscription-channels svg{flex:none;width:24px;height:24px}
+#ytg-subscription-toggle{position:sticky;top:0;z-index:1;background:var(--ytg-client-surface)!important}
+#ytg-subscription-toggle .subscription-chevron{width:16px;height:16px;margin-left:auto;rotate:90deg}
+#ytg-subscription-channels [data-subscription-id=all]>svg{width:40px}
+#ytg-subscription-channels span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ytg-subscription-channels .subscription-channel-name{flex:1}
+#ytg-subscription-channels .channel-avatar{background:var(--ytg-surface)}
+#ytg-subscription-channels .subscription-channel-status{width:18px;height:18px;margin-left:auto}
+#ytg-subscription-channels .subscription-channel-live{color:#f03}
+#ytg-subscription-channels .subscription-channel-new{width:6px;height:6px;margin-inline:6px;color:#065fd4}
+#ytg-subscription-channels :is(a,button):hover,#ytg-subscription-channels [aria-current=page],#ytg-subscription-channels .ytg-selected{background:var(--ytg-client-active);color:var(--ytg-text)}
+#ytg-subscription-channels [aria-current=page]{font-weight:600}
+#ytg-subscription-channels :is(a,button):focus-visible{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:-3px}
+@media(max-width:900px){#ytg-subscription-channels[data-expanded=true]{width:210px}}
+@media(max-width:600px){#ytg-subscription-channels[data-expanded=true]{width:160px}}
 #ytg-browse-sidebar section{margin-top:20px;padding-top:16px}
 #ytg-browse-sidebar :is(a,button):focus-visible,html.ytg-gamepad-input #ytg-browse-sidebar .ytg-selected{background:var(--ytg-client-active);color:var(--ytg-text)}
 #ytg-browse-grid [data-ytg-browse-grid]{padding:16px 24px 40px}
@@ -245,3 +259,9 @@ html:not([data-ytg-input-mode=mouse]) #ytg-browse-grid:has(#ytg-browse-sidebar:f
 #ytg-browse-grid .card-channel-avatar img{display:block;width:100%;height:100%;border-radius:50%;object-fit:cover;scale:1}
 #ytg-browse-grid .card-metadata-row{margin-top:4px;color:var(--ytg-muted);font-size:14px;line-height:20px}
 #ytg-browse-grid .cards[data-horizontal=true] .card-copy{margin-top:0}
+
+.ytg-shell-status{position:fixed;inset:var(--ytg-client-header,56px) 0 0 var(--ytg-sidebar-drawer-width,var(--ytg-sidebar-width,80px));padding:48px;overflow:auto;background:var(--ytg-client-background);color:var(--ytg-text)}
+.ytg-shell-status p{line-height:1.7;color:var(--ytg-muted)}
+.ytg-shell-status button{padding:12px 20px;margin:12px 16px 0 0;border:1px solid var(--ytg-border);border-radius:12px;background:var(--ytg-client-surface);color:inherit;cursor:pointer}
+.ytg-shell-status button:is(:focus-visible,.ytg-selected){outline:4px solid var(--ytg-focus-color);outline-offset:2px}
+:host([data-header-only]) .ytg-shell-status{display:none}

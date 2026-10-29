@@ -1,7 +1,7 @@
 import type { PlaybackSnapshot, WatchPageSnapshot, WatchFeatures, WatchSnapshot, RecommendationSnapshot } from '../../types/ports';
 import type { PlaybackViewState } from '../playback/playback-model';
 
-export type PlaybackMetadata = Pick<WatchPageSnapshot, 'title' | 'channel' | 'channelBadge' | 'viewCount' | 'avatar' | 'notificationPreference' | 'subscribed' | 'liked' | 'disliked'>;
+export type PlaybackMetadata = Pick<WatchPageSnapshot, 'title' | 'channel' | 'channelBadge' | 'viewCount' | 'avatar' | 'notificationPreference' | 'subscribed' | 'liked' | 'disliked' | 'metadataFailed'>;
 export type PlaybackControlState = Pick<PlaybackViewState, 'paused' | 'muted' | 'captionsEnabled' | 'isLive' | 'canSeek' | 'atLiveEdge'> & { seekStep?: number };
 
 const recommendationFields = ['key', 'label', 'channel', 'channelBadge', 'thumbnail', 'thumbnailFallback', 'metadata', 'viewCount', 'duration', 'watchedPercent', 'href', 'queue', 'selected', 'isPlaylist'] as const;
@@ -18,10 +18,6 @@ export interface PlaybackFeedback {
   seek?: SeekPreview;
 }
 /** Distinguish repeated videos while keeping identity independent of list position. */
-export function recommendationFocusId(items: readonly { key: string }[], index: number) {
-  const key = items[index]?.key || '';
-  return 'recommendation:' + key + ':' + items.slice(0, index).filter(item => item.key === key).length;
-}
 export function recommendationFocusIds(items: readonly { key: string }[]) {
   const counts = new Map<string, number>();
   return items.map(item => {

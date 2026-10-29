@@ -47,7 +47,7 @@ async function setup(t, failSequence = false) {
 test('Shorts API owns recommendations, continuation, wheel playback and previous history without native reel navigation', { timeout: 45000 }, async t => {
   const { page, controls, requests, documents } = await setup(t);
   const player = await page.locator('#shorts-player').elementHandle();
-  await page.mouse.move(640, 450); await page.mouse.wheel(0, 400);
+  await page.mouse.move(20, 450); await page.mouse.wheel(0, 400);
   await page.waitForURL('**/shorts/second');
   await controls.locator('.preview').waitFor({ state: 'hidden' });
   await controls.locator('[data-shorts-action=down]').click(); await page.waitForURL('**/shorts/third');

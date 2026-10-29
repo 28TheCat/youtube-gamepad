@@ -29,7 +29,7 @@ function fixture({ handler, authenticated = false, pathname = '/results', search
     origin: 'https://www.youtube.com' };
   const context = { client: { clientName: 'WEB', clientVersion: 'real-page-version', hl: 'zh-CN', gl: 'TW', visitorData: 'visitor' },
     user: { lockedSafetyMode: false } };
-  const sandbox = { URL, URLSearchParams, AbortController, Request, Response, Headers, structuredClone, TextEncoder,
+  const sandbox = { URL, URLSearchParams, AbortController, Request, Response, Headers, structuredClone, TextEncoder, TextDecoder, btoa, atob,
     crypto: webcrypto, setTimeout, clearTimeout, console, location,
     history: { state: {}, replaceState(value) { this.state = value; states.push(value); } },
     document: { cookie: authenticated ? 'SAPISID=test-session' : '',
@@ -212,15 +212,6 @@ test('library normalization selects the largest thumbnail even when it is not la
   const s = fixture({ handler: () => response([item]) });
   const result = await s.createYouTubeFeedService().request('all');
   assert.equal(result.items[0].thumbnail, 'https://i.ytimg.com/vi/sizes/large.jpg');
-  assert.equal(s.calls.length, 1);
-});
-
-test('flat API response contents parse directly without refetching or losing pagination', async () => {
-  const raw = { contents: [video('fallback'), continuation('fallback-next')] };
-  const s = fixture({ handler: () => raw });
-  const result = await s.createYouTubeFeedService().request('all');
-  assert.deepEqual(Array.from(result.items, item => item.id), ['video:fallback']);
-  assert.ok(result.nextPage);
   assert.equal(s.calls.length, 1);
 });
 

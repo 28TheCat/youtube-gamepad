@@ -1,3 +1,14 @@
+/** A playlist directory entry has no required first video. */
+export function parsePlaylistLink(raw: unknown, origin = 'https://www.youtube.com') {
+  if (typeof raw !== 'string' || raw.length > 4096) return null;
+  try {
+    const url = new URL(raw, origin), id = url.searchParams.get('list');
+    if (url.origin !== origin || url.pathname !== '/playlist' || url.hash || url.username || url.password ||
+      !id || !/^[\w-]{1,200}$/.test(id) || url.searchParams.getAll('list').length !== 1 || [...url.searchParams.keys()].some(key => key !== 'list')) return null;
+    return { id: `playlist:${id}`, href: `/playlist?list=${id}` };
+  } catch { return null; }
+}
+
 /** A bounded Shorts destination shared by feed parsing and the page bridge. */
 export function parseShortLink(raw: unknown, origin = 'https://www.youtube.com') {
   if (typeof raw !== 'string' || raw.length > 4096) return null;

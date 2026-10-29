@@ -5,7 +5,7 @@ import { launchExtension } from './helpers/extension.mjs';
 for (const [path, endpoint, browseId] of [
   ['/results?search_query=music', 'search'], ['/', 'browse', 'FEwhat_to_watch'],
   ['/feed/subscriptions', 'browse', 'FEsubscriptions'], ['/feed/history', 'browse', 'FEhistory'],
-  ['/playlist?list=WL', 'browse', 'VLWL']
+  ['/playlist?list=WL', 'browse', 'VLWL'], ['/feed/playlists', 'browse', 'FEplaylist_aggregation']
 ]) test(`bundled ${path} uses same-origin browser cookies under CSP and crosses the bridge with cards only`, { timeout: 45000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: false }));
@@ -32,7 +32,10 @@ for (const [path, endpoint, browseId] of [
           { url: `https://i.ytimg.com/vi/${id}/small.jpg`, width: 120 }
         ] }
       };
-      const items = [{ itemSectionRenderer: { contents: [{ [browseId === 'VLWL' ? 'playlistVideoRenderer' : 'videoRenderer']: card }] } }, ...(!body.continuation ? [{ continuationItemRenderer: {
+      const directory = browseId === 'FEplaylist_aggregation';
+      const entry = directory ? { playlistRenderer: { playlistId: `PL${id}`, title: { simpleText: id },
+        thumbnails: [{ thumbnails: card.thumbnail.thumbnails }] } } : { [browseId === 'VLWL' ? 'playlistVideoRenderer' : 'videoRenderer']: card };
+      const items = [{ itemSectionRenderer: { contents: [entry] } }, ...(!body.continuation ? [{ continuationItemRenderer: {
         continuationEndpoint: { continuationCommand: { token: 'private-next', request: 'CONTINUATION_REQUEST_TYPE_SEARCH' } }
       } }] : [])];
       const data = body.continuation ? { onResponseReceivedCommands: [{ appendContinuationItemsAction: { continuationItems: items } }] }
@@ -70,6 +73,10 @@ for (const [path, endpoint, browseId] of [
   assert.equal(second.ok, true);
   if (browseId === 'VLWL') {
     assert.match(second.value.items[0].href, /v=second&list=WL&index=2/);
+  } else if (browseId === 'FEplaylist_aggregation') {
+    assert.equal(second.value.items[0].id, 'playlist:PLsecond');
+    assert.equal(second.value.items[0].href, '/playlist?list=PLsecond');
+    assert.equal(second.value.items[0].isPlaylist, true);
   } else assert.equal(second.value.items[0].id, 'video:second');
   assert.equal(calls.length, 2);
   if (browseId) assert.equal(calls[0].body.browseId, browseId);
@@ -80,5 +87,14 @@ for (const [path, endpoint, browseId] of [
     assert.equal(call.headers['x-goog-authuser'], '2');
   }
   assert.equal(JSON.stringify(first).includes('fixture-session'), false);
+  if (browseId === 'FEplaylist_aggregation') {
+    const opened = await page.evaluate(() => new Promise(resolve => {
+      document.querySelector('ytd-app').navigate_ = endpoint => resolve(endpoint);
+      document.dispatchEvent(new CustomEvent('ytg-page-request-v1', { detail: JSON.stringify({ version: 1,
+        id: 'open-playlist', operation: 'openBrowseVideo', href: '/playlist?list=PLfirst' }) }));
+    }));
+    assert.equal(opened.browseEndpoint.browseId, 'VLPLfirst');
+    assert.equal(opened.watchEndpoint, undefined);
+  }
   assert.deepEqual(errors, []);
 });

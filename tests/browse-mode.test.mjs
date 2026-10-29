@@ -117,7 +117,7 @@ test('failed mode save restores the previous view and keeps a usable switch', { 
 });
 
 
-test('adapter failure reveals clickable native videos without persisting the fallback', { timeout: 45000 }, async t => {
+test('adapter failure keeps the client surface without changing the saved mode', { timeout: 45000 }, async t => {
   const { context, worker } = await launchExtension(t);
   await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, browseMode: 'gamepad' }));
   await context.addInitScript(() => {
@@ -126,27 +126,25 @@ test('adapter failure reveals clickable native videos without persisting the fal
   let requests = 0;
   await context.route('https://www.youtube.com/**', route => {
     if (route.request().url().includes('/youtubei/')) {
-      requests++;
+      if (route.request().url().includes('/browse')) requests++;
       return route.fulfill({ json: { unexpected: true } });
     }
     return route.fulfill({ contentType: 'text/html', body: '<html><head><style>ytd-page-manager{display:block;padding-top:120px}</style></head><body><ytd-app><ytd-page-manager><a id="native-video" href="/watch?v=original">Original video</a></ytd-page-manager></ytd-app></body></html>' });
   });
   const page = await context.newPage();
   await page.goto('https://www.youtube.com/');
-  await page.waitForFunction(() => document.documentElement.getAttribute('data-ytg-browse-mode') === 'youtube');
-  const native = page.locator('#native-video');
-  await native.waitFor();
-  assert.equal(await native.evaluate(node => {
-    const rect = node.getBoundingClientRect();
-    return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === node;
-  }), true);
+  const retry = page.locator('#ytg-browse-root').getByRole('button', { name: /重试|Retry|Try again/i });
+  await retry.waitFor();
+  assert.equal(await page.locator('#native-video').isVisible(), false);
   assert.equal((await worker.evaluate(() => chrome.storage.local.get('browseMode'))).browseMode, 'gamepad');
-  assert.equal(requests, 1, 'malformed data must not retry');
+  assert.equal(requests, 1);
   const mode = page.locator('#ytg-browse-root [data-ytg-page-mode]');
-  assert.equal(await mode.getAttribute('aria-checked'), 'false');
-  await mode.click();
-  await page.waitForFunction(() => document.documentElement.getAttribute('data-ytg-browse-mode') === 'youtube');
-  assert.equal(requests, 2, 'the user can explicitly retry');
+  assert.equal(await mode.getAttribute('aria-checked'), 'true');
+  await retry.click();
+  await page.waitForTimeout(200);
+  await retry.waitFor();
+  assert.equal(requests, 2);
+  assert.equal(await page.locator('#native-video').isVisible(), false);
 });
 
 test('Off keeps the banner and native watch layout across navigation and mode changes', { timeout: 45000 }, async t => {
@@ -175,4 +173,100 @@ test('Off keeps the banner and native watch layout across navigation and mode ch
   await page.reload();
   await top.waitFor();
   await assertNative();
+});
+
+
+test('unsupported destinations keep the shell, navigation and explicit original-page exit', { timeout: 45000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, browseMode: 'gamepad', autoFullscreen: false }));
+  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body:
+    '<html><body><ytd-app><ytd-page-manager><p id="native-content">Original page</p></ytd-page-manager></ytd-app></body></html>' }));
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/account_advanced');
+  const shell = page.locator('#ytg-browse-root');
+  await shell.locator('[data-ytg-shell-status]').waitFor();
+  assert.equal(await page.locator('#native-content').isVisible(), false);
+  await shell.locator('#ytg-browse-top').evaluate(node => window.__retainedHeader = node);
+  await shell.locator('[data-sidebar-id="subscriptions"]').click();
+  await page.waitForURL('**/feed/subscriptions');
+  assert.equal(await shell.locator('#ytg-browse-top').evaluate(node => node === window.__retainedHeader), true);
+  await page.goBack();
+  await shell.locator('[data-ytg-shell-status]').waitFor();
+  await shell.getByRole('button', { name: '打开 YouTube 原页面', exact: true }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.ytgBrowseMode === 'youtube');
+  await page.locator('#native-content').waitFor();
+  assert.equal(new URL(page.url()).pathname, '/account_advanced');
+});
+
+
+test('watch adaptation failure keeps an actionable client error surface', { timeout: 45000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, browseMode: 'gamepad', autoFullscreen: false }));
+  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body:
+    '<html><body><ytd-app><ytd-page-manager><ytd-watch-flexy><p id="native-details">Original details</p></ytd-watch-flexy></ytd-page-manager></ytd-app></body></html>' }));
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/watch?v=missing');
+  const notice = page.locator('#ytg-fallback-notice');
+  await notice.waitFor({ timeout: 15000 });
+  assert.equal(await page.locator('#native-details').isVisible(), false);
+  assert.equal(await page.locator('#ytg-browse-root #ytg-browse-top').isVisible(), true);
+  assert.equal(await notice.getByRole('button').count(), 3);
+  mkdirSync('output/playwright', { recursive: true });
+  await page.screenshot({ path: 'output/playwright/shell-watch-error.png' });
+  await notice.getByRole('button', { name: 'YouTube', exact: true }).click();
+  await page.locator('#native-details').waitFor();
+  await notice.waitFor({ state: 'hidden' });
+});
+
+
+test('YouTube account flows keep their native content without changing the saved interface', { timeout: 45000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, browseMode: 'gamepad' }));
+  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body:
+    '<html><body><ytd-app><ytd-page-manager><button id="native-account-flow">Continue account selection</button></ytd-page-manager></ytd-app></body></html>' }));
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/channel_switcher');
+  await page.locator('#native-account-flow').waitFor();
+  await page.waitForFunction(() => document.documentElement.dataset.ytgBrowseMode === 'gamepad');
+  assert.equal(await page.locator('#native-account-flow').isVisible(), true);
+  assert.equal(await page.locator('[data-ytg-shell-status]').count(), 0);
+  assert.equal((await worker.evaluate(() => chrome.storage.local.get('browseMode'))).browseMode, 'gamepad');
+});
+
+
+test('failed search retains its keyword, sidebar and retry inside the shell', { timeout: 45000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, browseMode: 'gamepad', autoFullscreen: false }));
+  await context.addInitScript(() => { window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'fixture' } } : undefined }; });
+  await context.route('https://www.youtube.com/**', route => route.request().url().includes('/youtubei/')
+    ? route.fulfill({ json: { unexpected: true } })
+    : route.fulfill({ contentType: 'text/html', body: '<html><body><ytd-app><ytd-page-manager><p id="native-results">Native results</p></ytd-page-manager></ytd-app></body></html>' }));
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/results?search_query=retained+query');
+  const shell = page.locator('#ytg-browse-root');
+  await shell.getByRole('button', { name: /重试|Retry|Try again/i }).waitFor();
+  assert.equal(await shell.locator('[data-ytg-search-input]').inputValue(), 'retained query');
+  assert.equal(await shell.locator('#ytg-browse-sidebar').isVisible(), true);
+  assert.equal(await page.locator('#native-results').isVisible(), false);
+  assert.equal(await shell.locator('[data-ytg-page-mode]').getAttribute('aria-checked'), 'true');
+});
+
+
+test('external links retain their requested new-tab behavior', { timeout: 45000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, browseMode: 'gamepad' }));
+  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<html><body><ytd-app></ytd-app><ytd-page-manager></ytd-page-manager></body></html>' }));
+  await context.route('https://external.example/**', route => route.fulfill({ contentType: 'text/html', body: '<html><body>External destination</body></html>' }));
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/unsupported');
+  await page.locator('[data-ytg-shell-status]').waitFor();
+  await page.evaluate(() => {
+    const link = document.createElement('a'); link.href = 'https://external.example/'; link.target = '_blank'; link.textContent = 'External destination';
+    document.getElementById('ytg-browse-root').shadowRoot.querySelector('[data-ytg-shell-status]').append(link);
+  });
+  const opened = context.waitForEvent('page');
+  await page.getByRole('link', { name: 'External destination', exact: true }).click();
+  const external = await opened; await external.waitForURL('https://external.example/');
+  assert.equal(new URL(page.url()).pathname, '/unsupported');
+  assert.equal(await page.locator('[data-ytg-shell-status]').isVisible(), true);
 });

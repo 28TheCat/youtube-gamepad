@@ -5,7 +5,7 @@ export function browseShadow(): ShadowRoot | null {
   return document.getElementById?.(browseHostId)?.shadowRoot || null;
 }
 export function pageShadowRoots(): ShadowRoot[] {
-  return [browseShadow(), document.getElementById?.('ytg-native-mode')?.shadowRoot].filter((root): root is ShadowRoot => !!root);
+  return [browseShadow(), document.getElementById?.('ytg-native-mode')?.shadowRoot, document.getElementById?.('ytg-fallback-notice')?.shadowRoot].filter((root): root is ShadowRoot => !!root);
 }
 export function pageQueryAll<T extends Element = HTMLElement>(selector: string): T[] {
   return [...document.querySelectorAll<T>(selector), ...pageShadowRoots().flatMap(root => [...root.querySelectorAll<T>(selector)])];

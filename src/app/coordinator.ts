@@ -60,7 +60,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     prepareVideo: href => appState().navigation?.target === href || prepareVideo(href) });
   const routeFactory = YTGamepadRouteController;
   const lifecycle = runtime.scope('coordinator');
-  const transition = createWatchTransition(() => pageAccess?.readPlayerVideoId?.());
+  const transition = createWatchTransition(() => pageAccess?.readPlayerVideoId?.(), () => { failAdaptation('Video frames unavailable'); syncLoading(); }, () => renderMode());
   lifecycle.cleanup(transition.destroy);
   let site: SitePort, watch: WatchModule | undefined;
   let heldSeek: { route: string; action: Action; origin: number; target: number; distance: number } | null = null;
@@ -77,7 +77,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   const watchExpanded = () => expandedWatchRoute !== null && expandedWatchRoute === routeNow();
   const fullscreenLayout = () => watchExpanded() || document.fullscreenElement === document.documentElement || preferences.playbackLayout === 'fullscreen' && playbackInputMode === 'gamepad';
   const routeNow = () => location.pathname + location.search;
-  let adaptationSince = 0, rendering = false, checking = false, notice: {host:HTMLElement;message:HTMLElement;retry:HTMLButtonElement} | undefined, loading: HTMLElement | undefined;
+  let adaptationSince = 0, rendering = false, checking = false, notice: {host:HTMLElement;message:HTMLElement;retry:HTMLButtonElement} | undefined;
   let healthPolling: import('../../types/ports').Scope | undefined;
   function syncHealthPolling() {
     if (preferences.enabled && (location.pathname === '/watch' || appState().openingVideo && !!appState().navigation) && !document.hidden) {
@@ -90,7 +90,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   lifecycle.cleanup(() => { healthPolling?.destroy(); healthPolling = undefined; });
   const adaptation = (): AdaptationSnapshot => appState().adaptation || { status: 'inactive', reason: '' };
   const nativePageStyle = () => document.documentElement.getAttribute('data-ytg-browse-mode') === 'youtube';
-  const surfaceReady = () => !nativePageStyle() && adaptation().status === 'ready' && adaptation().route === routeNow();
+  const surfaceReady = () => !transition.waiting && !nativePageStyle() && adaptation().status === 'ready' && adaptation().route === routeNow();
   const visibleMode = () => !isShortsPlaybackRoute() && location.pathname === '/watch' && surfaceReady() ? appState().mode : 'browse';
   function syncLoading() {
     if (!preferences.enabled || location.pathname !== '/watch' || expandedWatchRoute !== routeNow()) expandedWatchRoute = null;
@@ -110,24 +110,11 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       app.openingVideo && app.navigation?.target || routeNow(),
       !!(app.openingVideo && app.navigation) || adaptation().status === 'waiting',
       adaptation().status === 'fallback' || !!app.returning);
-    const active = preferences.enabled && pageLayout && (app.openingVideo && !!app.navigation && !destinationReady ||
-      location.pathname === '/watch' && (adaptation().status === 'waiting' || app.returning));
-    if (active && !loading && typeof document.createElement === 'function') {
-      loading = document.createElement('div'); loading.id = 'ytg-watch-loading';
-      loading.setAttribute('lang', 'en');
-      loading.setAttribute('role', 'status'); loading.setAttribute('aria-live', 'polite');
-      document.documentElement.append(loading);
-    }
-    if (loading) {
-      const message = app.returning ? 'Going back…' : 'Loading video…';
-      if (loading.textContent !== message) loading.textContent = message;
-      if (loading.hidden !== !active) loading.hidden = !active;
-    }
   }
   function setAdaptation(status: AdaptationSnapshot['status'], reason = '') {
     send({ type: 'ADAPTATION', route: routeNow(), status, reason });
     document.documentElement.dataset.ytgAdaptation = status;
-    if (status === 'waiting' || status === 'fallback') document.documentElement.dataset.ytgNative = 'true';
+    if (status === 'fallback') document.documentElement.dataset.ytgNative = 'true';
     else delete document.documentElement.dataset.ytgNative;
   }
   function showFallbackNotice() {
@@ -137,11 +124,15 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       host.setAttribute('lang', currentLanguage());
       const root = host.attachShadow({ mode: 'open' });
       const style = document.createElement('style');
-      style.textContent = ':host{position:fixed;right:20px;bottom:20px;z-index:2147483647;max-width:min(460px,90vw);font:18px/1.6 var(--ytg-font-family,Roboto,Arial,sans-serif);color:#fff;background:#202020;padding:18px 22px;border:1px solid #f5b942;border-radius:12px;box-shadow:0 4px 20px #0006}:host([hidden]){display:none}button{display:block;margin-top:12px;padding:8px 16px;font:inherit;cursor:pointer}button:focus-visible{outline:3px solid #f5b942;outline-offset:3px}';
+      style.textContent = ':host{position:fixed;inset:56px 0 0;z-index:2147483646;font:18px/1.6 var(--ytg-font-family,Roboto,Arial,sans-serif);color:var(--ytg-text,#171717);background:var(--ytg-client-background,#fff);padding:48px;box-sizing:border-box;overflow:auto}:host([hidden]){display:none}[role=status]{display:block;max-width:800px;margin-bottom:24px}button{display:inline-block;margin:0 16px 16px 0;padding:12px 20px;border:1px solid var(--ytg-border,#ddd);border-radius:12px;background:var(--ytg-client-surface,#f2f2f2);color:inherit;font:inherit;cursor:pointer}button:is(:focus-visible,.ytg-selected){outline:3px solid #f5b942;outline-offset:3px}';
       const message = document.createElement('span'); message.setAttribute('role', 'status');
       const retry = document.createElement('button'); retry.textContent = t('Try again');
       retry.addEventListener('click', retryAdaptation);
-      root.append(style, message, retry); document.documentElement.append(host);
+      const back = document.createElement('button'); back.textContent = t('Back');
+      back.addEventListener('click', () => history.back());
+      const original = document.createElement('button'); original.textContent = 'YouTube';
+      original.setAttribute('data-ytg-exit-shell', '');
+      root.append(style, message, retry, back, original); document.documentElement.append(host);
       notice = { host, message, retry };
     }
     const reason = adaptation().reason;
@@ -149,7 +140,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       ? t('Missing: {capabilities}', { capabilities: reason.slice('Missing:'.length).trim().split(', ').map(value => t(value)).join(', ') })
       : t(reason);
     notice.host.setAttribute('lang', currentLanguage());
-    notice.message.textContent = t('Player adaptation failed. Switched to the YouTube interface. Reason: {reason}', { reason: details });
+    notice.message.textContent = t('Player adaptation failed. Try again or choose the YouTube interface. Reason: {reason}', { reason: details });
     notice.retry.textContent = t('Try again');
     notice.host.hidden = false;
   }
@@ -170,7 +161,6 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     // Establish the CSS safety gate before attempting any potentially faulty view work.
     document.documentElement.dataset.ytgNative = 'true';
     document.documentElement.dataset.ytgMode = 'browse';
-    if (loading) loading.hidden = true;
     try { menu?.close(); } catch (error) { diagnose('restore.closeMenu', error, 'menu'); }
     try { watch?.sync('browse', preferences); } catch (error) { diagnose('restore.syncWatch', error, 'watch'); }
     try { site.restoreNativeInterface(); } catch (error) { diagnose('restore.nativeInterface', error, 'site'); }
@@ -182,6 +172,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       return;
     }
     setAdaptation('fallback', reason);
+    try { document.querySelector<HTMLVideoElement>('video')?.pause?.(); } catch (error) { diagnose('fallback.pause', error, 'site'); }
     restoreNative();
     try { showFallbackNotice(); } catch (error) { diagnose('fallback.notice', error, 'coordinator'); }
   }
@@ -212,16 +203,18 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
         if (notice) notice.host.hidden = true;
       }
       site.inspectOptionalCapabilities?.();
-      const wasReady = surfaceReady(), health = site.inspectWatchCapabilities(opening);
+      const wasReady = adaptation().status === 'ready' && adaptation().route === routeNow(), health = site.inspectWatchCapabilities(opening);
       if (health.ready) {
-        if (!wasReady) { setAdaptation('ready'); renderMode(); }
-      } else if (health.failed || wasReady || Date.now() - adaptationSince >= 5000) {
+        if (adaptation().status !== 'ready' || adaptation().route !== routeNow()) { setAdaptation('ready'); renderMode(); }
+      } else if (wasReady) {
+        adaptationSince = Date.now(); setAdaptation('waiting');
+        renderMode();
+      } else if (Date.now() - adaptationSince >= 5000) {
         const reason = health.failed ? 'Player interface unavailable' : 'Missing: ' + health.missing.join(', ');
         diagnose('inspectWatchCapabilities', new Error(reason), 'site');
         failAdaptation(reason);
       } else {
-        // Leave native playback visible while custom controls are unavailable.
-        try { site.restoreNativeInterface(); } catch (error) { diagnose('restore.nativeInterface', error, 'site'); }
+        // Keep the current shell while YouTube replaces or prepares its media.
       }
     } catch (error) { diagnose('checkAdaptation', error, 'site'); failAdaptation(); }
     finally {
@@ -303,7 +296,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     const result = send({ type: 'AUTO_HIDE', idle, playing: !!video && !video.paused && !video.ended,
       temporaryLayer: hasTemporaryLayer() });
     if (result.effects.length) renderMode();
-    } catch (error) { diagnose('requestAutoHide', error, 'site'); failAdaptation(); }
+    } catch (error) { diagnose('requestAutoHide', error, 'site'); }
   }
   function openSettings() {
     const opened = site.openSettings();
@@ -318,9 +311,13 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   }
   // Every view command shares the same enablement and navigation policy.
   // Views read this state; their render notifications cannot write it back.
+  function hasBlockingMediaLayer() {
+    return !!(core.hasTemporaryLayer || menu?.opened || site.hasNativeLayer?.() ||
+      focusManager?.suspended && !watch?.state.panel);
+  }
   function canRepeatMedia() {
     return !lifecycle.destroyed && preferences.enabled && (isShortsPlaybackRoute() || location.pathname === '/watch' && surfaceReady() && visibleMode() !== 'browse') &&
-      !appState().navigation && !appState().returning && !hasTemporaryLayer() &&
+      !appState().navigation && !appState().returning && !hasBlockingMediaLayer() &&
       !document.hidden && (document.hasFocus?.() ?? true);
   }
   function cancelHeldSeek() {
@@ -355,7 +352,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       const target = video && YTGamepadSeeking.target(video.timeline, pending.target);
       if (target === null || target === undefined) return;
       if (site.seekTo(target)) watch?.mediaFeedback?.(action, target - pending.origin);
-    } catch (error) { diagnose('heldSeek.commit', error, 'site'); failAdaptation('Playback action failed'); }
+    } catch (error) { diagnose('heldSeek.commit', error, 'site'); watch?.feedback?.('Seeking is unavailable'); }
   }
   function performMedia(action: Action) {
     const route = routeNow();
@@ -363,7 +360,8 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     const failed = (error: unknown) => {
       diagnose('media.' + action, error, 'site');
       if (!lifecycle.destroyed && preferences.enabled && routeNow() === route) {
-        failAdaptation(action === 'playPause' ? 'Playback failed. Click Play in the YouTube player to try again.' : 'Playback action failed');
+        cancelHeldSeek();
+        watch?.feedback?.(action === 'playPause' ? 'Playback was blocked. Press Play or retry.' : 'This action is currently unavailable');
       }
       return false;
     };
@@ -437,7 +435,8 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       default: return false;
     }
     } catch (error) { diagnose('request.' + type, error, 'site');
-      if (['mode', 'seek'].includes(type) || (type === 'media' && value !== 'captions')) failAdaptation();
+      if (type === 'mode') failAdaptation();
+      else if (type === 'seek') { cancelHeldSeek(); watch?.feedback?.('Seeking is unavailable'); }
       return type === 'recommendation' ? 'missing' as const : false; }
   }
   function observePlayback(playback: PlaybackSnapshot) {
@@ -592,7 +591,9 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
   function initialize(ports: {site:SitePort;watch:WatchModule}) {
     site = ports.site; watch = ports.watch;
     watch?.connect({ request, observePlayback, hasTemporaryLayer, requestAutoHide, requestRefresh: scheduleWatchRefresh,
-      get state() { return { mode: visibleMode(), enabled: preferences.enabled && !nativePageStyle() && !isShortsPlaybackRoute(), surfaceReady: surfaceReady(), navigating: !!appState().navigation || appState().returning }; },
+      get nativePlayer() { return site.nativePlayer; },
+      get state() { return { mode: visibleMode(), enabled: preferences.enabled && !nativePageStyle() && !isShortsPlaybackRoute(), surfaceReady: surfaceReady(), transitioning: preferences.enabled && !nativePageStyle() && !appState().returning &&
+        (transition.waiting || adaptation().status === 'waiting' || !!appState().openingVideo), navigating: !!appState().navigation || appState().returning }; },
       dispatchAction: (action: Action) => core.act(action),
       readRoute: site.readRoute,
       readWatchFeatures: site.readWatchFeatures,
@@ -635,6 +636,7 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       if (input?.connected === true) suspended = false;
       applyLayout({});
     });
+    lifecycle.listen(window, 'ytg-native-player-fullscreen', () => request('fullscreen'));
     lifecycle.listen(window, 'yt-gamepad-exit', () => { suspended = true; applyLayout({}); });
     lifecycle.listen(window, 'yt-gamepad-resume', () => { suspended = false; applyLayout({}); });
     lifecycle.listen(window, 'yt-gamepad-local-settings', e => applyLayout(e.detail));
@@ -724,7 +726,6 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
     preferences = { ...preferences, enabled: false };
     send({ type: 'ENABLE', enabled: false, route: routeNow() }); routes.destroy(); restoreNative();
     notice?.host.remove?.();
-    loading?.remove?.();
     document.documentElement.classList.remove('ytg-playback', 'ytg-controls', 'ytg-theater', 'ytg-settings-open', 'ytg-player-primed', 'ytg-watch-layout');
     delete document.documentElement.dataset.ytgAdaptation;
     delete document.documentElement.dataset.ytgPlaybackLayout;

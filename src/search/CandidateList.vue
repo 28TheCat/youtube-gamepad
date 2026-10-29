@@ -3,6 +3,7 @@ import { useI18n } from '../shared/use-i18n';
 const { t } = useI18n();
 import type { ControllerStyle } from '../../types/ports.js';
 import type { SearchView, SearchViewActions } from './search-view';
+import SearchDiscovery from './SearchDiscovery.vue';
 defineProps<{ view: SearchView; actions: SearchViewActions; controllerStyle: ControllerStyle }>();
 const vHint = { mounted(el: HTMLElement, binding: { value: ControllerStyle }) { binding.value.hint(el, ' · R3 Candidates · Y Confirm · LB / RB Page'); } };
 </script>
@@ -23,10 +24,7 @@ const vHint = { mounted(el: HTMLElement, binding: { value: ControllerStyle }) { 
           @focus="actions.focus($event.currentTarget as HTMLButtonElement)" @click="actions.raw()">{{ t("Use typed text:") }} {{ view.composing }}</button>
       </div>
     </div>
-    <p id="history-title" :hidden="view.chinese && !!view.composing">{{ t("Recent searches") }}</p>
-    <p v-if="!view.recent.length" id="history-empty" :hidden="view.chinese && !!view.composing">{{ t("Your recent searches will appear here") }}</p>
-    <button v-for="(query, row) in view.recent" :key="query" :data-focus-id="`history:${query}`" :data-row="row" data-column="-1"
-      :hidden="view.chinese && !!view.composing" @focus="actions.focus($event.currentTarget as HTMLButtonElement)"
-      @click="actions.recent(query)">↶ {{ query }}</button>
+    <SearchDiscovery v-if="!view.composing && !view.choosingLanguage"
+      :query="view.query" :recent="view.recent" @search="actions.recent" @focus="actions.focus" />
   </div>
 </template>

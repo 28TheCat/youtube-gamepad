@@ -34,6 +34,7 @@ export let YTGamepadShortsModule = {
     let unregister: (() => void) | undefined;
     let host: HTMLElement | undefined, backdrop: HTMLElement | undefined, style: HTMLStyleElement | undefined, shadow: ShadowRoot;
     let title: HTMLElement, author: HTMLElement, status: HTMLElement, clock: HTMLElement, count: HTMLElement;
+    let stage: HTMLElement;
     let avatar: HTMLImageElement, avatarFallback: HTMLElement, subscribe: HTMLButtonElement;
     let progress: HTMLProgressElement, play: HTMLButtonElement, previous: HTMLButtonElement, next: HTMLButtonElement, retry: HTMLButtonElement;
     let rail: HTMLElement, drawer: HTMLElement, drawerTitle: HTMLElement, body: HTMLElement, hint: HTMLElement;
@@ -268,7 +269,11 @@ export let YTGamepadShortsModule = {
       shadow = host.attachShadow({ mode: 'open' });
       const css = node('style'); css.textContent = controlsCSS + mediaActionCSS + controllerStyle.css;
       const back = button('Back to feed', () => handle('back'), 'left'); back.className = 'back';
-      const stage = node('div', 'stage');
+      stage = node('div', 'stage');
+      const stageContent = node('div', 'stage-content');
+      lifecycle.listen(host, 'scroll', () => {
+        document.documentElement.style.setProperty('--ytg-shorts-scroll-y', `${host!.scrollTop}px`);
+      });
       preview = node('div', 'preview'); preview.hidden = true; cover = node('img'); cover.alt = '';
       frame = node('canvas'); frame.hidden = true; frame.setAttribute('aria-hidden', 'true'); preview.append(cover, frame);
       lifecycle.listen(cover, 'load', slidePreview);
@@ -282,7 +287,7 @@ export let YTGamepadShortsModule = {
       subscribe = button('Subscribe', () => { void manageSubscription(); }); subscribe.className = 'subscribe'; subscribe.dataset.shortsSubscribe = '';
       identity.append(avatar, avatarFallback, author, subscribe); metadata.append(identity, title);
       const timeline = node('div', 'timeline'); progress = node('progress'); progress.max = 1; progress.value = 0; progress.setAttribute('aria-label', t('Video progress'));
-      clock = node('span', 'clock'); timeline.append(progress, clock); stage.append(preview, play, timeline);
+      clock = node('span', 'clock'); timeline.append(progress, clock); stageContent.append(preview, play, timeline); stage.append(stageContent);
       rail = node('nav', 'rail'); rail.setAttribute('aria-label', t('Shorts controls'));
       for (const action of ['like', 'comments', 'save', 'mute'] as const) {
         const slot = node('div'); slot.style.display = 'contents'; actionSlots.set(action, slot); rail.append(slot);
@@ -553,6 +558,7 @@ export let YTGamepadShortsModule = {
         ++apiVersion; apiIds = []; recommendationsRequest = undefined;
         awaitingMedia = false; resetPreviewMotion(); cancelMoves(); closePanel(false); releaseMedia(); document.documentElement.classList.remove('ytg-shorts-player');
         document.documentElement.style.removeProperty('--ytg-shorts-ratio');
+        document.documentElement.style.removeProperty('--ytg-shorts-scroll-y');
         inShorts = false; entryIndex = undefined; returning = false; route = ''; wheelHeld = false; lifecycle.clearTimeout(wheelTimer);
         if (host) host.hidden = true; if (backdrop) backdrop.hidden = true; return;
       }
@@ -562,6 +568,8 @@ export let YTGamepadShortsModule = {
       if (route !== playbackRoute) {
         if (route) holdMediaFrame();
         route = playbackRoute; watchActions.reset(); started = performance.now(); messageUntil = 0; closePanel(false);
+        if (host) host.scrollTop = 0;
+        document.documentElement.style.removeProperty('--ytg-shorts-scroll-y');
       }
       if (!apiIds.includes(id())) { ++apiVersion; apiIds = [id()]; apiExhausted = false; apiRetryAt = 0; apiNeedsReset = true; recommendationsRequest = undefined; }
       mount(); host!.hidden = false;
@@ -685,6 +693,7 @@ export let YTGamepadShortsModule = {
     lifecycle.listen(window, 'wheel', event => {
       const wheel = event as WheelEvent;
       if (!active() || panel || !canHandle?.() || Math.abs(wheel.deltaY) < 20 || Math.abs(wheel.deltaX) > Math.abs(wheel.deltaY)) return;
+      if (stage && wheel.composedPath().includes(stage) && host && host.scrollHeight > host.clientHeight + 1) return;
       wheel.preventDefault(); lifecycle.clearTimeout(wheelTimer);
       wheelTimer = lifecycle.timeout(() => { wheelHeld = false; }, 180);
       if (wheelHeld || switching()) return;
@@ -698,7 +707,7 @@ export let YTGamepadShortsModule = {
     lifecycle.listen(document, PAGE_WATCH_INFO, update);
     lifecycle.listen(window, 'popstate', () => { cancelMoves(); sync(); });
     lifecycle.listen(document, 'ytg-language-changed', () => { if (host) { closePanel(false); clearActions(); unregister?.(); unregister = undefined; host.remove(); host = undefined; style?.remove(); backdrop?.remove(); } sync(); });
-    lifecycle.cleanup(() => { resetPreviewMotion(); cancelMoves(); closePanel(false); clearActions(); polling?.destroy(); unregister?.(); releaseMedia(); document.documentElement.classList.remove('ytg-shorts-player'); document.documentElement.style.removeProperty('--ytg-shorts-ratio'); host?.remove(); backdrop?.remove(); style?.remove(); });
+    lifecycle.cleanup(() => { resetPreviewMotion(); cancelMoves(); closePanel(false); clearActions(); polling?.destroy(); unregister?.(); releaseMedia(); document.documentElement.classList.remove('ytg-shorts-player'); document.documentElement.style.removeProperty('--ytg-shorts-ratio'); document.documentElement.style.removeProperty('--ytg-shorts-scroll-y'); host?.remove(); backdrop?.remove(); style?.remove(); });
     return { sync, handle };
   }
 };

@@ -10,7 +10,7 @@ const props = defineProps<{ items: readonly BrowseItem[]; selectedId: string | n
   register: (id: string, node: HTMLAnchorElement | null) => void }>();
 const emit = defineEmits<{ select: [id: string]; open: [id: string] }>();
 const viewport = ref<HTMLElement>();
-const left = ref(0), width = ref(800), cardWidth = ref(180);
+const left = ref(0), width = ref(800), cardWidth = ref(288);
 const overflow = ref(false);
 const gap = 16;
 function scrollShorts(direction: number) {
@@ -50,8 +50,9 @@ function measure() {
   // YouTube's default rich grid derives the Shorts column cap from regular columns.
   const regular = Math.max(1, Math.min(6, Math.floor((available + gap) / (310 + gap))));
   const limit = regular === 1 ? 2 : regular % 2 === 0 ? regular / 2 * 3 : regular + 2;
-  const columns = Math.max(1, Math.min(limit, Math.floor((available + gap) / (194 + gap))));
-  cardWidth.value = (available - (columns - 1) * gap) / columns;
+  const columns = Math.max(1, Math.min(limit, Math.floor((available + gap) / (240 + gap))));
+  // Enlarge the actual card, even when the responsive column count stays unchanged.
+  cardWidth.value = Math.min(available, (available - (columns - 1) * gap) / columns * 1.2);
   void nextTick(() => { overflow.value = node.scrollWidth > node.clientWidth + 1; });
 }
 const observer = new ResizeObserver(measure);

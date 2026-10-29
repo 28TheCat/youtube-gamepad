@@ -59,7 +59,10 @@ export function createSidebarService() {
             const id = entry.endpoint.payload.browseId;
             const label = entry.title.toString().trim();
             if (typeof id !== 'string' || !/^UC[\w-]{1,100}$/.test(id) || !label) continue;
-            (result.subscriptions ||= []).push({ id, label, href: `/channel/${id}/videos`, avatar: entry.thumbnails?.[0]?.url });
+            const badges = Array.isArray(entry.badges) ? entry.badges : [entry.badges];
+            (result.subscriptions ||= []).push({ id, label, href: `/channel/${id}/videos`, avatar: entry.thumbnails?.[0]?.url,
+              isLive: badges.some(badge => badge?.liveBroadcasting === true || !!badge?.liveBroadcastingBadgeRenderer),
+              hasNewContent: badges.some(badge => badge?.newContent === true || !!badge?.newContentBadgeRenderer) });
           }
           continue;
         }

@@ -62,8 +62,17 @@ export function isInnerTubeBrowseRoute(route: string): boolean {
   try {
     const url = new URL(route, 'https://www.youtube.com');
     if (url.origin !== 'https://www.youtube.com') return false;
-    return !!resolveExplorePage(route) || ['/', '/results', '/feed/subscriptions', '/feed/history'].includes(url.pathname) ||
+    return !!resolveExplorePage(route) || ['/', '/results', '/feed/subscriptions', '/feed/history', '/feed/playlists'].includes(url.pathname) ||
       (url.pathname === '/playlist' && /^[\w-]+$/.test(url.searchParams.get('list') || '')) ||
       /^\/(?:@[^/]+|(?:channel|c|user)\/[^/]+)(?:\/[^/]+)?\/?$/.test(url.pathname);
+  } catch { return false; }
+}
+
+
+/** Account authentication and account selection remain owned by YouTube. */
+export function isNativeFlowRoute(route: string): boolean {
+  try {
+    const url = new URL(route, 'https://www.youtube.com');
+    return url.origin === 'https://www.youtube.com' && /^\/(?:signin|logout|channel_switcher)(?:\/|$)/.test(url.pathname);
   } catch { return false; }
 }

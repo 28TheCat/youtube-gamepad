@@ -1,7 +1,7 @@
 import type { PlaybackLayout } from '../shared/playback-layout';
 export type UiTheme = 'light' | 'dark';
 export type UiLayout = PlaybackLayout;
-export type UiPanel = 'account' | 'settings' | 'search' | 'description' | 'comments' | 'playlists' | 'subscription';
+export type UiPanel = 'notifications' | 'account' | 'settings' | 'search' | 'description' | 'comments' | 'playlists' | 'subscription';
 export interface UiSnapshot {
   readonly theme: UiTheme | undefined;
   readonly layout: UiLayout | undefined;
@@ -15,7 +15,7 @@ interface Entry<T> { value: T; order: number }
 /** Local ISOLATED API. Owners keep their state and DOM; registrations only
  * delegate commands to the current owner, and must be released on teardown. */
 export function createUiApi() {
-  const panels: readonly UiPanel[] = ['account', 'settings', 'search', 'description', 'comments', 'playlists', 'subscription'];
+  const panels: readonly UiPanel[] = ['notifications', 'account', 'settings', 'search', 'description', 'comments', 'playlists', 'subscription'];
   let destroyed = false, order = 0;
   const themes: Entry<ValuePort<UiTheme>>[] = [], layouts: Entry<ValuePort<UiLayout>>[] = [];
   const focusTargets = new Map<string, Entry<() => boolean>[]>();
@@ -47,7 +47,7 @@ export function createUiApi() {
       const entry = current(entries);
       try { return entry?.value.isOpen() ? [{ id, entry }] : []; } catch { return []; }
     }).sort((a, b) => {
-      const priority = (id: UiPanel) => id === 'settings' || id === 'search' ? 100 : id === 'account' ? 50 : 0;
+      const priority = (id: UiPanel) => id === 'settings' || id === 'search' ? 100 : id === 'account' || id === 'notifications' ? 50 : 0;
       return priority(a.id) - priority(b.id) || a.entry.order - b.entry.order;
     });
   }

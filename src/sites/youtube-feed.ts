@@ -1,13 +1,16 @@
+import { createRequestScope } from './request-scope';
 import { createYouTubeHeaders, requestYouTube } from './youtube-request';
 import { categoryIdentity, type CategoryItem } from '../shared/browse-categories';
-import { listEndpoint } from './youtube-parser';
+import { listEndpoint, parseYouTubePage } from './youtube-parser';
 import { resolveExplorePage, isInnerTubeBrowseRoute } from '../shared/explore-pages';
 import type { BrowseItem } from '../shared/browse-data';
-import { parseYouTubeJsBrowse } from './youtube-search';
-import { channelEndpoint, parseChannelPage, type ChannelChoice } from './youtube-channel';
+import { browsePage, parseYouTubeJsBrowse, playlistDirectoryItems } from './youtube-search';
+import { parseChannelPage, type ChannelChoice } from './youtube-channel';
+import { Innertube, Mixins, YT, YTNodes } from 'youtubei.js/web';
+import { createYouTubeSession } from './youtube-session';
 
 type Node = Record<string, any>;
-export interface FeedResult { items: BrowseItem[]; continuation?: string }
+interface FeedResult { items: BrowseItem[]; continuation?: string }
 export interface FeedCategory extends CategoryItem { selected: boolean; localize?: boolean }
 // Runs in MAIN. Session context and endpoint tokens never cross into Vue.
 export function createYouTubeFeedService() {
@@ -34,7 +37,7 @@ export function createYouTubeFeedService() {
       history.replaceState({ ...history.state, [historyKey]: [...pages].filter(([, value]) => value.route === route).slice(-200) }, '');
     } catch { /* Browsing still works if the browser cannot save history state. */ }
   }
-  const requests = new Set<AbortController>();
+  const requests = createRequestScope();
   let responseCategories: Node[] = [];
   const categoryPages = new Map<string, Node[]>();
   const channelPages = new Map<string, ChannelChoice[]>();
@@ -52,6 +55,7 @@ export function createYouTubeFeedService() {
     // Personal feeds often have no filter chips. Give them the same request,
     // pagination and return-state lifecycle as the home feed.
     const personalFeed = location.pathname === '/feed/subscriptions' ? { browseId: 'FEsubscriptions', label: '订阅' } :
+      location.pathname === '/feed/playlists' ? { browseId: 'FEplaylist_aggregation', label: 'Playlists' } :
       location.pathname === '/feed/history' ? { browseId: 'FEhistory', label: '历史记录' } :
       location.pathname === '/playlist' && /^[\w-]+$/.test(new URLSearchParams(location.search).get('list') || '') ?
         { browseId: `VL${new URLSearchParams(location.search).get('list')}`, label:
@@ -88,7 +92,7 @@ export function createYouTubeFeedService() {
     }
     return [];
   }
-  function cancel() { for (const controller of requests) controller.abort(); requests.clear(); }
+  function cancel() { requests.cancel(); }
   async function request(category: string, page?: string) {
     categories();
     restorePages();
@@ -96,6 +100,16 @@ export function createYouTubeFeedService() {
     const requestRoute = route;
     const endpoint = page ? (savedPage?.route === requestRoute ? savedPage : undefined) : endpoints.get(category);
     if (!endpoint) throw new Error('Category unavailable');
+    function channelResult(parsed: ReturnType<typeof parseChannelPage>) {
+      if (!page) {
+        const previous = channelPages.get(requestRoute) || [];
+        const retained = !parsed.choices.length && category.startsWith('channel:sort:') ? previous :
+          previous.filter(item => item.id.startsWith('channel:tab:'));
+        channelPages.set(requestRoute, [...new Map([...retained, ...parsed.choices].map(item => [item.id, item])).values()]);
+        if (channelPages.size > 30) channelPages.delete(channelPages.keys().next().value!);
+      }
+      return result(parsed);
+    }
     function result(parsed: FeedResult) {
       let nextPage: string | undefined;
       if (parsed.continuation && parsed.continuation !== savedPage?.body.continuation) {
@@ -109,44 +123,109 @@ export function createYouTubeFeedService() {
     const win = window as any;
     const context = win.ytcfg?.get?.('INNERTUBE_CONTEXT');
     if (!context?.client) throw new Error('YouTube context unavailable');
-    const controller = new AbortController(); requests.add(controller);
-    const timeout = setTimeout(() => controller.abort(), 20000);
+    const request = requests.begin(20000);
     try {
       const headers = await createYouTubeHeaders(context);
       async function send(path: string, body: Node): Promise<any> {
-        if (controller.signal.aborted || requestRoute !== location.pathname + location.search)
+        if (!request.current || requestRoute !== location.pathname + location.search)
           throw new Error('YouTube request cancelled');
         const data = await requestYouTube(path, { method: 'POST', credentials: 'same-origin',
-          headers, body: JSON.stringify({ context, ...body }), signal: controller.signal });
-        if (controller.signal.aborted || requestRoute !== location.pathname + location.search)
+          headers, body: JSON.stringify({ context, ...body }), signal: request.signal });
+        if (!request.current || requestRoute !== location.pathname + location.search)
           throw new Error('YouTube request cancelled');
         return data;
       }
-      // YouTube resolves handles and channel tab params; do not hardcode them.
-      if (channelFeed() && !endpoint.body.browseId && !endpoint.body.continuation) {
-        const resolved = await send('navigation/resolve_url', { url: new URL(requestRoute, location.origin).href });
-        const target = channelEndpoint(resolved);
-        if (!target) throw new Error('Channel unavailable');
-        endpoint.body = target;
+      const channelRequest = channelFeed() && !resolveExplorePage(requestRoute);
+      function createClient() {
+        const session = createYouTubeSession(context, async (input, options) => {
+          const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+          const path = url.pathname.replace('/youtubei/v1/', '');
+          const allowed = channelRequest ? ['browse', 'navigation/resolve_url'] : [endpoint!.path];
+          if (url.origin !== 'https://www.youtube.com' || !allowed.includes(path))
+            throw new Error('Invalid feed endpoint');
+          const body = JSON.parse(String(options?.body || '{}'));
+          // Preserve the server's tab/sort params while getChannel owns the read.
+          if (channelRequest && path === 'browse' && body.browseId === endpoint!.body.browseId) Object.assign(body, endpoint!.body);
+          if (path === 'search' && !page && typeof endpoint!.body.params === 'string') body.params = endpoint!.body.params;
+          let data = await send(path, body);
+          // Channel requires a two-column shell; both layouts contain the same tabs.
+          if (channelRequest && data.contents?.singleColumnBrowseResultsRenderer) {
+            data.contents = { ...data.contents, twoColumnBrowseResultsRenderer: data.contents.singleColumnBrowseResultsRenderer };
+            delete data.contents.singleColumnBrowseResultsRenderer;
+          }
+          if (path === 'browse' && !['contents', 'continuationContents', 'onResponseReceivedActions',
+            'onResponseReceivedCommands', 'onResponseReceivedEndpoints'].some(key => key in data)) data = { contents: data };
+          // The transport already decoded JSON. Hand it to the library directly,
+          // avoiding a second serialization that traverses unselected tab cards.
+          const response = new Response(null, { headers: { 'Content-Type': 'application/json' } });
+          response.json = async () => data;
+          return response;
+        });
+        const execute = session.actions.execute.bind(session.actions);
+        session.actions.execute = ((path: Parameters<typeof execute>[0], args: Node = {}) =>
+          execute(path, { ...args, skip_auth_check: true } as any)) as typeof session.actions.execute;
+        return { session, client: new Innertube(session) };
+      }
+      if (channelRequest) {
+        const { session, client } = createClient();
+        if (!page && !endpoint.body.browseId) {
+          const resolved = await client.resolveURL(new URL(requestRoute, location.origin).href);
+          const target = listEndpoint(resolved);
+          if (target?.path !== 'browse' || !target.body.browseId) throw new Error('Channel unavailable');
+          endpoint.body = target.body;
+        }
+        // Partial sort responses have no Channel shell. Execute their validated
+        // server endpoint through the public API rather than constructing one.
+        let parsedPage;
+        if (page) {
+          const cursor = parseYouTubePage({ contents: [{ continuationItemRenderer: {
+            continuationEndpoint: { continuationCommand: {
+              token: endpoint.body.continuation, request: 'CONTINUATION_REQUEST_TYPE_BROWSE'
+            } }
+          } }] });
+          parsedPage = (await new YT.ChannelListContinuation(session.actions, cursor, true).getContinuation()).page;
+        } else if (category.startsWith('channel:sort:')) {
+          parsedPage = await client.call(new YTNodes.NavigationEndpoint({ browseEndpoint: endpoint.body }), { parse: true });
+        } else parsedPage = (await client.getChannel(endpoint.body.browseId)).page;
+        return channelResult(parseChannelPage({}, context, parsedPage));
+      }
+      const home = location.pathname === '/' && category === 'all' && !endpoint.body.params;
+      const subscriptions = location.pathname === '/feed/subscriptions' && category === 'all';
+      const historyFeed = location.pathname === '/feed/history' && category === 'all';
+      const searchFeed = location.pathname === '/results' && endpoint.path === 'search';
+      const directory = location.pathname === '/feed/playlists';
+      const playlistFeed = directory || location.pathname === '/playlist';
+      if (playlistFeed || (!page && (searchFeed || home || subscriptions || historyFeed))) {
+        const { session, client } = createClient();
+        let listing;
+        if (page) {
+          // Restore a library cursor from the saved opaque token. Each request
+          // gets fresh actions so cancelled requests cannot poison later pages.
+          const cursor = parseYouTubePage({ contents: [{ continuationItemRenderer: {
+            continuationEndpoint: { continuationCommand: {
+              token: endpoint.body.continuation, request: 'CONTINUATION_REQUEST_TYPE_BROWSE'
+            } }
+          } }] });
+          const previous = directory ? new Mixins.Feed(session.actions, cursor, true) : new YT.Playlist(session.actions, cursor, true);
+          listing = await previous.getContinuation();
+        } else {
+          listing = searchFeed ? await client.search(endpoint.body.query) : home ? await client.getHomeFeed() : subscriptions ? await client.getSubscriptionsFeed() : historyFeed ? await client.getHistory() : directory ? await client.getPlaylists() : await client.getPlaylist(new URLSearchParams(location.search).get('list')!);
+        }
+        const parsed = browsePage(listing.page);
+        if ((searchFeed || home || subscriptions || historyFeed) && parsed.chips.length) responseCategories = parsed.chips;
+        return result({ ...parsed, items: directory ? playlistDirectoryItems(listing.page) : parsed.items });
       }
       const data = await send(endpoint.path, endpoint.body);
       if (channelFeed()) {
         // Parse API data once for cards, sibling tab endpoints and filters.
-        const parsed = parseChannelPage(data, context);
-        if (!page) {
-          const previous = channelPages.get(requestRoute) || [];
-          const retained = !parsed.choices.length && category.startsWith('channel:sort:') ? previous :
-            previous.filter(item => item.id.startsWith('channel:tab:'));
-          channelPages.set(requestRoute, [...new Map([...retained, ...parsed.choices].map(item => [item.id, item])).values()]);
-          if (channelPages.size > 30) channelPages.delete(channelPages.keys().next().value!);
-        }
-        return result(parsed);
+        return channelResult(parseChannelPage(data, context));
       }
       const parsed = parseYouTubeJsBrowse(data);
-      if (!controller.signal.aborted && requestRoute === route && requestRoute === location.pathname + location.search && !page && parsed.chips.length)
+      if (request.current && requestRoute === route && requestRoute === location.pathname + location.search && !page && parsed.chips.length)
         responseCategories = parsed.chips;
       return result(parsed);
-    } finally { clearTimeout(timeout); requests.delete(controller); }
+    } finally { request.finish(); }
   }
   return { categories, request, cancel };
 }
+

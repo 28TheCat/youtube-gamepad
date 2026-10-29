@@ -6,14 +6,19 @@ Parser.setParserErrorHandler(() => {});
 
 // 18.1.0 defaults omitted style ranges, but not command ranges. Commands can
 // also span multiple styled runs, which its single-run matcher cannot handle.
+// Collaborative owner titles can report command lengths beyond their content.
 // Repair the public Text factory so every library renderer uses the same fix.
 const textFactory = Misc.Text.fromAttributed as typeof Misc.Text.fromAttributed & { ytgCommandRanges?: boolean };
 if (!textFactory.ytgCommandRanges) {
   Misc.Text.fromAttributed = Object.assign(function (this: typeof Misc.Text, data: Parameters<typeof textFactory>[0]) {
     if (!data.commandRuns?.length) return textFactory.call(this, data);
-    const commands = data.commandRuns.map(run => {
+    const commands = data.commandRuns.flatMap(run => {
       const startIndex = run.startIndex ?? 0;
-      return { ...run, startIndex, length: run.length ?? data.content.length - startIndex };
+      const length = run.length ?? data.content.length - startIndex;
+      if (!Number.isInteger(startIndex) || !Number.isInteger(length) || length <= 0) return [];
+      const start = Math.max(0, startIndex);
+      const end = Math.min(data.content.length, startIndex + length);
+      return end > start ? [{ ...run, startIndex: start, length: end - start }] : [];
     });
     const boundaries = new Set<number>();
     for (const run of [...(data.styleRuns || []), ...commands]) {
@@ -23,8 +28,6 @@ if (!textFactory.ytgCommandRanges) {
     }
     const commandRuns = commands.flatMap(run => {
       const end = run.startIndex + run.length;
-      if (!Number.isInteger(run.startIndex) || !Number.isInteger(run.length) || run.startIndex < 0 ||
-        run.length <= 0 || end > data.content.length) return [run];
       const cuts = [run.startIndex, ...[...boundaries].filter(index => index > run.startIndex && index < end), end]
         .sort((a, b) => a - b);
       return cuts.slice(1).map((index, i) => ({ ...run, startIndex: cuts[i], length: index - cuts[i] }));

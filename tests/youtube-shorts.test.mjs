@@ -41,3 +41,35 @@ test('Shorts API errors are retryable without advancing or poisoning the recomme
   fail = false;
   assert.deepEqual(await service.read('first'), { ids: ['next'], hasMore: false });
 });
+
+test('resetting Shorts recommendations starts a new sequence even when revisiting a known video', async t => {
+  let batch = 0;
+  const { service, calls } = setup(t, path => path.endsWith('reel_item_watch') ? { playerResponse: {} }
+    : { entries: entries([++batch === 1 ? 'second' : 'fresh']) });
+  assert.deepEqual(await service.read('first'), { ids: ['second'], hasMore: false });
+  assert.deepEqual(await service.read('first', true), { ids: ['fresh'], hasMore: false });
+  assert.equal(calls.filter(call => call.path.endsWith('reel_item_watch')).length, 2);
+});
+
+test('concurrent reads share a request and a late cancelled sequence cannot replace its successor', async t => {
+  let release, entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  let first = true;
+  const { service, calls } = setup(t, path => {
+    if (path.endsWith('reel_item_watch')) return { playerResponse: {} };
+    if (first) {
+      first = false; entered();
+      return new Promise(resolve => { release = () => resolve({ entries: entries(['stale']) }); });
+    }
+    return { entries: entries(['fresh']) };
+  });
+  const old = service.read('first');
+  const shared = service.read('first');
+  const oldRejected = assert.rejects(old), sharedRejected = assert.rejects(shared);
+  await waiting;
+  assert.equal(calls.filter(call => call.path.endsWith('reel_watch_sequence')).length, 1);
+  assert.deepEqual(await service.read('different', true), { ids: ['fresh'], hasMore: false });
+  release();
+  await Promise.all([oldRejected, sharedRejected]);
+  assert.deepEqual(await service.read('fresh'), { ids: [], hasMore: false });
+});

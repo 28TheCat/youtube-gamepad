@@ -23,6 +23,7 @@ const groups = {
   'account-page.test.mjs': 'browser',
   'ui-api-browser.test.mjs': 'browser',
   'youtube-account-extension.test.mjs': 'extension',
+  'youtube-notifications-extension.test.mjs': 'extension',
   'browse-mode.test.mjs': 'extension',
   'playback-layout.test.mjs': 'browser',
   'windowed-watch.test.mjs': 'browser',

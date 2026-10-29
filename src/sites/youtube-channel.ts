@@ -3,7 +3,7 @@ import type { Context } from 'youtubei.js/web';
 import { createYouTubeSession } from './youtube-session';
 import type { FeedCategory } from './youtube-feed';
 import { browsePage } from './youtube-search';
-import { listEndpoint, parseYouTubePage } from './youtube-parser';
+import { listEndpoint, parseYouTubePage, type ParsedPage } from './youtube-parser';
 
 type Node = Record<string, any>;
 export interface ChannelChoice extends FeedCategory { body: Node }
@@ -14,16 +14,9 @@ const key = (label: string) => {
   return (hash >>> 0).toString(36);
 };
 
-// YouTube resolves aliases and tab parameters. Only parsed browse endpoints
-// may reach the transport; no caller-provided URL becomes a fetch destination.
-export function channelEndpoint(raw: Node): Node | undefined {
-  const endpoint = listEndpoint(new YTNodes.NavigationEndpoint(raw.endpoint));
-  return endpoint?.path === 'browse' ? endpoint.body : undefined;
-}
-
-export function parseChannelPage(raw: Node, context: Context) {
+export function parseChannelPage(raw: Node, context: Context, parsed?: ParsedPage) {
   const choices: ChannelChoice[] = [];
-  const page = parseYouTubePage(raw);
+  const page = parsed || parseYouTubePage(raw);
   const result = browsePage(page);
   const main: any = page.contents?.is_array ? undefined : page.contents?.item();
   if (!main?.tabs) return { ...result, choices };

@@ -15,6 +15,7 @@ import { finishEarlyContent, abortEarlyContent } from './early-start';
 import { waitForPageServer } from '../bridge/page-ready';
 import { configureDiagnosticsChannel } from '../diagnostics/diagnostics';
 import { mountBrowseCategorySettings } from '../sites/browse-category-settings';
+import { createAppShell } from '../ui/app-shell';
 export const localChannel = createApplicationChannel();
 const startup = new AbortController();
 const startupScope = YTGamepadRuntime.scope('startup');
@@ -36,8 +37,10 @@ if (startup.signal.aborted) return;
 const pinia = createPinia();
 YTGamepadRuntime.scope('interaction').cleanup(() => disposePinia(pinia));
 const interaction = useInteractionStore(pinia);
-startCoordinator({ interaction, pageAccess, localChannel, remoteHistory: true, createWatchView: createVueWatchView, mountBrowseOverlay,
-  mountBrowseGrid: dependencies => mountBrowseSurface(pinia, dependencies, localChannel),
+const shell = createAppShell();
+startupScope.cleanup(shell.destroy);
+startCoordinator({ interaction, pageAccess, localChannel, remoteHistory: true, createWatchView: port => createVueWatchView(port, shell.mountContent), mountBrowseOverlay,
+  mountBrowseGrid: dependencies => mountBrowseSurface(pinia, dependencies, localChannel, shell.mountChrome),
   mountQuickMenu: (container, _interaction, items, onAction) => mountQuickMenu(pinia, container, items, onAction)
 });
 let settingsApplied!: () => void;

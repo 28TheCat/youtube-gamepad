@@ -1,12 +1,6 @@
 /* Native page layout, input effects and playback overrides. */
 #ytg-temporary-speed{position:fixed!important;top:64px!important;left:50%!important;transform:translateX(-50%)!important;z-index:2147483647!important;padding:10px 20px!important;border-radius:24px!important;background:var(--ytg-overlay-surface)!important;color:var(--ytg-overlay-text)!important;font:600 18px/1.4 var(--ytg-font-family)!important;pointer-events:none!important}
 #ytg-temporary-speed[hidden]{display:none!important}
-/* Loading status does not reserve space or resize the media frame. */
-#ytg-watch-loading{position:fixed!important;inset:0 0 auto!important;height:48px!important;box-sizing:border-box!important;z-index:2147483647!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;background:var(--ytg-overlay-surface)!important;color:var(--ytg-overlay-text)!important;font:500 16px/1.4 var(--ytg-font-family)!important;pointer-events:none!important}
-#ytg-watch-loading[hidden]{display:none!important}
-#ytg-watch-loading::before{content:"";width:18px;height:18px;border:2px solid #ffffff30;border-top-color:#fff;border-radius:50%;animation:ytg-watch-loading-spin 1s linear infinite}
-@keyframes ytg-watch-loading-spin{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){#ytg-watch-loading::before{animation:none}}
 html.ytg-gamepad-input,html.ytg-gamepad-input *{cursor:none!important}
 html.ytg-gamepad-input :is(ytd-rich-item-renderer,ytd-rich-grid-media,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model){background-color:transparent!important;box-shadow:none!important}
 html.ytg-gamepad-input :is(ytd-video-preview,ytd-moving-thumbnail-renderer,yt-video-preview-view-model,#inline-preview-player){display:none!important}
@@ -24,22 +18,28 @@ html.ytg-watch-layout,html.ytg-watch-layout body{overflow:hidden!important}
 html.ytg-watch-layout :is(ytd-masthead,#secondary,#below,ytd-guide-renderer,ytd-mini-guide-renderer){display:none!important}
 /* The selected layout has one geometry from PREPARE_VIDEO through playback.
    Readiness controls the interface, never the size of the media frame. */
-/* Fit the media first; the side panel receives the remaining viewport width. */
-html:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-top:0px;--ytg-watch-ratio:var(--ytg-video-ratio,1.777777778);--ytg-watch-side-min:15vw;--ytg-watch-height-limit:max(80px,calc(100dvh - var(--ytg-watch-top) - 96px));--ytg-watch-width:min(calc(100vw - var(--ytg-watch-side-min)),calc(var(--ytg-watch-height-limit) * var(--ytg-watch-ratio)));--ytg-watch-side:calc(100vw - var(--ytg-watch-width));--ytg-watch-height:calc(var(--ytg-watch-width) / var(--ytg-watch-ratio))}
+/* Stable detail-page regions; contain the media inside the remaining stage. */
+html:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-top:0px;--ytg-watch-info-height:177px;--ytg-watch-side:460px;--ytg-watch-width:calc(100vw - var(--ytg-watch-side));--ytg-watch-height:max(80px,calc(100dvh - var(--ytg-watch-top) - var(--ytg-watch-info-height)))}
+@media(max-width:1050px){html:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-side:340px}}
+@media(max-width:700px){html:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-side:min(240px,40vw)}}
 html[data-ytg-playback-layout="windowed"]:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-top:56px}
 html[data-ytg-playback-layout="fullscreen"]:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-width:100vw;--ytg-watch-height:100vh}
 html:is(.ytg-watch-layout,.ytg-player-primed) #movie_player{position:fixed!important;inset:var(--ytg-watch-top) auto auto 0!important;width:var(--ytg-watch-width)!important;height:var(--ytg-watch-height)!important;max-width:none!important;max-height:none!important;z-index:2147483645!important;background:#000!important}
 html:is(.ytg-watch-layout,.ytg-player-primed) #movie_player .html5-video-container{width:100%!important;height:100%!important}
 html:is(.ytg-watch-layout,.ytg-player-primed) #movie_player video.html5-main-video{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:contain!important}
-html:is(.ytg-watch-layout,.ytg-player-primed) #ytg-watch-loading{inset:auto auto 16px 24px!important;width:auto!important;height:40px!important;padding:0 16px!important;border-radius:8px!important}
 html.ytg-watch-layout #movie_player .ytp-chrome-bottom{width:calc(100% - 48px)!important;left:24px!important}
 /* Keep native controls visible while the gamepad owns their focus. */
 html.ytg-controls:not([data-ytg-native]) #movie_player .ytp-chrome-bottom{opacity:1!important;visibility:visible!important;display:block!important;pointer-events:auto!important}
 html.ytg-controls:not([data-ytg-native]) #movie_player .ytp-chrome-controls{opacity:1!important;visibility:visible!important}
 
 /* The watch surface replaces desktop chrome, while media, captions and ads stay native. */
-html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-bottom,
+html[data-ytg-playback-layout="fullscreen"].ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-bottom,
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-top{display:none!important}
+/* Keep YouTube's original control strip, sizing and interactions in the detail page. */
+html[data-ytg-playback-layout="windowed"].ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-bottom{display:block!important;opacity:1!important;visibility:visible!important;pointer-events:auto!important}
+html[data-ytg-playback-layout="windowed"].ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-controls{opacity:1!important;visibility:visible!important}
+html[data-ytg-playback-layout="windowed"].ytg-watch-active #movie_player .ytp-button{transform:none!important}
+html[data-ytg-playback-layout="windowed"].ytg-watch-active #movie_player .ytg-native-control-selected{outline:3px solid #fff!important;outline-offset:-3px!important}
 /* Recommendations belong to the gamepad surface, including after playback ends. */
 html.ytg-watch-active:not([data-ytg-native]) #movie_player :is(.html5-endscreen,.ytp-endscreen-content,.ytp-autonav-endscreen,.ytp-upnext,.ytp-ce-element,.ytp-fullscreen-grid,.ytp-fullscreen-grid-stills-container,.ytp-modern-videowall-still){display:none!important}
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-settings-menu{z-index:2147483647!important;bottom:12px!important;right:12px!important;max-width:calc(100% - 24px)!important;max-height:calc(100% - 24px)!important;overflow:auto;font-size:20px!important}
@@ -66,6 +66,11 @@ html.ytg-watch-layout #movie_player .caption-window.ytp-caption-window-bottom{bo
 
 
 /* Cover native page rearrangement without hiding the playing media below it. */
-#ytg-watch-transition{position:fixed!important;inset:0!important;z-index:2147483646!important;background:var(--ytg-background,#101010)!important;pointer-events:none!important}
-#ytg-watch-transition :is(img,canvas){position:absolute!important;left:0!important;top:var(--ytg-watch-top,0px)!important;width:var(--ytg-watch-width,100vw)!important;height:var(--ytg-watch-height,100vh)!important;object-fit:contain!important;background:#101010!important}
+#ytg-watch-transition{position:fixed!important;left:0!important;top:var(--ytg-watch-top,0px)!important;width:var(--ytg-watch-width,100vw)!important;height:var(--ytg-watch-height,100vh)!important;z-index:2147483646!important;background:var(--ytg-background,#101010)!important;pointer-events:none!important}
+#ytg-watch-transition :is(img,canvas){position:absolute!important;left:0!important;top:0!important;width:100%!important;height:100%!important;object-fit:contain!important;background:#101010!important}
 #ytg-watch-transition [hidden]{display:none!important}
+
+/* Adaptation errors keep the client surface until the user explicitly exits. */
+html.ytg-theater:not([data-ytg-browse-mode="youtube"])[data-ytg-adaptation="fallback"] ytd-page-manager{visibility:hidden!important}
+
+html.ytg-theater:not([data-ytg-browse-mode="youtube"])[data-ytg-adaptation="waiting"] ytd-watch-flexy :is(#below,#secondary,#related){visibility:hidden!important}

@@ -5,6 +5,7 @@ import { createApp, h, reactive } from 'vue';
 import type { BrowseDependencies } from '../../types/ports';
 import SearchBar from './SearchBar.vue';
 import css from './search-bar.css?inline';
+import { readSearchHistory, rememberSearch, SEARCH_HISTORY_CHANGED } from './search-history';
 
 /** Keep YouTube operations outside the reusable input component. */
 export function mountSearchBar({ runtime, core }: Pick<BrowseDependencies, 'runtime' | 'core'>, shadow?: ShadowRoot) {
@@ -13,24 +14,27 @@ export function mountSearchBar({ runtime, core }: Pick<BrowseDependencies, 'runt
   host.id = 'ytg-search-host'; host.hidden = true;
   const style = document.createElement('style'); style.textContent = css;
   const mount = document.createElement('div'); host.append(style, mount);
-  const state = reactive({ query: '', voiceAvailable: false });
+  const state = reactive({ query: '', voiceAvailable: false, recent: readSearchHistory() });
   const page = createPageClient();
   const nativeVoice = () => document.querySelector<HTMLElement>('ytd-masthead #voice-search-button button,ytd-masthead button#voice-search-button');
   function update(query: string) {
     state.query = query;
   }
   const app = createApp({ render: () => h(SearchBar, { modelValue: state.query,
-    voiceAvailable: state.voiceAvailable, 'onUpdate:modelValue': update,
+    voiceAvailable: state.voiceAvailable, recent: state.recent, 'onUpdate:modelValue': update,
     onClear() {
       core.focus(host.querySelector<HTMLInputElement>('[data-ytg-search-input]'));
     },
     onSearch(query: string) {
       const href = searchHref(query); if (!href) return;
+      state.recent = rememberSearch(query);
       update(query.trim()); if (!page.openBrowseRoute?.(href)) location.assign(href);
     },
     onVoice() { nativeVoice()?.click(); }
   }) });
   app.mount(mount);
+  lifecycle.listen(document, SEARCH_HISTORY_CHANGED, () => { state.recent = readSearchHistory(); });
+  lifecycle.listen(window, 'storage', () => { state.recent = readSearchHistory(); });
   let center: HTMLElement | null = null;
   function sync(readQuery = false) {
     const enabled = (document.documentElement.classList.contains('ytg-browse-header') || document.documentElement.classList.contains('ytg-custom-browse'));

@@ -271,7 +271,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     clearDiagnostics, exportDiagnostics,
     saveHomeFilter: (next: Partial<HomeFilterSettings>, id: string) => {
       const values = normalizeHomeFilter({ ...state.values, ...next });
-      return save(Object.fromEntries(Object.keys(next).filter(key => key in homeFilterDefaults).map(key => [key, values[key as keyof HomeFilterSettings]])), id);
+      return save(Object.fromEntries(Object.entries(values).filter(([key]) => Object.hasOwn(next, key))), id);
     },
     saveGrid: (next: Partial<VideoGridSettings>, id: string) => save(next, id),
     savePlayback: (next: Partial<PlaybackParameters>, id: string) => {

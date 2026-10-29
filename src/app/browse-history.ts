@@ -19,10 +19,32 @@ export function readBrowseReturn(history: Pick<History, 'state'>, route: string)
     !value.categories.every((item: any) => item && typeof item.id === 'string' && typeof item.label === 'string') ||
     !value.categories.some((item: any) => item.id === value.category) ||
     !Array.isArray(value.snapshot.items) || !value.snapshot.items.length ||
-    !value.snapshot.items.every((item: any) => item && ['id', 'title', 'channel', 'thumbnail', 'href'].every(field => typeof item[field] === 'string') && /^\/(watch\?|shorts\/)/.test(item.href)) ||
+    !value.snapshot.items.every((item: any) => item && ['id', 'title', 'channel', 'thumbnail', 'href'].every(field => typeof item[field] === 'string') && /^\/(watch\?|shorts\/|playlist\?)/.test(item.href)) ||
     typeof value.snapshot.canLoadMore !== 'boolean' ||
     (value.nextPage !== undefined && typeof value.nextPage !== 'string') ||
     (value.activeItemId !== null && typeof value.activeItemId !== 'string') ||
     !Number.isFinite(value.scrollTop) || value.scrollTop < 0) return;
+  return value;
+}
+
+
+export interface WatchReturnState {
+  route: string;
+  target: { region: string; itemKey?: string; index: number };
+  tab: number;
+  panel?: 'description' | 'comments' | 'playlists' | 'subscription';
+  scrollTop: number;
+}
+const watchKey = 'ytGamepadWatchReturn';
+export function saveWatchReturn(history: Pick<History, 'state' | 'replaceState'>, state: WatchReturnState) {
+  try { history.replaceState({ ...history.state, [watchKey]: JSON.parse(JSON.stringify(state)) }, ''); } catch { /* Navigation remains available when history storage is full. */ }
+}
+export function readWatchReturn(history: Pick<History, 'state'>, route: string): WatchReturnState | undefined {
+  const value = history.state?.[watchKey];
+  if (!value || value.route !== route || !['player', 'metadata', 'controls', 'progress', 'tabs', 'recommendations', 'panel'].includes(value.target?.region) ||
+      !Number.isInteger(value.target.index) || value.target.index < 0 ||
+      (value.target.itemKey !== undefined && typeof value.target.itemKey !== 'string') ||
+      (value.panel !== undefined && !['description', 'comments', 'playlists', 'subscription'].includes(value.panel)) ||
+      !Number.isInteger(value.tab) || value.tab < 0 || !Number.isFinite(value.scrollTop) || value.scrollTop < 0) return;
   return value;
 }

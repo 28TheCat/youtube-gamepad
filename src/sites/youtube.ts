@@ -7,12 +7,14 @@ import type { NavigationConfig, InteractiveElement } from '../../types/core';
 type Mutable<T> = {-readonly [K in keyof T]: T[K]};
 
 import { YTGamepadSeeking } from '../playback/seek';
+import { createNativePlayerControls } from './native-player-controls';
 import { playbackParameterDefaults, normalizePlaybackParameters } from '../shared/playback-settings';
 export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFactory<SiteDependencies,SitePort>;
 (() => {
   /** @param {import('../../types/ports.js').SiteDependencies} dependencies */
   function create({ runtime, diagnostics, focusManager, pageAccess = undefined }: import('../../types/ports.js').SiteDependencies) {
   const lifecycle = runtime.scope('site');
+  const nativePlayer = createNativePlayerControls(lifecycle);
   let playbackParameters = { ...playbackParameterDefaults };
   function configurePlayback(values: Partial<typeof playbackParameters>) {
     const next = normalizePlaybackParameters(values);
@@ -190,6 +192,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
   /** @returns {import('../../types/ports.js').RouteSnapshot} */
   const readRoute = () => ({ key: location.pathname + location.search, isWatch: location.pathname === '/watch' });
   const watchFeatures: Record<string,Capability> = {};
+  let confirmedMetadata: { route: string; page: WatchPageSnapshot; channelId: string } | undefined;
   function diagnoseSite(operation: string, error: unknown) {
     try { diagnostics?.record('site', operation, error, {
       route: location.pathname === '/watch' ? 'watch' : 'browse'
@@ -323,34 +326,49 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
     const route = readRoute(), id = new URLSearchParams(location.search).get('v');
     nextDestinations.clear(); channelId = '';
     const page: Mutable<WatchPageSnapshot> = { ...route, waiting: false, title: '', channel: '', avatar: '', subscribed: false, liked: false, disliked: false, viewCount: null, description: '', recommendations: [] };
+    if (confirmedMetadata?.route !== route.key) confirmedMetadata = undefined;
     if (!route.isWatch) return page;
-    let details;
-    try { details = pageAccess?.readVideoDetails(); } catch (_) {}
-    if (details?.videoId && details.videoId !== id) { page.waiting = true; return page; }
-    const info = pageAccess?.readWatchInfo?.();
-    channelId = details?.channelId || '';
-    page.title = details?.title || '';
-    page.channel = details?.author || '';
-    page.description = details?.shortDescription || '';
-    page.viewCount = details?.viewCount ?? null;
-    page.avatar = info?.avatar || '';
-    page.channelBadge = info?.channelBadge;
-    page.subscribed = info?.subscribed || false;
-    page.notificationPreference = info?.notificationPreference;
-    page.liked = info?.liked || false;
-    page.disliked = info?.disliked || false;
+    // Metadata has one error boundary; recommendations continue independently.
+    const metadata = optionalFeature('metadata', () => {
+      const details = pageAccess?.readVideoDetails();
+      if (details?.videoId && details.videoId !== id) return { stale: true } as const;
+      const info = pageAccess?.readWatchInfo?.();
+      return { details, info };
+    }, () => undefined);
+    if (metadata && 'stale' in metadata) { confirmedMetadata = undefined; watchFeatures.metadata = 'missing'; page.waiting = true; return page; }
+    const details = metadata?.details, info = metadata?.info;
+    const metadataFailed = !metadata || info?.failed === true;
+    if ((!details || metadataFailed) && confirmedMetadata) {
+      Object.assign(page, confirmedMetadata.page);
+      channelId = confirmedMetadata.channelId;
+    } else {
+      channelId = details?.channelId || '';
+      page.title = details?.title || '';
+      page.channel = details?.author || '';
+      page.description = details?.shortDescription || '';
+      page.viewCount = details?.viewCount ?? null;
+      page.avatar = info?.avatar || '';
+      page.channelBadge = info?.channelBadge;
+      page.subscribed = info?.subscribed || false;
+      page.notificationPreference = info?.notificationPreference;
+      page.liked = info?.liked || false;
+      page.disliked = info?.disliked || false;
+    }
     page.waiting = info?.loading === true && !details;
-    watchFeatures.metadata = info?.failed ? 'failed' : details ? 'available' : 'missing';
+    page.metadataFailed = metadataFailed;
+    if (details?.videoId === id && !metadataFailed) confirmedMetadata = { route: route.key, page: { ...page }, channelId };
+    watchFeatures.metadata = metadataFailed ? 'failed' : details ? 'available' : 'missing';
     watchFeatures.channel = channelId ? 'available' : 'missing';
-    watchFeatures.like = watchFeatures.dislike = info?.canLike && !info.working ? 'available' : 'missing';
-    watchFeatures.subscribe = info?.canSubscribe && !info.working ? 'available' : 'missing';
-    watchFeatures.save = info?.canSave && !info.working ? 'available' : 'missing';
+    watchFeatures.like = watchFeatures.dislike = !metadataFailed && info?.canLike && !info.working ? 'available' : 'missing';
+    watchFeatures.subscribe = !metadataFailed && info?.canSubscribe && !info.working ? 'available' : 'missing';
+    watchFeatures.save = !metadataFailed && info?.canSave && !info.working ? 'available' : 'missing';
     if (pageAccess?.readWatchNext) {
       nextDestinations.clear();
       const next = optionalFeature('recommendations', () => pageAccess.readWatchNext!(), () => undefined);
       if (next?.route === route.key) {
         page.queue = next.queue;
         page.playlistTitle = next.playlistTitle;
+        page.playlistTotal = next.playlistTotal;
         // Queue entries retain playlist positions and are shown before related videos.
         page.recommendations = [...next.queue.filter(item => !item.selected), ...next.recommendations];
         for (const item of page.recommendations) if (item.href) nextDestinations.set(item.key, item.href);
@@ -526,11 +544,12 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       },
       defaultSection: 'content',
       sections: {
-        sidebar: { axis: 'vertical', exits: { right: ['content', 'player', 'categories', 'header'], up: ['header'] } },
+        sidebar: { axis: 'vertical', exits: { right: ['subscriptions', 'content', 'player', 'categories', 'header'], up: ['header'] } },
+        subscriptions: { axis: 'vertical', exits: { left: ['sidebar'], right: ['content'], up: ['categories', 'header'] } },
         header: { axis: 'horizontal', exits: { down: ['categories', 'content', 'player', 'sidebar'], left: ['sidebar'] } },
         searchEntry: { exits: { down: ['content', 'player'], left: ['categories', 'sidebar'], right: ['header'] } },
         categories: { axis: 'horizontal', exits: { up: ['searchEntry', 'header'], down: ['content', 'player'], left: ['sidebar'], right: ['searchEntry'] } },
-        content: { layout: 'grid', retainRowFocus: true, exits: { left: ['sidebar'], up: ['categories', 'header', 'player'] } },
+        content: { layout: 'grid', retainRowFocus: true, exits: { left: ['subscriptions', 'sidebar'], up: ['categories', 'header', 'player'] } },
         player: { axis: 'horizontal', exits: { down: ['content'], up: ['header'], left: ['sidebar'], right: ['content'] } },
         controls: { axis: 'horizontal', exits: { up: ['progress'] } },
         progress: { exits: { down: ['controls'] } }
@@ -540,6 +559,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
         if (el?.closest<HTMLElement>('#ytg-search-host')) return 'searchEntry';
         if (el?.closest<HTMLElement>('[data-ytg-category]')) return 'categories';
         if (el?.closest<HTMLElement>('#ytg-browse-sidebar')) return 'sidebar';
+        if (el?.closest<HTMLElement>('#ytg-subscription-channels')) return 'subscriptions';
         if (el?.closest<HTMLElement>('#ytg-browse-top,[data-ytg-category]')) return 'header';
         if (el?.closest<import('../../types/core').YouTubePlayer>('#movie_player')) return controller.mode === 'controls' ? (el.matches?.(progressSelector) ? 'progress' : 'controls') : 'player';
         return 'content';
@@ -558,6 +578,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
         return { top: Math.min(top, innerHeight - 32), bottom: innerHeight - 16 };
       },
       getKey(el) {
+        if (el?.dataset?.subscriptionId) return `subscription:${el.dataset.subscriptionId}`;
         if (el?.dataset?.sidebarId) return `sidebar:${el.dataset.sidebarId}`;
         if (el?.dataset?.browseId) return el.dataset.browseId;
         const label = el?.closest?.<HTMLElement>('.ytp-settings-menu') && el?.querySelector?.<HTMLElement>('.ytp-menuitem-label');
@@ -588,7 +609,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
           return true;
         });
       },
-      selectors: '[data-ytg-search-input],[data-ytg-page-mode],#ytg-browse-sidebar a[href],#ytg-browse-grid a[data-browse-id],#ytg-browse-grid button,#ytg-browse-top button,[data-ytg-category],.ytp-button,.ytp-progress-bar',
+      selectors: '[data-ytg-search-input],[data-ytg-page-mode],#ytg-browse-sidebar a[href],#ytg-subscription-channels a[href],#ytg-browse-grid a[data-browse-id],#ytg-browse-grid button,#ytg-browse-top button,[data-ytg-category],.ytp-button,.ytp-progress-bar',
       overlays: nativeLayerSelector,
       overlayItems: 'a[href],button,input,[role="slider"],[role="button"],[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],tp-yt-paper-item,.ytp-panel-back',
       isSlider: (el) => el?.matches?.('input[type="range"],[role="slider"]') === true,
@@ -612,7 +633,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
         if (el?.matches?.('[data-browse-id]')) return el.querySelector<HTMLElement>('.card-cover,img,.thumbnail-placeholder') || el;
         return el;
       },
-      ownsSelectionPaint: (el) => Boolean(el?.closest<HTMLElement>('#ytg-browse-sidebar,#ytg-browse-categories,#ytg-browse-top,[data-browse-id],[data-ytg-category]')),
+      ownsSelectionPaint: (el) => Boolean(el?.closest<HTMLElement>('#ytg-browse-sidebar,#ytg-subscription-channels,#ytg-browse-categories,#ytg-browse-top,[data-browse-id],[data-ytg-category]')),
       getSelectionRadius(el) {
         if (el?.matches?.('[data-ytg-category]')) return 'var(--ytg-chip-radius, 8px)';
         return el?.closest<HTMLElement>('#ytg-browse-top') ? 'var(--ytg-pill-radius, 28px)' : 'var(--ytg-card-radius, 14px)';
@@ -652,7 +673,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
         (!inert || focusManager?.isSuspendedScope(inert));
     });
   }
-  YTGamepadSite = { configurePlayback, destroy: lifecycle.destroy, temporarySpeed, hasNativeLayer, perform, showNativeControls, isProgress: el => el?.matches?.(progressSelector) === true, createNavigationConfig,
+  YTGamepadSite = { nativePlayer, configurePlayback, destroy: lifecycle.destroy, temporarySpeed, hasNativeLayer, perform, showNativeControls, isProgress: el => el?.matches?.(progressSelector) === true, createNavigationConfig,
     inspectWatchCapabilities, inspectOptionalCapabilities, readWatchFeatures: () => ({ ...watchFeatures }), restoreNativeInterface,
     readRoute, readPlayback, readWatchPage, readComments,
     readCommentsStatus: () => pageAccess?.readComments?.(),
@@ -666,7 +687,6 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
   // These ports may fail independently when native markup changes. Retry reads
   // on later observations; do not latch optional failures for the whole route.
   for (const [method, feature, fallback] of [
-    ['readWatchPage', 'metadata', () => ({ ...readRoute(), title: '', channel: '', description: '', recommendations: [] })],
     ['readComments', 'comments', () => []],
     ['loadComments', 'comments', () => false], ['expandReplies', 'comments', () => false], ['translateComment', 'comments', () => false],
     ['openRecommendation', 'recommendations', () => 'missing'], ['openChannel', 'channel', () => false],

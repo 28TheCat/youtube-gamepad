@@ -23,6 +23,7 @@ export function mountBrowseMode(runtime: Runtime, core: CoreModule) {
     try {
       if (typeof chrome !== 'undefined' && chrome.storage?.local)
         await chrome.storage.local.set({ browseMode: mode });
+      if (mode === 'youtube' && root.dataset.ytgVirtualRoute === 'true') location.reload();
     } catch {
       if (!lifecycle.destroyed) { apply(previous); state.error = 'Could not save page mode. Try again.'; }
     } finally {
@@ -54,10 +55,8 @@ export function mountBrowseMode(runtime: Runtime, core: CoreModule) {
   } else apply('gamepad');
   function unavailable() {
     if (lifecycle.destroyed) return;
-    // Recover this tab without changing the user's saved interface preference.
-    ++revision;
-    apply('youtube');
-    state.error = 'Gamepad videos could not load. YouTube is available; switch Gamepad on to retry.';
+    // Data errors belong to the current surface, not to the saved page mode.
+    state.error = 'Videos could not load. Try again.';
   }
   return { state, change, unavailable, destroy: lifecycle.destroy };
 }

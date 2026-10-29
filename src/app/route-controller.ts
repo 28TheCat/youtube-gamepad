@@ -13,7 +13,11 @@ export let YTGamepadRouteController!: ModuleFactory<RoutePort,RouteControllerMod
     let started = false;
     function cancel() { send({ type: 'NAV_CANCEL', route: port.routeNow() }); port.renderMode(); }
     function finish() {
-      const previous = app(); send({ type: 'NAV_FINISH', route: port.routeNow() });
+      const previous = app();
+      if (previous.navigation && !previous.navigation.traversal && previous.settledRoute && previous.settledRoute !== port.routeNow()) {
+        try { port.history.replaceState({ ...port.history.state, ytGamepadParentRoute: previous.settledRoute }, ''); } catch { /* Keep navigation usable. */ }
+      }
+      send({ type: 'NAV_FINISH', route: port.routeNow() });
       if (previous.mode !== app().mode || previous.settledRoute !== app().settledRoute || previous.navigation) port.renderMode();
     }
     function prepareVideo(href: string | null) {
@@ -40,7 +44,10 @@ export let YTGamepadRouteController!: ModuleFactory<RoutePort,RouteControllerMod
       if (lifecycle.destroyed) return;
       const result = send({ type: 'PAGE_BACK', route: port.routeNow(), temporaryLayer: port.hasTemporaryLayer() });
       if (result.disposition === 'blocked') return;
-      port.renderMode(); result.effects.forEach(execute);
+      port.renderMode(); result.effects.forEach(effect => {
+        if (effect.type === 'assign' && typeof port.history.state?.ytGamepadParentRoute === 'string') port.history.back();
+        else execute(effect);
+      });
     }
     function start() {
       if (started || lifecycle.destroyed) return;

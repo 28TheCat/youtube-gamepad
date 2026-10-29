@@ -8,7 +8,7 @@
 
 `sites/youtube-account.ts` 通过页面登录会话发送只读 `account/accounts_list` 请求，使用 YouTube.js `account.getInfo(true)` 解析头像、名称、频道标识及账号列表。MAIN 仅缓存有界展示字段，不向 Vue 返回身份切换命令、Cookie 或私有 token；账号选择变化或退出登录使缓存失效，重复请求共用正在进行的加载。BrowseHeader 与 AccountPage 通过异步 pageAccess 读取快照，已移除原生头像读取、账号菜单扫描、MutationObserver 和模拟点击。账号页提供官方登录、Google 账号管理、YouTube 账号切换及设置页面入口；本阶段不直接执行身份切换。
 
-频道页对一次 API 响应只执行一次 YouTube.js 页面解析：库的 Tab 注册适配保留所有频道标签的元数据和 endpoint，仅解析选中标签的 content；卡片、分页、标签及排序复用同一份解析结果，新版筛选使用 `Channel(..., already_parsed=true)`。续页直接读取解析节点，不创建 Channel 或 Session；地址解析响应只解析 endpoint 节点。正常频道响应不再先运行旧卡片解析器，也不再重建仅含选中标签的第二个 Channel。已删除原始 JSON 卡片及分页回退；分类读取异常不丢弃已解析卡片。
+频道页对一次 API 响应只执行一次 YouTube.js 页面解析：库的 Tab 注册适配保留所有频道标签的元数据和 endpoint，仅解析选中标签的 content；卡片、分页、标签及排序复用同一份解析结果，新版筛选使用 `Channel(..., already_parsed=true)`。频道首屏及标签使用 getChannel，地址使用 resolveURL；续页从已保存 token 重建 ChannelListContinuation，使用当前请求的 Session 调用 getContinuation。排序部分响应经公开 call API 解析。正常频道响应不再先运行旧卡片解析器，也不再重建仅含选中标签的第二个 Channel。已删除原始 JSON 卡片及分页回退；分类读取异常不丢弃已解析卡片。
 
 `sites/youtube-watch-info.ts` 使用当前页面会话适配 YouTube.js 的视频详情、评价及订阅接口。点赞状态直接使用 VideoInfo，收藏列表直接读取 contents/actions 的 PlaylistAddToOption 解析节点；已删除两处原始 JSON 递归扫描。库 Menu 节点注册适配补齐旧版点赞按钮的解析白名单，按钮由库解析一次。MAIN 缓存当前路由的元数据与可操作状态，播放列表选择接口返回已有列表；列表的增删 endpoint 和私有参数仅留在 MAIN，Vue 只得到有界文本、选中状态和临时句柄。账号写入串行执行、超时取消且不自动重试，确认成功才更新状态；切换路由取消请求并丢弃陈旧响应。`page-client.ts` 对异步操作关联请求 ID，应用销毁会解除监听及计时器。收藏使用现有 Vue 面板和焦点状态机选择列表；视频播放、字幕、设置与布局继续操作原生播放器。
 

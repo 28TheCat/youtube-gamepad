@@ -10,12 +10,13 @@ const {playbackControlIds,defaultPlaybackControlIndex}=await importSettingsModel
 test('playback controls derive layout visibility and the default target from shared definitions',()=>{
  const full=playbackControlIds(true).map(id=>({id})),windowed=playbackControlIds(false).map(id=>({id}));
  assert.equal(full[defaultPlaybackControlIndex(full)].id,'playPause');
- assert.equal(windowed[defaultPlaybackControlIndex(windowed)].id,'fullscreen');
+ assert.equal(windowed[defaultPlaybackControlIndex(windowed)].id,'channel');
  assert.equal(full.some(item=>item.id==='fullscreen'),false);
+ assert.equal(windowed.some(item=>item.id==='fullscreen'),false);
  assert.equal(windowed.some(item=>['seekBack','playPause','seekForward'].includes(item.id)),false);
- const reordered=[{id:'like'},{id:'fullscreen'}];
+ const reordered=[{id:'like'},{id:'native:playPause'}];
  assert.equal(defaultPlaybackControlIndex(reordered),1);
- assert.equal(defaultPlaybackControlIndex([{id:'fullscreen',available:false},{id:'like'}]),1);
+ assert.equal(defaultPlaybackControlIndex([{id:'native:playPause',available:false},{id:'like'}]),1);
 });
 
 test('shared comments paginate cached replies before requesting more and retry failed replies',()=>{

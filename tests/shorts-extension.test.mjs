@@ -752,7 +752,7 @@ for (const mode of ['native', 'hidden-wrapper', 'display-none', 'fixed-wrapper']
         const backdrop = document.querySelector('#ytg-shorts-backdrop');
         backdrop.style.pointerEvents = 'auto';
         const rect = stage.getBoundingClientRect(), layers = document.elementsFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 3);
-        const result = { video: bounds(video), player: bounds(player), stage: bounds(stage), visibility: getComputedStyle(video).visibility,
+        const result = { video: bounds(video), player: bounds(player), stage: bounds(stage.querySelector('.stage-content')), visibility: getComputedStyle(video).visibility,
           videoLayer: layers.indexOf(video), backdropLayer: layers.indexOf(backdrop), decodedHeight: video.videoHeight };
         backdrop.style.removeProperty('pointer-events');
         return result;

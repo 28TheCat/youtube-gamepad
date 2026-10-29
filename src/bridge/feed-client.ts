@@ -1,6 +1,6 @@
 import { safeHomeFilterData } from '../shared/home-filter';
 import { PAGE_REQUEST, PAGE_RESPONSE } from './page-protocol';
-import { parseWatchLink, parseShortLink } from '../shared/watch-link';
+import { parseWatchLink, parseShortLink, parsePlaylistLink } from '../shared/watch-link';
 import type { FeedCategory } from '../sites/youtube-feed';
 import type { BrowseItem } from '../shared/browse-data';
 import { playlistColor } from '../shared/playlist-colors';
@@ -57,7 +57,7 @@ export function createFeedClient() {
         if (!message?.ok || !Array.isArray(message.value?.items)) { reject(new Error('无法加载分类视频，请重试。')); return; }
         const items: BrowseItem[] = message.value.items.slice(0, 500).filter((item: any) => {
           if (!item || typeof item !== 'object') return false;
-          const target = parseWatchLink(item.href) || parseShortLink(item.href);
+          const target = parseWatchLink(item.href) || parseShortLink(item.href) || (item.isPlaylist === true ? parsePlaylistLink(item.href) : null);
           if (!target || item.id !== target.id || item.href !== target.href || typeof item.title !== 'string' ||
             typeof item.channel !== 'string') return false;
           try { return new URL(item.thumbnail).protocol === 'https:'; } catch { return false; }
@@ -74,7 +74,7 @@ export function createFeedClient() {
           ...(typeof item.duration === 'string' ? { duration: item.duration.slice(0, 40) } : {}),
           ...(typeof item.watchedPercent === 'number' && Number.isFinite(item.watchedPercent) && item.watchedPercent > 0
             ? { watchedPercent: Math.min(100, item.watchedPercent) } : {}),
-          href: item.href, thumbnail: item.thumbnail, thumbnailFallback: `https://i.ytimg.com/vi/${(parseWatchLink(item.href) || parseShortLink(item.href))!.videoId}/hqdefault.jpg`,
+          href: item.href, thumbnail: item.thumbnail, thumbnailFallback: parsePlaylistLink(item.href) ? undefined : `https://i.ytimg.com/vi/${(parseWatchLink(item.href) || parseShortLink(item.href))!.videoId}/hqdefault.jpg`,
           ...(item.isPlaylist === true ? { isPlaylist: true,
             stackColorLight: playlistColor(item.stackColorLight), stackColorDark: playlistColor(item.stackColorDark) } : {}) };
         });

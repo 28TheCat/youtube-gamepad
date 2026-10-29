@@ -122,14 +122,14 @@ export function createBrowseFeedController({ store, feed, getRoute, isVisible, i
         const result = await feed.request(id, cursor);
         if (!isCurrent(version, route)) return;
         nextPage = result.nextPage && !visited.has(result.nextPage) ? result.nextPage : undefined;
-        const accept = createHomeFilter(getFilters(), getSubscriptions());
+        const accept = filtering(route) ? createHomeFilter(getFilters(), getSubscriptions()) : undefined;
         let added = 0;
         for (const item of result.items) {
-          if (!items.has(item.id) && (!filtering(route) || accept(item))) added++;
+          if (!items.has(item.id) && (!accept || accept(item))) added++;
           items.set(item.id, item);
         }
         feedSnapshot = { route, items: [...items.values()], canLoadMore: !!nextPage };
-        if (!filtering(route) || added > 0 || !nextPage) break;
+        if (!accept || added > 0 || !nextPage) break;
         cursor = nextPage; extra = true;
       }
       loadedAt = Date.now();
@@ -186,7 +186,8 @@ export function createBrowseFeedController({ store, feed, getRoute, isVisible, i
         if (saved.activeItemId) {
           const position = saved.snapshot.items.findIndex(item => item.id === saved.activeItemId);
           const candidates = [saved.snapshot.items[position], ...saved.snapshot.items.slice(position + 1), ...saved.snapshot.items.slice(0, position).reverse()];
-          const survivor = candidates.find(item => item && visible.items.some(next => next.id === item.id));
+          const visibleIds = new Set(visible.items.map(item => item.id));
+          const survivor = candidates.find(item => item && visibleIds.has(item.id));
           if (survivor) store.select(survivor.id);
         }
         cacheFeed();

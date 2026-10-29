@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript-vue';
+import { importSettingsModel } from './helpers/settings-model.mjs';
+const routes = await importSettingsModel('src/shared/explore-pages.ts');
 
 function fixture(invalidated = false, lateRoot = false, pathname = '/') {
   const attributes = new Map();
@@ -17,7 +19,7 @@ function fixture(invalidated = false, lateRoot = false, pathname = '/') {
   const source = ts.transpileModule(readFileSync(new URL('../src/app/early-start.ts', import.meta.url), 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
   }).outputText;
-  vm.runInNewContext(source, { exports, window, document, location: { pathname }, matchMedia: () => ({ matches: true }),
+  vm.runInNewContext(source, { exports, require(name) { assert.equal(name, '../shared/explore-pages'); return routes; }, window, document, location: { pathname }, matchMedia: () => ({ matches: true }),
     MutationObserver: class { constructor(callback) { this.callback = callback; } observe() { observed = this.callback; } disconnect() { observed = undefined; } },
     requestAnimationFrame: callback => { frame = callback; return 1; }, cancelAnimationFrame: () => { frame = undefined; },
     navigator: { getGamepads: () => [{ connected: true, mapping: 'standard' }] },
@@ -40,7 +42,7 @@ test('early startup settles privately after application readiness and preserves 
   f.window.dispatchEvent(new Event('ytg-main-failed'));
   assert.equal(f.attributes.has('data-ytg-boot'), true);
   f.exports.finishEarlyContent();
-  assert.equal(f.children.size, 1, 'keep native page hidden until queued view updates finish');
+  assert.equal(f.children.size, 0, 'startup does not cover the page');
   f.paint();
   assert.equal(f.attributes.size, 0);
   assert.equal(f.children.size, 0);
@@ -55,14 +57,12 @@ test('timeout clears preparation and late storage cannot recreate UI', async () 
   assert.equal(f.children.size, 0);
 });
 
-test('guard attaches when html arrives and hides body without changing layout', () => {
+test('startup attaches when html arrives without hiding the page', () => {
   const f = fixture(false, true);
   assert.equal(f.children.size, 0);
   f.attachRoot();
   assert.equal(f.attributes.get('data-ytg-boot'), 'starting');
-  const [style] = f.children;
-  assert.match(style.textContent, /html > body.*opacity: 0 !important/);
-  assert.match(style.textContent, /pointer-events: none !important/);
+  assert.equal(f.children.size, 0);
   f.exports.abortEarlyContent();
   assert.equal(f.children.size, 0);
 });
@@ -75,18 +75,10 @@ test('disabled extension reveals native page immediately', async () => {
   assert.equal(f.attributes.size, 0);
 });
 
-for (const pathname of ['/watch', '/shorts/first']) test(`startup on ${pathname} guards initial playback paint`, () => {
+for (const pathname of ['/watch', '/shorts/first']) test(`startup on ${pathname} leaves playback visible`, () => {
   const f = fixture(false, false, pathname);
-  const [style] = f.children;
   assert.equal(f.attributes.get('data-ytg-boot'), 'starting');
-  if (pathname.startsWith('/shorts/')) {
-    assert.match(style.textContent, /background: #fff !important/);
-    assert.match(style.textContent, /html\[dark\].*background: #0f0f0f !important/);
-    assert.match(style.textContent, /visibility: hidden !important/);
-  } else {
-    assert.match(style.textContent, /html > body.*visibility: hidden/);
-    assert.match(style.textContent, /#movie_player, #movie_player \*.*visibility: visible/, 'media stays visible while native details are hidden');
-  }
+  assert.equal(f.children.size, 0);
   f.exports.abortEarlyContent();
   assert.equal(f.children.size, 0);
 });
@@ -105,4 +97,13 @@ test('synchronous extension invalidation clears early startup without throwing',
   const f = fixture(true);
   assert.equal(f.attributes.size, 0);
   assert.equal(f.window[Symbol.for('yt-gamepad.early-start')], undefined);
+});
+
+
+test('native account flows do not install a startup cover', () => {
+  for (const route of ['/signin', '/channel_switcher', '/logout']) {
+    const f = fixture(false, false, route);
+    assert.equal(f.children.size, 0);
+    assert.equal(f.attributes.size, 0);
+  }
 });

@@ -94,18 +94,18 @@ export let YTGamepadStateMachine!: StateMachineModule;
         watch = { ...watch, adjusting: false, row, index: row === 'controls' ? watch.controlIndex : clamp(watch.recommendationIndex, event.count) }; break;
       }
       case 'WATCH_FOCUS':
-        if (event.region === 'panel') watch = { ...watch, panelIndex: event.index ?? watch.panelIndex };
-        else watch = { ...watch, adjusting: event.region === 'progress' && watch.row === 'progress' ? watch.adjusting : false, row: event.region, ...(event.index === undefined ? {} : { index: event.index }),
+        if (event.region === 'panel') watch = { ...watch, commentsParked: false, panelIndex: event.index ?? watch.panelIndex };
+        else watch = { ...watch, commentsParked: watch.panel === 'comments', adjusting: event.region === 'progress' && watch.row === 'progress' ? watch.adjusting : false, row: event.region, ...(event.index === undefined ? {} : { index: event.index }),
           ...(event.region === 'controls' && event.index !== undefined ? { controlIndex: event.index } : {}),
           ...(event.region === 'recommendations' && event.index !== undefined ? { recommendationIndex: event.index } : {}) };
         break;
-      case 'WATCH_PANEL': watch = { ...watch, panel: event.panel, panelIndex: 0 }; break;
+      case 'WATCH_PANEL': watch = { ...watch, panel: event.panel, commentsParked: false, panelIndex: 0 }; break;
       case 'WATCH_PANEL_COUNT': watch = { ...watch, panelIndex: Math.min(watch.panelIndex, event.count) }; break;
       case 'WATCH_EMPTY':
         if (watch.row === 'recommendations') watch = { ...watch, row: 'controls', index: watch.playIndex }; break;
       case 'WATCH_INPUT': {
         const action = event.action;
-        if (watch.panel) {
+        if (watch.panel && !watch.commentsParked) {
           if (action === 'back') { watch = { ...watch, panel: '' }; effect('closePanel'); }
           else if (action === 'confirm') effect('panelClick');
           else if (action === 'up' || action === 'down') {
@@ -125,12 +125,16 @@ export let YTGamepadStateMachine!: StateMachineModule;
           break;
         }
         if (event.windowed && ['up', 'down', 'left', 'right'].includes(action)) {
+          const playerControls = event.playerControls || [];
+          const inPlayerControls = playerControls.includes(watch.index);
+          const detailControls = (event.availableControls || []).filter(index => !playerControls.includes(index));
           if (watch.row === 'player') {
-            if (action === 'down') watch = { ...watch, row: 'metadata', index: 0 };
+            if (action === 'down') watch = event.canSeek ? { ...watch, row: 'progress', index: 0 }
+              : { ...watch, row: 'controls', index: watch.playIndex, controlIndex: watch.playIndex };
             else if (action === 'right' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
           } else if (watch.row === 'metadata') {
-            if (action === 'up') watch = { ...watch, row: 'player', index: 0 };
-            else if (action === 'down') watch = { ...watch, row: 'controls', index: event.availableControls?.[0] ?? 0, controlIndex: event.availableControls?.[0] ?? 0 };
+            if (action === 'up') watch = { ...watch, row: 'controls', index: watch.playIndex, controlIndex: watch.playIndex };
+            else if (action === 'down') watch = { ...watch, row: 'controls', index: detailControls[0] ?? 0, controlIndex: detailControls[0] ?? 0 };
             else if (action === 'right' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
           } else if (watch.row === 'recommendations') {
             if (action === 'left') watch = { ...watch, row: 'player', index: 0 };
@@ -139,11 +143,16 @@ export let YTGamepadStateMachine!: StateMachineModule;
             else if (action === 'down') effect('loadRecommendations');
           } else if (watch.row === 'progress') {
             if (action === 'up') watch = { ...watch, row: 'player', index: 0 };
-            else if (action === 'down') watch = { ...watch, row: 'controls', index: watch.controlIndex };
+            else if (action === 'down') watch = { ...watch, row: 'controls', index: playerControls.includes(watch.controlIndex) ? watch.controlIndex : watch.playIndex };
             else if (action === 'right' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
-          } else if (action === 'up') watch = { ...watch, row: 'metadata', index: 0 };
+          } else if (action === 'up') watch = event.canSeek && inPlayerControls
+            ? { ...watch, row: 'progress', index: 0 }
+            : inPlayerControls ? { ...watch, row: 'player', index: 0 } : { ...watch, row: 'metadata', index: 0 };
+          else if (action === 'down' && inPlayerControls) watch = { ...watch, row: 'metadata', index: 0 };
           else if (action === 'right' || action === 'left') {
-            const next = action === 'left' ? [...(event.availableControls || [])].reverse().find(i => i < watch.index) : event.availableControls?.find(i => i > watch.index);
+            const controls = inPlayerControls ? playerControls : detailControls;
+            const position = controls.indexOf(watch.index);
+            const next = controls[position + (action === 'left' ? -1 : 1)];
             if (next !== undefined) watch = { ...watch, index: next, controlIndex: next };
             else if (action === 'right' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
           }

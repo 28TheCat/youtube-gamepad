@@ -3,6 +3,28 @@ import { contentRoots, continuationToken, parseYouTubePage, parsedChips, walkPar
 import type { BrowseItem } from '../shared/browse-data';
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import { playlistColor } from '../shared/playlist-colors';
+import { parsePlaylistLink } from '../shared/watch-link';
+
+export function playlistDirectoryItems(page: ParsedPage): BrowseItem[] {
+  const items = new Map<string, BrowseItem>();
+  walkParsed(contentRoots(page), node => {
+    if (!['Playlist', 'GridPlaylist', 'CompactPlaylist', 'LockupView'].includes(node.type) ||
+      (node.type === 'LockupView' && node.content_type !== 'PLAYLIST')) return;
+    const id = node.id || node.content_id || node.endpoint?.payload?.playlistId;
+    if (typeof id !== 'string') return;
+    const target = parsePlaylistLink(`/playlist?list=${id}`);
+    const title = String(node.title || node.metadata?.title || '').trim();
+    if (!target || !title || title === '[object Object]') return;
+    const thumbnails = node.thumbnails || node.thumbnail || node.content_image?.primary_thumbnail?.image || node.content_image?.image || [];
+    let thumbnail = 'https://i.ytimg.com/img/no_thumbnail.jpg';
+    for (const image of [...thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0))) {
+      try { const url = new URL(image.url); if (url.protocol === 'https:') { thumbnail = url.href; break; } } catch { /* Try the next image. */ }
+    }
+    items.set(target.id, { ...target, title: title.slice(0, 2000), channel: String(node.author?.name || '').slice(0, 2000), thumbnail, isPlaylist: true });
+    return false;
+  });
+  return [...items.values()];
+}
 import { channelBadge } from './youtube-channel-badge';
 
 type Node = Record<string, any>;

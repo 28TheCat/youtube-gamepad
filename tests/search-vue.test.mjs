@@ -123,12 +123,26 @@ test('Vue search submits API destinations without native controls and bounds unt
   await menu.waitFor({ state: 'hidden' });
   assert.equal(await page.evaluate(() => document.documentElement.dataset.submittedSearch), 'Vue search');
   await open();
+  await menu.locator('#query').fill('');
   assert.equal(await menu.locator('#recent button').first().textContent(), '↶ Vue search');
   await page.evaluate(() => { document.querySelector('#search-icon-legacy').remove(); document.querySelector('input#search').remove(); });
   await menu.locator('#query').fill('without native controls');
   await menu.locator('#query').press('Enter');
   await menu.waitFor({ state: 'hidden' });
   assert.equal(await page.evaluate(() => document.documentElement.dataset.submittedSearch), 'without native controls');
+  await open();
+  await context.route('https://www.youtube.com/complete/search?**', route => route.fulfill({
+    contentType: 'text/javascript', body: 'window.google.ac.h(["pad",[["pad games",0,[512]]]])'
+  }));
+  await menu.locator('#query').fill('pad');
+  await menu.getByRole('button', { name: 'pad games', exact: true }).waitFor();
+  await setPad({ connected: true, button: 11 }); await page.waitForTimeout(100);
+  await setPad({ connected: true }); await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => document.querySelector('#yt-gamepad-menu').shadowRoot.activeElement?.dataset.focusId), 'suggestion:pad games');
+  await setPad({ connected: true, button: 0 });
+  await menu.waitFor({ state: 'hidden' });
+  await setPad({ connected: true }); await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.submittedSearch), 'pad games');
   await open();
   await menu.locator('#query').fill('x'.repeat(257));
   await menu.locator('#query').press('Enter');

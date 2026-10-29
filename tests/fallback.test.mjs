@@ -33,6 +33,7 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
     toggle(name, on) { on ? classes.add(name) : classes.delete(name); }
   };
   root.getAttribute = name => name === 'data-ytg-language' ? language : null;
+  root.style = { getPropertyValue: () => '', setProperty() {}, removeProperty() {} };
   const document = { documentElement: root, body: node(), createElement: node, addEventListener: listeners,
     querySelector(selector) {
       if (throwing) throw new Error('changed DOM');
@@ -42,6 +43,7 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
       return nodes.get(selector.slice(1)) || null;
     }, querySelectorAll: () => [] };
   const watch = { state: { panel: '', row: 'controls' }, ownsFocus: false, failRender: false,
+    feedback(text) { this.message = text; },
     connect(value) { port = value; },
     sync() {
       if (this.failRender) throw new Error('render failure');
@@ -54,6 +56,7 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
     YTGamepad: { registerSite(value) { config = value; }, configure() {}, refresh() {} } };
   const location = { pathname, search: pathname === '/watch' ? '?v=current' : '', origin: 'https://www.youtube.com' };
   const context = { window, document, location, URL, URLSearchParams, history: {}, Date: { now: () => now },
+    MutationObserver: class { observe() {} disconnect() {} },
     setInterval(fn) { tick = fn; }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, setTimeout: () => 1, clearTimeout() {},
     getComputedStyle: () => ({ display: 'block' }) };
   for (const file of ['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/sites/youtube.ts', 'src/app/coordinator.ts']) {
@@ -65,8 +68,8 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
     get status() { return window.YTGamepadCoordinator.adaptation.status; } };
 }
 
-test('rejected playback returns failure, preserves its cause and offers native recovery and retry', async () => {
-  const s = setup(), entries = [];
+test('rejected playback preserves controls and diagnostics and permits another play attempt', async () => {
+  const s = setup({ missing: '.ytp-play-button' }), entries = [];
   s.window.YTGamepadDiagnostics.record = (module, operation, error) => entries.push({ module, operation, error });
   const error = Object.assign(new Error('User activation is required'), { name: 'NotAllowedError' });
   let reject;
@@ -78,16 +81,11 @@ test('rejected playback returns failure, preserves its cause and offers native r
   reject(error);
   assert.equal(await result, false);
   assert.equal(s.video.paused, true);
-  assert.equal(s.status, 'fallback');
-  assert.equal(s.document.documentElement.dataset.ytgNative, 'true');
-  const notice = s.nodes.get('ytg-fallback-notice');
-  assert.equal(notice.hidden, false);
-  assert.match(notice.shadow.children[1].textContent, /Playback failed.*YouTube player.*try again/);
+  assert.equal(s.status, 'ready');
+  assert.equal(s.nodes.has('ytg-fallback-notice'), false);
+  assert.match(s.watch.message, /Press Play/);
   assert.equal(entries[0].operation, 'media.playPause');
   assert.equal(entries[0].error, error);
-  notice.shadow.children[2].click();
-  assert.equal(s.status, 'ready');
-  assert.equal(notice.hidden, true);
   s.video.play = () => { s.video.paused = false; return Promise.resolve(); };
   assert.equal(await s.port.request('media', 'playPause'), true);
   assert.equal(s.video.paused, false);
@@ -95,9 +93,9 @@ test('rejected playback returns failure, preserves its cause and offers native r
   assert.equal(s.video.paused, true);
 });
 
-test('controller playback and synchronous play exceptions share failure recovery', async () => {
+test('controller playback and synchronous play exceptions preserve the custom interface', async () => {
   for (const synchronous of [false, true]) {
-    const s = setup(); s.video.paused = true;
+    const s = setup({ missing: '.ytp-play-button' }); s.video.paused = true;
     s.video.play = () => {
       const error = new Error('Playback unavailable');
       if (synchronous) throw error;
@@ -105,13 +103,13 @@ test('controller playback and synchronous play exceptions share failure recovery
     };
     assert.equal(s.config.onAction('playPause', { scope: s.document }), synchronous ? 'pass' : 'handled');
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(s.status, 'fallback');
+    assert.equal(s.status, 'ready');
   }
 });
 
 test('late playback rejection cannot replace a new video or disabled interface', async () => {
   for (const disable of [false, true]) {
-    const s = setup(); let reject;
+    const s = setup({ missing: '.ytp-play-button' }); let reject;
     s.video.paused = true;
     s.video.play = () => new Promise((_, fail) => { reject = fail; });
     const result = s.port.request('media', 'playPause');
@@ -122,6 +120,60 @@ test('late playback rejection cannot replace a new video or disabled interface',
     assert.equal(s.status, disable ? 'inactive' : 'ready');
     assert.equal(s.nodes.has('ytg-fallback-notice'), false);
   }
+});
+
+test('seek and volume exceptions preserve playback and allow the next operation', () => {
+  for (const action of ['seek', 'seekForward', 'volumeUp']) {
+    const s = setup(), entries = [];
+    s.window.YTGamepadDiagnostics.record = (module, operation, error) => entries.push({ operation, error });
+    s.video.duration = 100;
+    const property = action === 'volumeUp' ? 'volume' : 'currentTime';
+    Object.defineProperty(s.video, property, { configurable: true, get: () => 0,
+      set() { throw new Error('Transient media failure'); } });
+    assert.equal(action === 'seek' ? s.port.request('seek', 20) : s.port.request('media', action), false);
+    assert.equal(s.status, 'ready');
+    assert.equal(s.nodes.has('ytg-fallback-notice'), false);
+    assert.ok(s.watch.message);
+    assert.ok(entries.some(entry => entry.error.message === 'Transient media failure'));
+    Object.defineProperty(s.video, property, { configurable: true, writable: true, value: 0 });
+    assert.equal(action === 'seek' ? s.port.request('seek', 20) : s.port.request('media', action), true);
+  }
+});
+
+test('auto-hide snapshot failure leaves the playback interface available', () => {
+  const s = setup(), entries = [];
+  s.document.fullscreenElement = s.document.documentElement;
+  s.window.YTGamepadDiagnostics.record = (module, operation) => entries.push(operation);
+  s.setThrowing(true);
+  assert.doesNotThrow(() => s.port.requestAutoHide(6000));
+  assert.ok(entries.includes('requestAutoHide'));
+  assert.equal(s.status, 'ready');
+  assert.equal(s.nodes.has('ytg-fallback-notice'), false);
+});
+
+test('metadata failure retains confirmed details once, resets on navigation and recovers', () => {
+  const s = setup(), entries = [];
+  s.window.YTGamepadDiagnostics.record = (module, operation, error) => entries.push({ operation, error });
+  s.player.getPlayerResponse = () => ({ videoDetails: { videoId: 'current', title: 'Confirmed title', author: 'Creator', channelId: 'channel', shortDescription: 'Description' } });
+  assert.equal(s.port.readWatchPage().title, 'Confirmed title');
+  const error = new Error('Details temporarily unavailable');
+  s.player.getPlayerResponse = () => { throw error; };
+  const retained = s.port.readWatchPage();
+  assert.equal(retained.title, 'Confirmed title');
+  assert.equal(retained.description, 'Description');
+  assert.equal(retained.metadataFailed, true);
+  assert.equal(s.port.readWatchFeatures().metadata, 'failed');
+  assert.equal(entries.filter(entry => entry.error === error).length, 1, 'one metadata boundary records the failure');
+  s.location.search = '?v=next';
+  const cleared = s.port.readWatchPage();
+  assert.equal(cleared.title, '');
+  assert.equal(cleared.description, '');
+  assert.equal(cleared.metadataFailed, true);
+  s.player.getPlayerResponse = () => ({ videoDetails: { videoId: 'next', title: 'New title', author: 'New creator' } });
+  const recovered = s.port.readWatchPage();
+  assert.equal(recovered.title, 'New title');
+  assert.equal(recovered.metadataFailed, false);
+  assert.equal(s.port.readWatchFeatures().metadata, 'available');
 });
 
 test('keyboard and mouse UI survives controller disconnect and respects the saved off switch', () => {
@@ -162,12 +214,12 @@ test('missing player keeps the gamepad layout through loading and timeout', () =
   assert.equal(s.status, 'waiting'); assert.equal(s.port.state.mode, 'browse');
   assert.equal(s.classes.has('ytg-playback'), false); assert.equal(s.classes.has('ytg-watch-active'), false);
   assert.equal(s.document.documentElement.dataset.ytgNative, 'true');
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, false);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.classes.has('ytg-watch-layout'), true);
   s.advance(4999); assert.equal(s.status, 'waiting');
   s.advance(1); assert.equal(s.status, 'fallback');
   assert.equal(s.classes.has('ytg-watch-layout'), true);
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   const notice = s.nodes.get('ytg-fallback-notice');
   assert.equal(notice.hidden, false); assert.match(notice.shadow.children[1].textContent, /Missing: player/);
 });
@@ -188,13 +240,13 @@ test('failed adaptation explains the missing capability in Chinese and clears af
 test('normal async loading takes over only once all essential capabilities arrive', () => {
   const s = setup({ missing: 'video' }); s.advance(2000);
   assert.equal(s.status, 'waiting');
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, false);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   s.setMissing(''); s.advance(500);
   assert.equal(s.status, 'ready'); assert.equal(s.classes.has('ytg-playback'), true);
   assert.equal(s.classes.has('ytg-watch-active'), true);
   assert.equal(s.document.documentElement.dataset.ytgNative, undefined);
   assert.equal(s.video.paused, false);
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
 });
 
 test('watch health polling stops on browse pages, background tabs and disable, then resumes when needed', () => {
@@ -211,80 +263,80 @@ test('watch health polling stops on browse pages, background tabs and disable, t
   assert.equal(polling(), false);
 });
 
-test('controller confirmation shows status and gives the watch player immediate layout before readiness', () => {
+test('controller confirmation primes the watch layout without a loading banner', () => {
   const s = setup({ pathname: '/' });
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next'), true);
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, false);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.classes.has('ytg-watch-layout'), false, 'browse list keeps its own layout');
   assert.equal(s.classes.has('ytg-player-primed'), true, 'late native player is positioned before the watch URL arrives');
   s.location.pathname = '/watch'; s.location.search = '?v=next';
   s.advance(500);
   assert.equal(s.classes.has('ytg-watch-layout'), true);
   assert.equal(s.status, 'waiting', 'the previous player cannot authorize the destination without its identity and picture');
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, false);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   s.setMissing('video'); s.event('yt-navigate-finish');
   assert.equal(s.status, 'waiting');
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, false);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   s.setMissing(''); s.advance(500);
   assert.equal(s.status, 'ready');
   assert.equal(s.classes.has('ytg-watch-active'), true);
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.classes.has('ytg-watch-layout'), true, 'readiness preserves the watch layout');
 });
 
-test('switching recommendations keeps loading status until the video identity updates', () => {
+test('switching recommendations waits for video identity without a loading banner', () => {
   const s = setup();
   s.player.getPlayerResponse = () => ({ videoDetails: { videoId: 'current' } });
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
   s.location.search = '?v=next'; s.event('yt-navigate-finish');
   assert.equal(s.status, 'waiting');
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, false);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   s.player.getPlayerResponse = () => ({ videoDetails: { videoId: 'next' } });
   s.advance(500);
   assert.equal(s.status, 'ready');
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
 });
 
-test('destination picture clears loading status before navigation finishes without unlocking input', () => {
+test('destination picture becomes ready before navigation finishes without unlocking input', () => {
   const s = setup();
   let videoId = 'current';
   s.player.getPlayerResponse = () => ({ videoDetails: { videoId } });
   s.video.tagName = 'VIDEO'; s.video.readyState = 3; s.video.videoWidth = 1280;
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, false);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   s.location.search = '?v=next';
   s.event('playing', { target: s.video });
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, false, 'status remains while player identity is stale');
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   videoId = 'next'; s.video.readyState = 1; s.video.videoWidth = 0;
   s.event('canplay', { target: s.video });
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, false, 'metadata alone does not authorize custom controls');
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   s.video.readyState = 3; s.video.videoWidth = 1280;
   s.event('playing', { target: s.video });
   assert.equal(s.status, 'ready');
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.classes.has('ytg-watch-active'), true);
   assert.equal(s.window.YTGamepadCoordinator.navigating, true);
   assert.equal(s.window.YTGamepadCoordinator.request('media', 'pause'), false);
   assert.equal(s.video.paused, false);
   s.event('yt-navigate-finish');
   assert.equal(s.window.YTGamepadCoordinator.navigating, false);
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
 });
 
-test('canceling controller navigation or disabling controls clears TV loading', () => {
+test('canceling controller navigation or disabling controls clears the primed layout', () => {
   const s = setup({ pathname: '/' });
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
   s.event('yt-navigate-cancel');
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.classes.has('ytg-player-primed'), false);
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
   s.event('yt-navigate-finish');
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, true, 'a finish on the unchanged route clears the transition');
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.classes.has('ytg-player-primed'), false);
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
   s.event('yt-gamepad-local-settings', { detail: { enabled: false } });
-  assert.equal(s.nodes.get('ytg-watch-loading').hidden, true);
+  assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.classes.has('ytg-player-primed'), false);
 });
 

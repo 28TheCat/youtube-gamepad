@@ -1,9 +1,11 @@
+import { nativeControlId, nativeControlTargetId } from '../sites/native-player-controls';
 import type { Action, FocusTarget, InteractionEvent, Mode, PlaybackSnapshot, RecommendationSnapshot, Scope, SharedDependencies, WatchPanels, WatchPanelsPort, WatchPageSnapshot, WatchPort, WatchSnapshot, WatchView, WatchViewDependencies } from '../../types/ports';
 import type { PlaybackFeedback } from './playback-presentation';
 import { recommendationFocusIds, sameRecommendations } from './playback-presentation';
 import { ui } from './ui-api';
 import { playbackControlIds } from './playback-control-config';
 import { createStickScroller } from '../navigation/stick-scroll';
+import { YTGamepadBindings } from '../input/bindings';
 
 export interface WatchTarget {
   id: string;
@@ -16,6 +18,7 @@ export interface WatchSurfaceSnapshot {
   canSeek: boolean;
   player?: WatchTarget;
   metadata?: WatchTarget;
+  tabs?: readonly WatchTarget[];
   controls: readonly WatchTarget[];
   recommendations: readonly WatchTarget[];
   panel: readonly WatchTarget[];
@@ -41,7 +44,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
   const { controllerStyle, focusManager } = dependencies;
   const view = dependencies.createView({ activate: callbacks.activate, seek: callbacks.seek,
     closePanel: () => { if (!panels.back()) panels.close(); }, controllerStyle });
-  const { host, root, surface, progress, controls, dialog, sheet, close, status, presentation } = view;
+  const { host, root, surface, dialog, sheet, close, status, presentation } = view;
   let destroyed = false, descriptionText = '', feedbackAction = '', canSeek = false;
   let recommendations: readonly RecommendationSnapshot[] = [];
   let recommendationTargetsCache: readonly WatchTarget[] = [];
@@ -65,10 +68,18 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
   const controlNodes = () => {
     const fullscreen = document.documentElement.dataset.ytgPlaybackLayout === 'fullscreen';
     const visible = playbackControlIds(fullscreen);
-    return controls.filter(node => visible.includes(node.dataset.action || ''));
+    return view.controls.filter(node => visible.includes(node.dataset.action || ''));
   };
-  const controlTargets = () => controlNodes().map((node, index) => ({ id: node.dataset.action || '', region: 'controls',
-        itemKey: node.dataset.action || String(index), index, available: available(node) }));
+  const nativeControls = () => document.documentElement.dataset.ytgPlaybackLayout === 'windowed'
+    ? callbacks.controller()?.nativePlayer?.read() || [] : [];
+  const controlTargets = (): WatchTarget[] => {
+    const native = nativeControls();
+    const nativeOwned = document.documentElement.dataset.ytgPlaybackLayout === 'windowed';
+    if (host.dataset.nativePlayer !== String(nativeOwned)) host.dataset.nativePlayer = String(nativeOwned);
+    const targets = controlNodes().map((node, index) => ({ id: node.dataset.action || '', region: 'controls',
+      itemKey: node.dataset.action || String(index), index, available: available(node) }));
+    return [...targets, ...native.filter(item => item.id !== 'progress').map((item, index) => ({ id: nativeControlTargetId(item.id), region: 'controls', itemKey: nativeControlTargetId(item.id), index: targets.length + index, available: true }))];
+  };
   const panelNodes = () => callbacks.state().panel && callbacks.state().panel !== 'description' ? [close, ...panels.buttons] : [close];
   const panelTargets = () => panelNodes().map((node, index) => ({ id: node.dataset.focusId || 'panel:close',
     region: 'panel', itemKey: node.dataset.focusId || String(index), index, available: available(node) }));
@@ -79,9 +90,11 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     return target ? [target] : [];
   }).map((item, index) => ({ ...item, index }));
   function snapshot(): WatchSurfaceSnapshot {
-    return { canSeek, metadata: view.metadata ? { id: 'metadata', region: 'metadata', itemKey: 'metadata', index: 0, available: document.documentElement.dataset.ytgPlaybackLayout !== 'fullscreen' } : undefined, player: view.player ? { id: 'player', region: 'player', itemKey: 'player', index: 0, available: document.documentElement.dataset.ytgPlaybackLayout !== 'fullscreen' } : undefined, controls: controlTargets(), recommendations: recommendationTargets(), panel: panelTargets() };
+    const controls = controlTargets();
+    const seekAvailable = canSeek && (host.dataset.nativePlayer !== 'true' || nativeControls().some(item => item.id === 'progress'));
+    return { canSeek: seekAvailable, tabs: (view.tabs || []).map((node, index) => ({ id: 'tab:' + index, region: 'tabs', itemKey: 'tab:' + index, index, available: available(node) })), metadata: view.metadata ? { id: 'metadata', region: 'metadata', itemKey: 'metadata', index: 0, available: document.documentElement.dataset.ytgPlaybackLayout !== 'fullscreen' } : undefined, player: view.player ? { id: 'player', region: 'player', itemKey: 'player', index: 0, available: document.documentElement.dataset.ytgPlaybackLayout !== 'fullscreen' } : undefined, controls, recommendations: recommendationTargets(), panel: panelTargets() };
   }
-  function nodes(region: string) { return region === 'metadata' ? view.metadata ? [view.metadata] : [] : region === 'player' ? view.player ? [view.player] : [] : region === 'recommendations' ? cards() : region === 'progress' ? [progress] : region === 'panel' ? panelNodes() : controlNodes(); }
+  function nodes(region: string) { return region === 'tabs' ? [...view.tabs || []] : region === 'metadata' ? view.metadata ? [view.metadata] : [] : region === 'player' ? view.player ? [view.player] : [] : region === 'recommendations' ? cards() : region === 'progress' ? view.progress ? [view.progress] : [] : region === 'panel' ? panelNodes() : controlNodes(); }
   function animate(node: HTMLElement, frames: Keyframe[], duration: number, id = 'ytg-feedback') {
     if (!node.animate || !window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) return;
     node.getAnimations().filter(animation => animation.id === id).forEach(animation => animation.cancel());
@@ -95,37 +108,51 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     const node = event.target as HTMLElement;
     const observations = snapshot();
     let target: WatchTarget | undefined;
-    if (node === view.metadata) target = observations.metadata;
+    if (view.tabs?.includes(node as HTMLButtonElement)) target = observations.tabs?.[view.tabs.indexOf(node as HTMLButtonElement)];
+    else if (node === view.metadata) target = observations.metadata;
     else if (node === view.player) target = observations.player;
-    else if (controls.includes(node as HTMLButtonElement)) target = observations.controls.find(target => target.id === node.dataset.action);
+    else if (view.controls.includes(node as HTMLButtonElement)) target = observations.controls.find(target => target.id === node.dataset.action);
     else if (cards().includes(node as HTMLButtonElement)) target = observations.recommendations[cards().indexOf(node as HTMLButtonElement)];
     else if (panelNodes().includes(node)) target = observations.panel[panelNodes().indexOf(node)];
-    else if (node === progress) target = { id: 'progress', region: 'progress', itemKey: 'progress', index: 0, available: true };
+    else if (node === view.progress) target = { id: 'progress', region: 'progress', itemKey: 'progress', index: 0, available: true };
     if (target) callbacks.send({ type: 'WATCH_FOCUS', region: target.region as WatchSnapshot['row'] | 'panel', index: target.index });
   });
   lifecycle.listen(root, 'click', event => event.stopPropagation());
   lifecycle.listen(root, 'keydown', event => {
-    if ((event.target as HTMLElement).closest?.('textarea,input') && event.key !== 'Escape' && event.key !== 'Tab') return;
+    if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
+    if ((event.target as HTMLElement).closest?.('textarea,input,select,[role="textbox"],[contenteditable]:not([contenteditable="false"])') && event.key !== 'Escape' && event.key !== 'Tab') return;
     event.stopPropagation();
-    const action = ({ ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Escape: 'back' } as Record<string, Action>)[event.key];
-    if (action) { event.preventDefault(); callbacks.input(action); }
-    if (event.key === 'Tab') { event.preventDefault(); callbacks.input(callbacks.state().panel && callbacks.state().panel !== 'description' ? (event.shiftKey ? 'up' : 'down') : (event.shiftKey ? 'left' : 'right')); }
+    const action = YTGamepadBindings.keyboardActions[event.key] as Action | undefined;
+    if (action) { event.preventDefault(); if (!event.repeat || ['up', 'down', 'left', 'right'].includes(action)) callbacks.input(action); }
+    if (event.key === 'Tab') { event.preventDefault(); callbacks.input(surface.classList.contains('fullscreen-collection-open') || callbacks.state().panel && callbacks.state().panel !== 'description' ? (event.shiftKey ? 'up' : 'down') : (event.shiftKey ? 'left' : 'right')); }
   });
   for (const type of ['keydown', 'keyup'] as const) lifecycle.listen(window, type, event => {
     if (host.hidden || !callbacks.controller()?.state.enabled || !event.composedPath?.().includes(host) || ![' ', 'Spacebar', 'Enter'].includes(event.key)) return;
-    if ((event.composedPath?.()[0] as HTMLElement | undefined)?.closest?.('textarea,input')) return;
+    if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
+    if ((event.composedPath?.()[0] as HTMLElement | undefined)?.closest?.('textarea,input,select,[role="textbox"],[contenteditable]:not([contenteditable="false"])')) return;
     event.preventDefault(); event.stopImmediatePropagation();
-    if (type === 'keydown' && !event.repeat) callbacks.input('confirm');
+    if (type === 'keydown' && !event.repeat) callbacks.input(event.key === 'Enter' ? 'confirm' : 'playPause');
   }, true);
+  lifecycle.listen(root, 'scroll', () => callbacks.activity(), true);
   return {
     snapshot,
+    toggleFullCollection() { return view.toggleFullCollection?.() || false; },
+    closeFullCollection() { return view.closeFullCollection?.() || false; },
+    get fullCollectionOpen() { return view.surface.classList.contains('fullscreen-collection-open'); },
+    activeTab() { return Math.max(0, (view.tabs || []).findIndex(node => node.getAttribute('aria-selected') === 'true')); },
+    activateTab(index: number) { view.tabs?.[index]?.click(); },
+    sideIndex() { return view.sideIndex?.() ?? 0; },
+    restoreSideScroll() { view.restoreSideScroll?.(); },
+    readSideScroll() { return callbacks.state().panel && !callbacks.state().commentsParked ? sheet.scrollTop : view.recommendations.scrollTop; },
+    setSideScroll(top: number) { if (callbacks.state().panel && !callbacks.state().commentsParked) sheet.scrollTop = top; else view.recommendations.scrollTop = top; },
     scroll(delta: number) {
       if (!delta || destroyed || host.hidden) { stickScroller.stop(); return; }
-      const target = callbacks.state().panel ? sheet : view.recommendations;
+      const target = callbacks.state().panel && !callbacks.state().commentsParked ? sheet : view.recommendations;
       callbacks.activity();
       stickScroller.scroll(delta, host, target);
     },
     get visible() { return !destroyed && !host.hidden; },
+    hold(value: boolean) { surface.inert = value; dialog.inert = value; },
     sync(active: boolean, mode: Mode) {
       if (destroyed) return;
       document.documentElement.classList.toggle('ytg-watch-active', active);
@@ -150,25 +177,32 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     },
     focus(target: WatchTarget | undefined, adjusting: boolean, mode: Mode) {
       if (destroyed) return;
-      const state = callbacks.state();
+      const state = callbacks.state(), panel = !!state.panel && !state.commentsParked;
       view.updateHint(state.row, adjusting, canSeek);
       surface.classList.toggle('browsing', state.row === 'recommendations');
       document.documentElement.classList.toggle('ytg-recommendations', state.row === 'recommendations' && mode === 'controls');
       [close, ...panels.buttons].forEach(node => node.classList.remove('selected'));
-      presentation.selection(state.row, state.panel ? '' : target?.id || '', adjusting);
+      presentation.selection(state.row, panel ? '' : target?.id || '', adjusting);
       if (!target) return;
+      if (nativeControlId(target.id) !== undefined || target.region === 'progress' && nativeControls().some(item => item.id === 'progress')) {
+        callbacks.controller().nativePlayer?.focus(target.region === 'progress' ? 'progress' : nativeControlId(target.id)!);
+        return;
+      }
+      callbacks.controller().nativePlayer?.clear();
       // Resolve after rendering: Vue may have replaced the focused element.
       const candidates = nodes(target.region);
       const matches = (node: HTMLElement) => target.region === 'recommendations' ? node.dataset.focusId === target.id || (!node.dataset.focusId && node.dataset.videoId === target.itemKey)
         : target.region === 'controls' ? node.dataset.action === target.id
         : target.region === 'player' ? node === view.player
         : target.region === 'metadata' ? node === view.metadata
-        : target.region === 'progress' ? node === progress
+        : target.region === 'tabs' ? node === view.tabs?.[target.index]
+        : target.region === 'progress' ? node === view.progress
         : target.id === 'panel:close' ? node === close : node.dataset.focusId === target.id;
       const node = candidates[target.index] && matches(candidates[target.index]) ? candidates[target.index] : candidates.find(matches);
       if (!node || !available(node)) return;
-      if (state.panel) node.classList.add('selected');
+      if (panel) node.classList.add('selected');
       node.focus({ preventScroll: true });
+      if (target.region === 'tabs') node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
       if (target.region === 'controls') {
         const toolbar = node.closest<HTMLElement>('.toolbar');
         if (toolbar && toolbar.scrollWidth > toolbar.clientWidth) {
@@ -179,17 +213,24 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
           if (delta) toolbar.scrollBy({ left: delta, behavior: 'instant' });
         }
       }
-      if (target.region === 'recommendations' || (state.panel && state.panel !== 'description')) node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      if (target.region === 'recommendations' || (panel && state.panel !== 'description')) node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
     },
     items(region: string): FocusTarget[] {
-      const data = region === 'player' || region === 'metadata' ? [snapshot()[region]].filter((target): target is WatchTarget => !!target) : region === 'recommendations' ? recommendationTargets() : region === 'progress' ? [{ id: 'progress', region, itemKey: 'progress', index: 0, available: canSeek }] : region === 'panel' ? panelTargets() : controlTargets();
+      const data = region === 'tabs' ? snapshot().tabs || [] : region === 'player' || region === 'metadata' ? [snapshot()[region]].filter((target): target is WatchTarget => !!target) : region === 'recommendations' ? recommendationTargets() : region === 'progress' ? [{ id: 'progress', region, itemKey: 'progress', index: 0, available: canSeek }] : region === 'panel' ? panelTargets() : controlTargets();
       const elements = nodes(region);
-      return data.filter(target => target.available && elements[target.index]?.isConnected && available(elements[target.index])).map(({ region, itemKey, index }) => ({ region, itemKey, index }));
+      return data.filter(target => {
+        if (!target.available) return false;
+        if (nativeControlId(target.id) !== undefined) return true;
+        if (target.region === 'progress' && host.dataset.nativePlayer === 'true') return snapshot().canSeek;
+        const node = target.region === 'controls' ? elements.find(node => node.dataset.action === target.id) : elements[target.index];
+        return !!node?.isConnected && available(node);
+      })
+        .map(({ region, itemKey, index }) => ({ region, itemKey, index }));
     },
     capture(region: string, index: number): FocusTarget {
-      return { ...this.items(region).find(item => item.index === index), region, index, scope: callbacks.state().panel ? dialog : undefined };
+      return { ...this.items(region).find(item => item.index === index), region, index, scope: callbacks.state().panel && !callbacks.state().commentsParked ? dialog : undefined };
     },
-    press(id: string) { const node = controls.find(node => node.dataset.action === id); if (node) animate(node, [{ scale: '.95', offset: 0 }], 100, 'ytg-press'); },
+    press(id: string) { const node = view.controls.find(node => node.dataset.action === id); if (node) animate(node, [{ scale: '.95', offset: 0 }], 100, 'ytg-press'); },
     feedback(value: PlaybackFeedback | null, action = '') {
       if (destroyed) return;
       if (action === 'playPause' && document.documentElement.dataset.ytgInputMode === 'mouse') {
@@ -215,7 +256,6 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
         return (action === 'down' && delta > 1 || action === 'up' && delta < -1) ? Math.max(-180, Math.min(180, delta)) : 0;
       }
     },
-    cycleTab(direction: number) { return view.cycleTab?.(direction) || false; },
     reset() { panels.hide(); canSeek = false; recommendations = []; recommendationTargetsCache = []; recommendationTargetMap.clear(); presentation.reset(); },
     destroy() {
       if (destroyed) return; destroyed = true;

@@ -49,8 +49,10 @@ export function parseViewCount(text: string): number | undefined {
   return Number.isFinite(number) && number >= 0 ? number * factor : undefined;
 }
 export function parseDuration(text: string): number | undefined {
-  if (!/^\d+(?::\d{2}){1,2}$/.test(text) || text.split(':').slice(1).some(part => Number(part) >= 60)) return;
-  return text.split(':').reduce((seconds, part) => seconds * 60 + Number(part), 0);
+  if (!/^\d+(?::\d{2}){1,2}$/.test(text)) return;
+  const parts = text.split(':').map(Number);
+  if (parts.slice(1).some(part => part >= 60)) return;
+  return parts.reduce((seconds, part) => seconds * 60 + part, 0);
 }
 /** Relative labels are rounded; use their youngest plausible age. */
 export function parsePublishedAt(text: string, now = Date.now()): number | undefined {
@@ -61,8 +63,6 @@ export function parsePublishedAt(text: string, now = Date.now()): number | undef
   const units: Record<string, number> = { second: 1000, minute: 60000, hour: 3600000, day: 86400000, week: 604800000, month: 2419200000, year: 31536000000, '秒': 1000, '分钟': 60000, '分鐘': 60000, '小时': 3600000, '小時': 3600000, '天': 86400000, '周': 604800000, '週': 604800000, '个月': 2419200000, '個月': 2419200000, '年': 31536000000 };
   const found = match || chinese;
   if (found) return Math.max(0, now - Number(found[1]) * units[found[2].toLowerCase()]);
-  // Unrecognised/localised labels remain unknown.
-  return;
 }
 export function createHomeFilter(values: HomeFilterSettings, subscriptions: ReadonlySet<string> = new Set(), now = Date.now()) {
   return (item: BrowseItem) => {

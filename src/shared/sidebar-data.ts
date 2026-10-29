@@ -1,7 +1,7 @@
 import { explorePages } from './explore-pages';
 
 export interface SidebarEntry { id: string; label: string; href: string; icon: string }
-export interface SubscribedChannel { id: string; label: string; href: string; avatar?: string }
+export interface SubscribedChannel { id: string; label: string; href: string; avatar?: string; isLive?: boolean; hasNewContent?: boolean }
 export interface SidebarSnapshot { subscribedChannelIds?: string[]; subscriptions?: SubscribedChannel[]; personal: SidebarEntry[]; explore: SidebarEntry[] }
 export const personalSidebar: readonly SidebarEntry[] = [
   { id: 'history', label: '历史记录', href: '/feed/history', icon: 'history' },
@@ -53,7 +53,9 @@ export function sidebarSnapshot(raw: unknown): SidebarSnapshot | undefined {
         if (url.protocol === 'https:' && !url.username && !url.password) avatar = url.href;
       }
     } catch { /* Keep the channel's initial when no valid avatar is available. */ }
-    return [{ id: item.id, label: item.label.slice(0, 200), href: `/channel/${item.id}/videos`, ...(avatar ? { avatar } : {}) }];
+    return [{ id: item.id, label: item.label.slice(0, 200), href: `/channel/${item.id}/videos`, ...(avatar ? { avatar } : {}),
+      ...(typeof item.isLive === 'boolean' ? { isLive: item.isLive } : {}),
+      ...(typeof item.hasNewContent === 'boolean' ? { hasNewContent: item.hasNewContent } : {}) }];
   }) : [];
   return { personal: entries(value.personal), explore: entries(value.explore), ...(ids.length ? { subscribedChannelIds: ids } : {}),
     ...(subscriptions.length ? { subscriptions } : {}) };

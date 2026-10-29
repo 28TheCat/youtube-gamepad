@@ -47,15 +47,32 @@ test('Shorts details maximize the real media ratio and place desktop identity be
     }, { mediaWidth, mediaHeight, dark });
     await page.waitForFunction(ratio => Math.abs(Number(document.documentElement.style.getPropertyValue('--ytg-shorts-ratio')) - ratio) < .001, mediaWidth / mediaHeight);
     const stage = await controls.locator('.stage').boundingBox(), video = await page.locator('video').boundingBox();
-    assert.ok(Math.abs(stage.width / stage.height - mediaWidth / mediaHeight) < .01);
-    assert.ok(stage.x >= 0 && stage.x + stage.width <= width && stage.y >= 0 && stage.y + stage.height <= height);
+    const content = await controls.locator('.stage-content').boundingBox();
+    assert.ok(Math.abs(content.width / content.height - mediaWidth / mediaHeight) < .01);
+    assert.ok(stage.x >= 0 && stage.x + stage.width <= width && stage.y >= 0 && stage.height > 0);
     assert.ok(Math.abs(stage.width - video.width) < 1 && Math.abs(stage.x - video.x) < 1);
+    assert.ok(Math.abs(content.height - video.height) < 1);
     assert.equal(await original.evaluate(node => node === document.querySelector('#shorts-player')), true);
     if (width === 1692) {
       const metadata = await controls.locator('.metadata').boundingBox();
       assert.ok(metadata.x + metadata.width < stage.x, 'identity stays left of the desktop video');
       assert.ok(stage.height >= height - 25, 'media uses the available window height');
-      if (mediaWidth === mediaHeight) assert.ok(stage.width > 750, 'square Shorts are not squeezed into a portrait frame');
+      assert.ok(stage.width > 1000, 'desktop playback grows beyond the former 880px cap');
+      if (mediaHeight > mediaWidth) {
+        assert.ok(stage.height > height && Math.abs(stage.height - content.height) < 1, 'the visible stage itself grows beyond the window instead of clipping an inner scroll area');
+        await controls.evaluate(node => { node.scrollTop = 0; });
+        await page.mouse.move(stage.x + stage.width / 2, stage.y + 100);
+        await page.mouse.wheel(0, 400);
+        await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').scrollTop > 100);
+        assert.match(page.url(), /\/shorts\/first$/, 'scrolling over tall media does not switch videos');
+        const scrolled = await page.locator('video').boundingBox();
+        assert.ok(scrolled.y < video.y - 100, 'the resident media follows the scroll');
+        await controls.evaluate(node => { node.scrollTop = node.scrollHeight; });
+        await controls.locator('.timeline').waitFor({ state: 'visible' });
+        const timeline = await controls.locator('.timeline').boundingBox();
+        assert.ok(timeline.y + timeline.height <= height, 'the progress bar remains reachable');
+        await controls.evaluate(node => { node.scrollTop = 0; });
+      }
       assert.equal(await controls.locator('.subscribe').textContent(), 'Subscribe');
       await page.screenshot({ path: `output/playwright/shorts-details-${dark ? 'dark' : 'light'}.png` });
     }

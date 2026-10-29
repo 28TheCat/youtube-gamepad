@@ -107,8 +107,13 @@ test('like/dislike and subscription toggle only after confirmed writes', async (
   assert.equal(await s.service.act('subscribe'), true);
   assert.equal(s.service.read().subscribed, true);
   assert.deepEqual(Array.from(s.calls.at(-1).body.channelIds), ['UCcreator']);
+  const writes = s.calls.length;
   assert.equal(await s.service.act('subscribe'), true);
+  assert.equal(s.service.read().subscribed, true);
+  assert.equal(s.calls.length, writes, 'repeated subscribe must not send an unsubscribe');
+  assert.equal(await s.service.act('unsubscribe'), true);
   assert.equal(s.service.read().subscribed, false);
+  assert.ok(s.calls.at(-1).url.endsWith('/subscription/unsubscribe'));
   s.service.destroy();
 });
 test('save offers editable playlists and toggles the chosen list through private endpoints', async () => {
@@ -243,5 +248,20 @@ test('failed notification update preserves the previous preference', async () =>
   assert.equal(await s.service.act('notificationsAll'), false);
   assert.equal(s.service.read().notificationPreference, 'NONE');
   assert.equal(s.service.read().subscribed, true);
+  s.service.destroy();
+});
+
+
+test('player API rejection does not block subscribing to the channel identified by next', async () => {
+  const s = fixture({ handler: url => url.endsWith('/player') ? { playabilityStatus: { status: 'LOGIN_REQUIRED', reason: 'Player verification required' } } : undefined });
+  const info = await ready(s);
+  assert.equal(info.details.videoId, 'first');
+  assert.equal(info.details.channelId, 'UCcreator');
+  assert.equal(info.canSubscribe, true);
+  assert.equal(info.canLike, false, 'unknown rating state is not guessed');
+  assert.equal(await s.service.act('subscribe'), true);
+  assert.equal(s.service.read().subscribed, true);
+  assert.ok(s.calls.at(-1).url.endsWith('/subscription/subscribe'));
+  assert.equal(s.calls.filter(call => call.url.endsWith('/next')).length, 1);
   s.service.destroy();
 });

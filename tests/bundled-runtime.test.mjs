@@ -71,8 +71,8 @@ for (const mode of ['late', 'missing', 'cancelled', 'settings']) {
       value:()=>[{index:0,mapping:'standard',connected:true,axes:[0,0],buttons:Array.from({length:17},()=>({pressed:false,value:0}))}], configurable:true
     })`);
     await isolated(bundleSource('bundles/early.js'));
-    assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).opacity), mode === 'missing' ? '1' : '0');
-    assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).pointerEvents), mode === 'missing' ? 'auto' : 'none');
+    assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).opacity), '1');
+    assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).pointerEvents), 'auto');
     await isolated(bundleSource('bundles/content.js'));
     assert.equal(await page.locator('#yt-gamepad-overlay').count(), 0);
     assert.equal(await page.getAttribute('html', 'data-ytg-boot'), 'starting');
@@ -83,7 +83,7 @@ for (const mode of ['late', 'missing', 'cancelled', 'settings']) {
       await page.addScriptTag({ content: bundleSource('bundles/main.js') });
       if (mode === 'settings') {
         await page.locator('#ytg-sidebar-settings').waitFor();
-        assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).opacity), '0', 'mounting alone cannot reveal before settings apply');
+        assert.equal(await page.locator('body').evaluate(body => getComputedStyle(body).opacity), '1', 'startup leaves the page visible while settings load');
         await isolated('releaseSettings()');
       }
     } else if (mode === 'cancelled') {

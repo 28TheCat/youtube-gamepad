@@ -4,7 +4,7 @@ import { runInNewContext } from 'node:vm';
 import { moduleSource } from '../scripts/test-source.mjs';
 
 function setup(layout = 'windowed') {
-  const events = {}, configs = [];
+  const events = {}, configs = [], held = new Set();
   let port, browserFullscreenCalls = 0, historyCalls = 0;
   const video = { currentTime: 31, duration: 300, paused: false, volume: .5,
     play() { this.paused = false; return Promise.resolve(); }, pause() { this.paused = true; } };
@@ -21,7 +21,7 @@ function setup(layout = 'windowed') {
       return video;
     } };
   const window = { addEventListener(name, callback) { events[name] = callback; }, postMessage() {},
-    YTGamepadWatch: watch, YTGamepadInput: { mode: 'gamepad', connected: true, configure() {} },
+    YTGamepadWatch: watch, YTGamepadInput: { mode: 'gamepad', connected: true, configure() {}, isHeld: action => held.has(action) },
     YTGamepadMenu: { opened: false, configure() {}, close() {} },
     YTGamepad: { hasTemporaryLayer: false, configure() {}, refresh() {}, registerSite(config) { configs.push(config); } } };
   runInNewContext(moduleSource('src/app/coordinator.ts'), { window, document, location, URL, URLSearchParams,
@@ -30,7 +30,7 @@ function setup(layout = 'windowed') {
   window.YTGamepadSite.hasNativeLayer = () => false;
   events['yt-gamepad-local-settings']({ detail: { playbackLayout: layout } });
   window.YTGamepadCoordinator.checkAdaptation();
-  return { root, video, watch, port, events, location, adapter: configs[0], coordinator: window.YTGamepadCoordinator,
+  return { root, video, watch, port, events, location, held, window, adapter: configs[0], coordinator: window.YTGamepadCoordinator,
     get browserFullscreenCalls() { return browserFullscreenCalls; }, get historyCalls() { return historyCalls; } };
 }
 
@@ -48,6 +48,26 @@ test('detail-page expansion returns locally without changing browser fullscreen 
   assert.equal(s.port.state.mode, 'controls');
   assert.equal(s.video.currentTime, 31); assert.equal(s.video.paused, false);
   assert.equal(s.historyCalls, 0);
+});
+
+test('held media seeking works over watch panels and remains blocked by menus or native layers', () => {
+  for (const panel of ['comments', 'description', 'playlists', 'subscription']) {
+    const s = setup(); s.coordinator.setMode('controls'); s.watch.state.panel = panel;
+    s.held.add('seekForward');
+    assert.equal(s.coordinator.request('media', 'seekForward'), true);
+    assert.equal(s.video.currentTime, 31);
+    s.held.delete('seekForward');
+    s.events['yt-gamepad-button-end']({ detail: { action: 'seekForward', cancelled: false } });
+    assert.equal(s.video.currentTime, 41);
+    assert.equal(s.watch.state.panel, panel);
+  }
+  for (const block of [s => { s.window.YTGamepadMenu.opened = true; },
+    s => { s.window.YTGamepadSite.hasNativeLayer = () => true; }]) {
+    const s = setup(); s.coordinator.setMode('controls'); s.watch.state.panel = 'comments'; block(s);
+    s.held.add('seekForward');
+    assert.equal(s.coordinator.request('media', 'seekForward'), false);
+    assert.equal(s.video.currentTime, 31);
+  }
 });
 
 test('expanded controls return locally while a panel or timeline adjustment retains Back', () => {

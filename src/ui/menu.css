@@ -46,6 +46,10 @@
       .candidate-row button{flex:none;max-width:min(300px,65vw);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--ytg-surface);color:inherit;font-size:var(--ytg-font-heading);padding:var(--ytg-space-2) var(--ytg-space-3)}
       :host-context(html:not([data-ytg-input-mode="mouse"])) .candidate-row button:focus{background:var(--ytg-text);color:var(--ytg-background)}
       #composition[hidden],#recent [hidden]{display:none}
+      .search-panel .search-discovery{display:grid;gap:24px;min-width:0}
+      .search-panel .search-discovery-group{display:flex;flex-direction:column;gap:8px;min-width:0}
+      .search-panel .search-discovery-title{margin:0 0 8px;font-weight:600}
+      .search-panel .search-discovery-empty{margin:0;font-size:16px;line-height:1.6}
       @media(max-width:650px){.search-panel .search-layout{grid-template-columns:1fr}.search-panel #recent{order:2;max-height:none}.search-panel .key-row button{font-size:var(--ytg-font-heading)}.search-panel .controls{line-height:1.8}}
       .search-panel .key-row button:is([data-action="NUMBER_LAYOUT"],[data-action="LETTER_LAYOUT"]){box-sizing:border-box;font-size:clamp(14px,1.4vw,18px);font-weight:var(--ytg-weight-body);white-space:nowrap;letter-spacing:0;line-height:1;padding:var(--ytg-space-2) var(--ytg-space-half);border:2px solid transparent}
       :host-context(html:not([data-ytg-input-mode="mouse"])) .search-panel .key-row button:is([data-action="NUMBER_LAYOUT"],[data-action="LETTER_LAYOUT"]):focus{background:var(--ytg-surface);color:var(--ytg-text);border-color:var(--ytg-text)}

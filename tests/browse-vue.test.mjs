@@ -806,7 +806,7 @@ test('Shorts occupy their own row across the feed bridge and open the Shorts rou
   assert.equal(await short.locator('.shorts-view-count').textContent(), '12K views');
   assert.equal(await short.getAttribute('href'), '/shorts/short-one');
   const ratio = card => card.locator('.card-cover').evaluate(el => { const r = el.getBoundingClientRect(); return r.width / r.height; });
-  assert.ok(Math.abs(await ratio(short) - 2 / 3) < .01);
+  assert.ok(Math.abs(await ratio(short) - 9 / 16) < .01);
   assert.ok(Math.abs(await ratio(page.locator('[data-browse-id="video:normal"]')) - 16 / 9) < .01);
   assert.equal(await page.locator('.shorts-shelf').count(), 1);
   assert.equal(await page.locator('.shorts-row .shorts-card').count(), 2);
@@ -821,16 +821,19 @@ test('Shorts occupy their own row across the feed bridge and open the Shorts rou
     await page.waitForFunction(() => {
       const row = window.__pageDOM.querySelector('.shorts-row'), card = row.querySelector('.shorts-card');
       const available = row.clientWidth - 20, actual = card.getBoundingClientRect().width;
-      const count = Math.round((available + 16) / (actual + 16));
-      return Math.abs(count * actual + (count - 1) * 16 - available) < 1;
+      const regular = Math.max(1, Math.min(6, Math.floor((available + 16) / 326)));
+      const limit = regular === 1 ? 2 : regular % 2 === 0 ? regular / 2 * 3 : regular + 2;
+      const columns = Math.max(1, Math.min(limit, Math.floor((available + 16) / 256)));
+      const previous = (available - (columns - 1) * 16) / columns;
+      return Math.abs(actual - Math.min(available, previous * 1.2)) < 1;
     });
     const geometry = await short.evaluate(node => {
       const row = node.closest('.shorts-row'), box = node.getBoundingClientRect();
       return { width: box.width, available: row.clientWidth - 20, gap: getComputedStyle(row).gap };
     });
-    assert.ok(geometry.width >= Math.min(194, geometry.available) - 1);
+    assert.ok(geometry.width >= Math.min(288, geometry.available) - 1);
     assert.equal(geometry.gap, '16px');
-    assert.ok(Math.abs(await ratio(short) - 2 / 3) < .01);
+    assert.ok(Math.abs(await ratio(short) - 9 / 16) < .01);
   }
   await page.setViewportSize({ width: 1280, height: 900 });
   mkdirSync('output/playwright', { recursive: true });
@@ -838,7 +841,7 @@ test('Shorts occupy their own row across the feed bridge and open the Shorts rou
   await page.screenshot({ path: 'output/playwright/shorts-card.png' });
   await page.evaluate(() => window.postMessage({ source: 'yt-gamepad-settings', values: { gridLayout: 'oneColumn' } }, location.origin));
   await page.locator('.cards[data-horizontal=true]').waitFor();
-  assert.ok(Math.abs(await ratio(short) - 2 / 3) < .01);
+  assert.ok(Math.abs(await ratio(short) - 9 / 16) < .01);
   assert.equal(await short.evaluate(el => getComputedStyle(el).flexDirection), 'column');
   await short.focus();
   await short.press('Enter');
