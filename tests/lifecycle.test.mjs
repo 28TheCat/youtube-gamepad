@@ -61,7 +61,8 @@ test('route disposal preserves a later site wrapper and makes a retained wrapper
   let calls = 0;
   const history = { pushState() { calls++; assert.equal(this, history); } };
   const original = history.pushState;
-  runInNewContext(moduleSource('src/app/route-controller.ts'), { window, URL });
+  const context = { window, URL };
+  for (const file of ['src/app/state-machine.ts', 'src/app/route-controller.ts']) runInNewContext(moduleSource(file), context);
   const interaction = window.YTGamepadStateMachine.createStore();
   const routes = window.YTGamepadRouteController.create({ runtime: window.YTGamepadRuntime, interaction, location, history, window: s.target, document: s.target,
     routeNow: () => '/', enabled: () => true, renderMode() {}, onStart() {}, hasTemporaryLayer: () => false
@@ -71,4 +72,54 @@ test('route disposal preserves a later site wrapper and makes a retained wrapper
   routes.destroy(); const state = interaction.state; history.pushState({}, '', '/');
   assert.equal(history.pushState, siteWrapper); assert.equal(calls, 1); assert.equal(interaction.state, state);
   assert.notEqual(retained, original);
+});
+
+test('the remote history bridge settles only the active request and synchronizes native routes separately', () => {
+  const s = setup(), window = { YTGamepadRuntime: s.runtime };
+  const context = { window, URL };
+  for (const file of ['src/app/state-machine.ts', 'src/app/route-controller.ts']) runInNewContext(moduleSource(file), context);
+  const document = new EventTarget(), origin = 'https://www.youtube.com';
+  let route = '/results';
+  const interaction = window.YTGamepadStateMachine.createStore(window.YTGamepadStateMachine.createState(route));
+  const routes = window.YTGamepadRouteController.create({ runtime: s.runtime, interaction, location: { origin },
+    history: {}, window: new EventTarget(), document, remoteHistory: true, routeNow: () => route,
+    enabled: () => true, renderMode() {}, onStart() {}, hasTemporaryLayer: () => false });
+  const historyChanged = (method, changed) => document.dispatchEvent(new CustomEvent('ytg-page-history-v1', {
+    detail: JSON.stringify({ version: 1, method, route, changed })
+  }));
+  routes.start();
+  const stale = routes.prepareVideo('/watch?v=old');
+  routes.cancelRequest(stale);
+  const current = routes.prepareVideo('/watch?v=new');
+  routes.cancelRequest(stale);
+  document.dispatchEvent(new Event('yt-navigate-finish'));
+  document.dispatchEvent(new Event('yt-navigate-error'));
+  assert.equal(interaction.state.app.navigation.id, current);
+  assert.equal(interaction.state.app.watchDepth, 0);
+  route = '/watch?v=new'; historyChanged('pushState', true);
+  assert.equal(interaction.state.app.lastNavigation.id, current);
+  assert.equal(interaction.state.app.watchDepth, 1);
+  document.dispatchEvent(new Event('yt-navigate-finish'));
+  assert.equal(interaction.state.app.watchDepth, 1);
+  document.dispatchEvent(new Event('yt-navigate-start'));
+  assert.equal(interaction.state.app.navigation.source, 'site');
+  route = '/feed/subscriptions'; historyChanged('pushState', true);
+  document.dispatchEvent(new Event('yt-navigate-finish'));
+  assert.equal(interaction.state.app.settledRoute, route);
+  assert.equal(interaction.state.app.navigation, null);
+  assert.equal(interaction.state.app.lastNavigation.id, current);
+  assert.equal(interaction.state.app.watchDepth, 0);
+  const episode = routes.prepareVideo('/watch?v=episode&list=series&index=2&start_radio=1');
+  route = '/watch?list=series&index=3&v=episode'; historyChanged('pushState', true);
+  assert.equal(interaction.state.app.navigation.id, episode, 'another occurrence must not settle the request');
+  route = '/watch?list=other&index=2&v=episode'; historyChanged('pushState', true);
+  assert.equal(interaction.state.app.navigation.id, episode, 'another collection must not settle the request');
+  route = '/watch?list=series&index=2&v=episode&feature=autoplay'; historyChanged('replaceState', true);
+  assert.equal(interaction.state.app.navigation, null, 'a rewritten episode URL unlocks immediately');
+  assert.equal(interaction.state.app.settledRoute, route);
+  assert.equal(interaction.state.app.lastNavigation.id, episode);
+  assert.equal(interaction.state.app.lastNavigation.phase, 'completed');
+  assert.equal(s.tasks.size, 0, 'the eight-second deadline is cancelled');
+  assert.ok(routes.prepareVideo('/watch?v=next&list=series&index=3'), 'the next episode can be selected immediately');
+  routes.destroy();
 });

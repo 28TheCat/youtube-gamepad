@@ -251,7 +251,7 @@ watch(() => [store.category, store.snapshot.route, layout.value.columns], () => 
   preferredColumn = undefined; lastNavigationId = undefined;
 });
 async function direction(event: Event) {
-  const command = event as CustomEvent<{ direction: string; focus: (node: HTMLElement) => void }>;
+  const command = event as CustomEvent<{ direction: string; boundary?: () => void; focus: (node: HTMLElement) => void }>;
   const source = (event.target as Element).closest<HTMLElement>('[data-browse-id]')?.dataset.browseId;
   if (!source) return;
   const from = pendingId || source, position = navigation.value.position(from);
@@ -264,6 +264,7 @@ async function direction(event: Event) {
   if (!id) {
     if (!pendingId && ((direction === 'up' && position.row === 0) || (direction === 'left' && position.column === 0))) return;
     event.preventDefault();
+      command.detail.boundary?.();
     if (direction === 'down') loadNearBottom();
     return;
   }
@@ -277,7 +278,8 @@ async function direction(event: Event) {
   if (!props.ownsFocus()) { pendingId = undefined; pendingSourceId.value = undefined; return; }
   const node = elements.get(id);
   if (node) {
-    if (id.startsWith('short:')) node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    if (id.startsWith('short:') && node.dispatchEvent(new CustomEvent('ytg-shorts-reveal', { bubbles: true, cancelable: true })))
+      node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
     command.detail.focus(node);
   }
   pendingId = undefined; pendingSourceId.value = undefined;

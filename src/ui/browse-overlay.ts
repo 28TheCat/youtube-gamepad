@@ -2,7 +2,7 @@ import { h, render } from 'vue';
 import BrowseOverlay from './BrowseOverlay.vue';
 import type { ControllerStyle } from '../../types/ports';
 export interface BrowseOverlaySnapshot {
-  visible: boolean; helpVisible: boolean; animate: boolean; adjusting: boolean;
+  helpText?: string; visible: boolean; helpVisible: boolean; animate: boolean; adjusting: boolean;
   left: number; top: number; width: number; height: number; radius: string;
 }
 export interface BrowseOverlayPresenter { update(value: Partial<BrowseOverlaySnapshot>): void; destroy(): void }

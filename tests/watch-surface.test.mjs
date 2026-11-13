@@ -100,7 +100,7 @@ for (const layout of ['windowed', 'fullscreen']) for (const dark of [false, true
 
 test('watch surface exposes data and restores recommendation identity after reorder', async t => {
   const page = await browserPage(t);
-  await page.goto('about:blank');
+  await page.setContent('<!doctype html><html data-ytg-playback-layout="fullscreen"><body></body></html>');
   await page.evaluate(code);
   await page.evaluate(styles => {
     const api = WatchSurfaceFixture, scope = api.YTGamepadRuntime.scope('surface-test');
@@ -133,7 +133,7 @@ test('watch surface exposes data and restores recommendation identity after reor
   assert.equal(initial.canSeek, false);
   assert.equal(initial.controls.find(target => target.id === 'playPause').available, true, 'isolated surfaces without a native player retain playback controls');
   assert.equal(initial.controls.find(target => target.id === 'seekBack').available, false);
-  assert.equal(initial.controls.find(target => target.id === 'fullscreen').available, true);
+  assert.equal(initial.controls.some(target => target.id === 'fullscreen'), false, 'layout switching is separate from playback controls');
   assert.equal(initial.controls.find(target => target.id === 'goLive').available, false);
   assert.deepEqual(await page.evaluate(() => surface.items('controls').map(item => item.itemKey)),
     initial.controls.filter(target => target.available).map(target => target.itemKey),
@@ -150,6 +150,7 @@ test('watch surface exposes data and restores recommendation identity after reor
     setPage(Array.from({ length: 24 }, (_, index) => 'video-' + index));
     surface.focus(surface.snapshot().recommendations[20], false, 'controls');
   });
+  await page.waitForFunction(() => document.querySelector('#ytg-watch').shadowRoot.querySelector('.recommendations').scrollTop > 0);
   const grid = await page.locator('#ytg-watch .recommendations').evaluate(node => {
     const cards = [...node.querySelectorAll('.card')];
     return { visible: cards.filter(card => !card.hidden).length,

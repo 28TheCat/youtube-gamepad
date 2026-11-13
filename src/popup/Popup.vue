@@ -49,7 +49,7 @@ onUnmounted(() => {
 <label class="toggle"><span>{{ t("Enable gamepad controls") }}</span><input id="enabled" type="checkbox" :checked="settings.values.enabled" :disabled="!settings.ready || settings.saving" @change="settings.save('enabled', $event)"></label>
 <section class="connection-card" aria-labelledby="connectionTitle"><h2 id="connectionTitle">{{ t("Connection status") }}</h2><p id="connection" role="status">{{ t(connection) }}</p></section>
 <button id="openGamepadTest" type="button" @click="openGamepadTest">{{ t('Gamepad detection & calibration') }}</button>
-<p class="quick-guide" :data-ytg-hint="t('A Confirm · B Back · Start Menu')">{{ t("A Confirm · B Back · Start Menu") }}</p>
+<p class="quick-guide" data-ytg-hint="A Confirm · B Back · Start Menu"></p>
 <button id="moreSettings" type="button" @click="openSettings">{{ t("Open settings on YouTube") }}</button>
 <output id="status" role="status" :hidden="!settings.statusVisible">{{ t(settings.status) }}</output>
 </template>

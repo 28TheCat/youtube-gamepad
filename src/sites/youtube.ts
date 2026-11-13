@@ -354,6 +354,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       page.subscribed = info?.subscribed || false;
       page.notificationPreference = info?.notificationPreference;
       page.liked = info?.liked || false;
+      page.likeCount = info?.likeCount;
       page.disliked = info?.disliked || false;
     }
     page.waiting = !!stale || info?.loading === true && !details;
@@ -617,6 +618,19 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       },
       selectors: '[data-ytg-search-input],[data-ytg-page-mode],#ytg-browse-sidebar a[href],#ytg-subscription-channels a[href],#ytg-browse-grid a[data-browse-id],#ytg-browse-grid button,#ytg-browse-top button,[data-ytg-category],.ytp-button,.ytp-progress-bar',
       overlays: nativeLayerSelector,
+      getPageHint() {
+        const page = document.documentElement;
+        if (page.getAttribute('data-ytg-browse-mode') === 'youtube' || page.getAttribute('data-ytg-native') != null ||
+            location.pathname.startsWith('/shorts/')) return '';
+        if (location.pathname === '/watch') {
+          const video = getVideo();
+          if (!video || page.dataset.ytgMode === 'browse') return '';
+          return readTimeline(video).canSeek
+            ? 'X Play / pause · LB / RB Rewind / forward · LT / RT Volume'
+            : 'X Play / pause · LT / RT Volume';
+        }
+        return browseChips().length > 1 ? 'A Open · Y Search · LB / RB Switch categories' : 'A Open · Y Search';
+      },
       overlayItems: 'a[href],button,input,[role="slider"],[role="button"],[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],tp-yt-paper-item,.ytp-panel-back',
       isSlider: (el) => el?.matches?.('input[type="range"],[role="slider"]') === true,
       adjustSlider(el, direction) {

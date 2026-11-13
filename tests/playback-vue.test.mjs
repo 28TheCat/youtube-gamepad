@@ -23,7 +23,7 @@ const theme = readFileSync(new URL('../src/ui/theme.css', import.meta.url), 'utf
 
 test('shared action buttons reflect player state and delegate commands', async t => {
   const page = await browserPage(t);
-  await page.setContent('<html><body></body></html>');
+  await page.setContent('<html data-ytg-language="zh-CN"><body></body></html>');
   await page.evaluate(code);
   await page.evaluate(styles => {
     window.actions = [];
@@ -37,8 +37,14 @@ test('shared action buttons reflect player state and delegate commands', async t
   assert.equal(await controls.locator('[data-action=like]').getAttribute('aria-pressed'), 'true');
   assert.equal(await controls.locator('[data-action=mute]').getAttribute('aria-pressed'), 'true');
   assert.equal(await controls.locator('[data-action=save]').getAttribute('aria-pressed'), null);
+  const like = controls.locator('[data-action=like]');
+  assert.equal(await like.textContent(), '');
+  await page.evaluate(() => window.view.presentation.page({ key: 'video', isWatch: true, title: 'Video',
+    channel: 'Creator', liked: true, likeCount: 28000, recommendations: [] }, {}));
+  assert.equal(await like.textContent(), '2.8万');
   for (const action of ['like', 'comments', 'save', 'mute']) await controls.locator(`[data-action=${action}]`).click();
   assert.deepEqual(await page.evaluate(() => window.actions), ['like', 'comments', 'save', 'mute']);
+  await page.evaluate(() => document.documentElement.setAttribute('data-ytg-language', 'en'));
   for (const seekStep of [20, 7]) {
     await page.evaluate(seekStep => window.view.presentation.playback({ seekStep, video: { paused: true, currentTime: 0, duration: 30 }, captionsEnabled: false, settingsOpen: false }), seekStep);
     assert.equal(await controls.locator('[data-action=seekBack]').getAttribute('aria-label'), `Rewind ${seekStep} seconds`);
@@ -51,7 +57,7 @@ test('shared channel avatars fall back on errors and recover when the source cha
   await page.route('https://avatars.test/**', route => route.request().url().endsWith('/good.svg')
     ? route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="red"/></svg>' })
     : route.fulfill({ contentType: 'text/plain', body: 'invalid image' }));
-  await page.setContent(`<html data-ytg-playback-layout="windowed"><head><style>${theme}</style></head><body></body></html>`);
+  await page.setContent(`<html data-ytg-playback-layout="windowed" data-ytg-input-mode="mouse"><head><style>${theme}</style></head><body></body></html>`);
   await page.evaluate(code);
   await page.evaluate(styles => {
     window.view = PlaybackViewFixture.createVueWatchView({ activate() {}, closePanel() {}, styles: { watch: styles },
@@ -64,6 +70,11 @@ test('shared channel avatars fall back on errors and recover when the source cha
   }, styles);
   const avatar = page.locator('#ytg-watch .channel-portrait');
   await avatar.locator('[data-view="avatarFallback"]').waitFor();
+  const channel = page.locator('#ytg-watch [data-action="channel"]');
+  await channel.hover();
+  await page.waitForFunction(() =>
+    getComputedStyle(window.view.root.querySelector('[data-action="channel"]')).boxShadow === 'none');
+  assert.equal(await channel.getAttribute('title'), null);
   assert.equal(await avatar.textContent(), '😀');
   assert.equal(await avatar.locator('img').count(), 0);
   const before = await avatar.boundingBox();
@@ -76,6 +87,25 @@ test('shared channel avatars fall back on errors and recover when the source cha
   await page.evaluate(() => window.view.presentation.page({ ...window.pageInfo, avatar: '', channel: ' ' }, {}));
   await avatar.locator('[data-view="avatarFallback"]').waitFor();
   assert.equal(await avatar.textContent(), '●');
+  for (const controller of [true, false]) {
+    await page.evaluate(value => document.documentElement.classList.toggle('ytg-gamepad-input', value), controller);
+    for (const action of ['channel', 'subscribe', 'description']) {
+      assert.equal(await page.locator(`#ytg-watch [data-action="${action}"]`).evaluate(node => getComputedStyle(node).height), controller ? '48px' : '38px');
+    }
+    assert.equal(await avatar.evaluate(node => getComputedStyle(node).width), '36px');
+  }
+  await page.evaluate(() => window.view.presentation.page({ ...window.pageInfo, channel: '一隻土撥鼠MrMarmot', channelBadge: 'verified', avatar: 'https://avatars.test/good.svg' }, {}));
+  await avatar.locator('img').waitFor();
+  mkdirSync('output/playwright', { recursive: true });
+  await page.locator('#ytg-watch .channel-group').screenshot({ path: 'output/playwright/channel-controls.png' });
+  await page.evaluate(() => document.documentElement.setAttribute('data-ytg-playback-layout', 'fullscreen'));
+  assert.equal(await page.locator('#ytg-watch .channel-name').isVisible(), false);
+  assert.equal(await channel.evaluate(node => getComputedStyle(node).width), '48px');
+  const subscribe = page.locator('#ytg-watch [data-action="subscribe"]');
+  const colors = await subscribe.evaluate(node => { const style = getComputedStyle(node); return [style.color, style.backgroundColor]; });
+  assert.notEqual(colors[0], colors[1], 'fullscreen subscription text contrasts with its fill');
+
+
 });
 
 test('recommendations leave loading blank and show text before delayed covers without shifting cards', async t => {
@@ -300,13 +330,13 @@ test('split playback fits resized and zoomed viewports and scrolls only its side
     }, {});
   }, styles);
   assert.equal(await page.locator('#ytg-watch .card-watch-progress>span').evaluate(node => node.style.width), '37%');
-  assert.equal(await page.locator('#ytg-watch .control.avatar .channel-badge svg').getAttribute('data-icon'), 'material:verified-fill');
+  assert.equal(await page.locator('#ytg-watch .channel-control.avatar .channel-badge svg').getAttribute('data-icon'), 'material:verified-fill');
   assert.equal(await page.locator('#ytg-watch .heading').textContent().then(text => text.includes('清月已经不困了')), false);
   assert.equal(await page.locator('#ytg-watch .heading .meta .channel-badge').count(), 0);
   assert.match(await page.locator('#ytg-watch .heading .meta').textContent(), /122,693/);
   assert.equal(await page.locator('#ytg-watch .card').nth(0).locator('.channel-badge svg').getAttribute('data-icon'), 'material:artist-fill');
   assert.equal(await page.locator('#ytg-watch .card').nth(1).locator('.channel-badge').count(), 0);
-  assert.equal(await page.locator('#ytg-watch .control.avatar .channel-badge svg').evaluate(node => getComputedStyle(node).width), '14px');
+  assert.equal(await page.locator('#ytg-watch .channel-control.avatar .channel-badge svg').evaluate(node => getComputedStyle(node).width), '14px');
   mkdirSync(new URL('../output/playwright/', import.meta.url), { recursive: true });
   // Smaller CSS viewports also reproduce the layout pressure of browser zoom.
   for (const [width, height] of [[1920, 1080], [1280, 900], [1440, 900], [960, 720], [768, 600], [640, 480]]) {

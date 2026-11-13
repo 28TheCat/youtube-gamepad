@@ -7,7 +7,7 @@ import { runInNewContext } from 'node:vm';
 function setup({ missing = '', throwing = false, pathname = '/watch', connected = true, language = 'en' } = {}) {
   let now = 0, tick, port, refresh, config;
   const frames = [];
-  const flush = () => { while (frames.length) frames.shift()(); };
+  const flush = () => { for (const frame of frames.splice(0)) frame(); };
   const classes = new Set(), events = new Map(), nodes = new Map();
   const listeners = (name, callback) => {
     if (!events.has(name)) events.set(name, []);
@@ -19,7 +19,8 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
       classList: { add: name => names.add(name), remove: name => names.delete(name), contains: name => names.has(name), toggle(name, on) { on ? names.add(name) : names.delete(name); } },
       append(...items) { this.children.push(...items); for (const item of items) if (item.id) nodes.set(item.id, item); },
       attachShadow() { this.shadow = node(); return this.shadow; },
-      setAttribute() {}, removeAttribute() {}, addEventListener(name, callback) { handlers[name] = callback; },
+      setAttribute() {}, removeAttribute() {}, remove() { if (this.id) nodes.delete(this.id); },
+      addEventListener(name, callback) { handlers[name] = callback; },
       click() { handlers.click?.(); }, closest: () => null, querySelectorAll: () => [],
       getBoundingClientRect: () => ({ width: 100, height: 100 }), focus() {} };
   }
@@ -38,7 +39,7 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
     querySelector(selector) {
       if (throwing) throw new Error('changed DOM');
       if (selector === '#movie_player') return missing === 'player' ? null : player;
-      if (selector.startsWith('video')) return missing === 'video' ? null : video;
+      if (selector.startsWith('video') || selector === '#movie_player video') return missing === 'video' ? null : video;
       if (selector.startsWith('.ytp-')) return missing === selector ? null : buttons[selector] || null;
       return nodes.get(selector.slice(1)) || null;
     }, querySelectorAll: () => [] };
@@ -55,14 +56,23 @@ function setup({ missing = '', throwing = false, pathname = '/watch', connected 
   const window = { YTGamepadWatch: watch, YTGamepadMenu: menu, YTGamepadInput: { connected }, postMessage() {}, addEventListener: listeners,
     YTGamepad: { registerSite(value) { config = value; }, configure() {}, refresh() {} } };
   const location = { pathname, search: pathname === '/watch' ? '?v=current' : '', origin: 'https://www.youtube.com' };
-  const context = { window, document, location, URL, URLSearchParams, history: {}, Date: { now: () => now },
+  const timeouts = new Map();
+  let timeoutId = 0;
+  const history = { pushState(_state, _title, href) {
+    const url = new URL(href, location.origin);
+    location.pathname = url.pathname; location.search = url.search;
+  } };
+  const context = { window, document, location, URL, URLSearchParams, history, Date: { now: () => now },
     MutationObserver: class { observe() {} disconnect() {} },
-    setInterval(fn) { tick = fn; }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, setTimeout: () => 1, clearTimeout() {},
+    setInterval(fn) { tick = fn; }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; },
+    cancelAnimationFrame() {},
+    setTimeout(fn, delay) { if (delay === 8000) timeouts.set(++timeoutId, fn); return timeoutId; },
+    clearTimeout(id) { timeouts.delete(id); },
     getComputedStyle: () => ({ display: 'block' }) };
   for (const file of ['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/sites/youtube.ts', 'src/app/coordinator.ts']) {
     runInNewContext(moduleSource(file), context);
   }
-  return { window, document, classes, location, video, player, watch, menu, nodes, get config() { return config; }, get port() { return port; },
+  return { window, document, classes, location, history, timeouts, video, player, watch, menu, nodes, get config() { return config; }, get port() { return port; },
     setMissing(value) { missing = value; }, setThrowing(value) { throwing = value; }, setRefresh(value) { refresh = value; },
     advance(ms) { now += ms; tick?.(); flush(); }, event(name, value = {}) { for (const callback of events.get(name) || []) callback(value); flush(); },
     get status() { return window.YTGamepadCoordinator.adaptation.status; } };
@@ -278,7 +288,9 @@ test('controller confirmation primes the watch layout without a loading banner',
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.classes.has('ytg-watch-layout'), false, 'browse list keeps its own layout');
   assert.equal(s.classes.has('ytg-player-primed'), true, 'late native player is positioned before the watch URL arrives');
-  s.location.pathname = '/watch'; s.location.search = '?v=next';
+  let videoId = 'old';
+  s.player.getPlayerResponse = () => ({ videoDetails: { videoId } });
+  s.history.pushState({}, '', '/watch?v=next');
   s.advance(500);
   assert.equal(s.classes.has('ytg-watch-layout'), true);
   assert.equal(s.status, 'waiting', 'the previous player cannot authorize the destination without its identity and picture');
@@ -286,7 +298,9 @@ test('controller confirmation primes the watch layout without a loading banner',
   s.setMissing('video'); s.event('yt-navigate-finish');
   assert.equal(s.status, 'waiting');
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
+  videoId = 'next'; s.video.readyState = 3; s.video.videoWidth = 1280;
   s.setMissing(''); s.advance(500);
+  s.event('playing', { target: s.video });
   assert.equal(s.status, 'ready');
   assert.equal(s.classes.has('ytg-watch-active'), true);
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
@@ -297,7 +311,7 @@ test('switching recommendations waits for video identity without a loading banne
   const s = setup();
   s.player.getPlayerResponse = () => ({ videoDetails: { videoId: 'current' } });
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
-  s.location.search = '?v=next'; s.event('yt-navigate-finish');
+  s.history.pushState({}, '', '/watch?v=next'); s.event('yt-navigate-finish');
   assert.equal(s.status, 'waiting');
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
   s.player.getPlayerResponse = () => ({ videoDetails: { videoId: 'next' } });
@@ -306,7 +320,7 @@ test('switching recommendations waits for video identity without a loading banne
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
 });
 
-test('destination picture becomes ready before navigation finishes without unlocking input', () => {
+test('destination picture alone cannot settle an uncommitted navigation', () => {
   const s = setup();
   let videoId = 'current';
   s.player.getPlayerResponse = () => ({ videoDetails: { videoId } });
@@ -323,11 +337,12 @@ test('destination picture becomes ready before navigation finishes without unloc
   s.event('playing', { target: s.video });
   assert.equal(s.status, 'ready');
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
-  assert.equal(s.classes.has('ytg-watch-active'), true);
   assert.equal(s.window.YTGamepadCoordinator.navigating, true);
   assert.equal(s.window.YTGamepadCoordinator.request('media', 'pause'), false);
   assert.equal(s.video.paused, false);
   s.event('yt-navigate-finish');
+  assert.equal(s.window.YTGamepadCoordinator.navigating, true);
+  [...s.timeouts.values()][0]();
   assert.equal(s.window.YTGamepadCoordinator.navigating, false);
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
 });
@@ -335,11 +350,11 @@ test('destination picture becomes ready before navigation finishes without unloc
 test('canceling controller navigation or disabling controls clears the primed layout', () => {
   const s = setup({ pathname: '/' });
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
-  s.event('yt-navigate-cancel');
+  [...s.timeouts.values()][0]();
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.classes.has('ytg-player-primed'), false);
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');
-  s.event('yt-navigate-finish');
+  [...s.timeouts.values()][0]();
   assert.equal(s.nodes.has('ytg-watch-loading'), false);
   assert.equal(s.classes.has('ytg-player-primed'), false);
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=next');

@@ -12,7 +12,7 @@ const vSwitchKey: Directive<HTMLElement> = { mounted(node) { YTGamepadController
     :aria-label="t('Gamepad interface')" :aria-checked="state.mode === 'gamepad'" :disabled="state.busy"
     :title="t(state.mode === 'gamepad' ? 'Switch to YouTube' : 'Switch to Gamepad')"
     @click="change(state.mode === 'gamepad' ? 'youtube' : 'gamepad')">
-    <span class="ytg-mode-label">Gamepad</span>
+    <span class="ytg-mode-label">{{ t('Gamepad') }}</span>
     <span class="ytg-mode-state">{{ t(state.mode === 'gamepad' ? 'On' : 'Off') }}</span>
     <span class="ytg-mode-track" aria-hidden="true"><span class="ytg-mode-thumb"></span></span>
     <span v-switch-key class="ytg-mode-key" aria-hidden="true">A</span>

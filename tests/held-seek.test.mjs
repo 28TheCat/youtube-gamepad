@@ -22,8 +22,11 @@ function setup() {
   const document = { hidden: false, hasFocus: () => true, addEventListener(name, fn) { events[name] = fn; },
     querySelectorAll: () => [], querySelector(selector) {
       return ['.ytp-subtitles-button', '.ytp-play-button', '.ytp-settings-button'].includes(selector) ? button : video;
-    }, documentElement: { dataset: {}, classList: { toggle() {}, contains: () => false } } };
+    }, documentElement: { dataset: {}, getAttribute: () => null,
+      style: { getPropertyValue: () => '', setProperty() {}, removeProperty() {} },
+      classList: { toggle() {}, contains: () => false } } };
   const context = { window, document, location, URL,
+    MutationObserver: class { observe() {} disconnect() {} },
     history: { back() {}, go() {} }, getComputedStyle: () => ({ display: 'block' }) };
   runInNewContext(moduleSource('src/app/coordinator.ts'), context);
   window.YTGamepadSite.hasNativeLayer = () => nativeLayer;

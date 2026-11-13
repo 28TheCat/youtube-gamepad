@@ -232,6 +232,36 @@ test('replies and their continuation append to their parent only', async () => {
   f.service.destroy();
 });
 
+test('nested reply previews and continuations stay in the root thread', async () => {
+  const f = fixture(body => {
+    if (body.continuation === 'replies:parent') {
+      const raw = response(['second', 'third'], 'root-next');
+      const items = raw.onResponseReceivedEndpoints[0].appendContinuationItemsAction.continuationItems;
+      const third = items.splice(1, 1)[0];
+      third.commentThreadRenderer.replies = { commentRepliesRenderer: { contents: [continuation('deep-next')] } };
+      items[0].commentThreadRenderer.replies = { commentRepliesRenderer: { subThreads: [third] } };
+      return raw;
+    }
+    if (body.continuation === 'deep-next') {
+      const raw = response(['fourth']);
+      const items = raw.onResponseReceivedEndpoints[0].appendContinuationItemsAction.continuationItems;
+      items[0] = items[0].commentThreadRenderer.commentViewModel;
+      return raw;
+    }
+    if (body.continuation === 'root-next') return response(['second', 'other']);
+    return response(['parent'], undefined, { initial: true, replies: true });
+  });
+  const replies = () => Array.from(f.service.read().items[0].replies, item => [item.key, item.replyTo]);
+  f.service.more(true); await f.idle();
+  f.service.replies('parent'); await f.idle();
+  assert.deepEqual(replies(), [['second', undefined], ['third', 'Author second']]);
+  while (f.calls.length < 4 && f.service.replies('parent')) await f.idle();
+  assert.deepEqual(f.calls.slice(1).map(call => call.body.continuation), ['replies:parent', 'deep-next', 'root-next']);
+  assert.deepEqual(replies(), [['second', undefined], ['third', 'Author second'], ['fourth', 'Author third'], ['other', undefined]]);
+  assert.equal(f.service.read().items[0].hasReplies, false);
+  f.service.destroy();
+});
+
 test('API JSON reaches the parser without reserializing the response body', async () => {
   const f = fixture((_body, count) => {
     const raw = count === 1 ? response(['parent'], 'next', { initial: true, replies: true })

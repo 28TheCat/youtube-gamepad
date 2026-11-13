@@ -102,17 +102,28 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     /* Focus animation can retarget during held-direction repeats. Scroll updates snap. */
     @media(prefers-reduced-motion:no-preference){#ring{transition:transform var(--ytg-focus-duration,120ms) var(--ytg-focus-easing,cubic-bezier(.26,.86,.44,.985)),width var(--ytg-focus-duration,120ms) var(--ytg-focus-easing,cubic-bezier(.26,.86,.44,.985)),height var(--ytg-focus-duration,120ms) var(--ytg-focus-easing,cubic-bezier(.26,.86,.44,.985))}}
     #help{position:fixed;bottom:var(--ytg-space-6);left:var(--ytg-space-6);background:var(--ytg-overlay-panel);color:var(--ytg-overlay-text);padding:var(--ytg-space-4) var(--ytg-space-5);border-radius:var(--ytg-button-radius);font:var(--ytg-font-small)/1.8 var(--ytg-font-family);display:none;max-width:360px}
+    #scene-hint{display:none;position:fixed;inset:auto var(--ytg-space-4) var(--ytg-space-4) auto;max-width:calc(100vw - 2 * var(--ytg-space-4));background:var(--ytg-overlay-panel);color:var(--ytg-overlay-text);padding:6px 12px;border-radius:var(--ytg-button-radius);font:var(--ytg-font-small)/1.8 var(--ytg-font-family)}
+    :host-context(html.ytg-gamepad-input) #scene-hint:not([hidden]){display:block}
+    :host([data-native-dialog]) #scene-hint{left:var(--ytg-space-4);right:auto}
   `;
   style.textContent += controllerStyle.css;
   const ring = document.createElement('div'), help = document.createElement('div');
   ring.id = 'ring'; help.id = 'help';
   help.style.whiteSpace = 'pre-line';
-  controllerStyle.hint(help, 'YouTube Gamepad\nD-pad / left stick: Select · A: Open\nScroll stick: Scroll\nDuring playback, ↑: Controls · B: Back\nX: Play / pause · Y: Search\nLB / RB: Browse categories, or rewind / forward 10 seconds during playback\nLT / RT: Volume down / up · Start: Quick menu');
+  controllerStyle.hint(help, 'D-pad / left stick: Move · A Open · B Back · Y Search · LB / RB Switch categories · Start Menu');
   shadow.append(style);
   const overlay = mountOverlay?.(shadow, controllerStyle);
   if (!overlay) shadow.append(ring, help);
   else lifecycle.cleanup(() => overlay.destroy());
-  function setHelp(visible: boolean) { if (overlay) overlay.update({ helpVisible: visible }); else help.style.display = visible ? 'block' : 'none'; }
+  const sceneHint = document.createElement('div');
+  sceneHint.id = 'scene-hint';
+  sceneHint.hidden = true;
+  shadow.append(sceneHint);
+  function setHelp(visible: boolean) {
+    if (overlay) overlay.update({ helpVisible: visible });
+    else help.style.display = visible ? 'block' : 'none';
+    updateSceneHint();
+  }
   document.documentElement.append(host);
   function visible(el: HTMLElement, allowTransparent = false) {
     const r = rect(el), s = computed(el);
@@ -287,7 +298,32 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
         config.sections?.[config.getSection?.(current) || 'content']?.layout === 'grid') alignSelection(current);
     update();
   }
+  let lastHelpText = '', lastSceneText = '';
+  function updateSceneHint() {
+    host.toggleAttribute?.('data-native-dialog', enabled && activeScope !== document);
+    const text = !enabled || navigating || config.isNavigating?.() || helpVisible || config.getPriorityLayer?.() ? ''
+      : adjustingTarget ? '← / → Adjust · A Confirm · B Back'
+      : activeScope !== document || config.getInputLayer?.() ? 'D-pad: Select · A Confirm · B Back'
+      : config.getPageHint?.() || '';
+    sceneHint.hidden = !text;
+    if (text && text !== lastSceneText) {
+      lastSceneText = text;
+      controllerStyle.hint(sceneHint, text);
+    }
+  }
+  function updateHelp() {
+    const text = adjustingTarget ? '← / → Adjust · A Confirm · B Back'
+      : activeScope !== document ? 'D-pad: Select · A Confirm · B Back'
+      : location.pathname === '/watch' ? '↑ Show controls · X Play / pause · B Back · Start Menu'
+      : 'D-pad / left stick: Move · A Open · B Back · Y Search · LB / RB Switch categories · Start Menu';
+    if (text === lastHelpText) return;
+    lastHelpText = text;
+    if (overlay) overlay.update({ helpText: text });
+    else controllerStyle.hint(help, text);
+  }
   function update(animate = false) {
+    updateHelp();
+    updateSceneHint();
     if (!overlay) ring.style.transition = animate ? '' : 'none';
     if (!enabled || config.shouldShowSelection?.({ scope: activeScope }) === false || config.getPriorityLayer?.() || !current || config.ownsSelectionPaint?.(current) || !visible(current) || !scopeContains(current)) { if (overlay) overlay.update({ visible: false }); else ring.style.display = 'none'; return; }
     const target = config.getSelectionTarget?.(current) || config.getContainer?.(current) || current;
@@ -312,19 +348,23 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     return items;
   }
   function alignSelection(el: HTMLElement) {
+    const behavior = window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches ? 'smooth' : 'instant';
     const grid = el.closest<HTMLElement>('[data-ytg-browse-grid]');
     if (grid) {
       if (indexedGrid(el)) {
-        // Logical neighbours are already resolved by ID. Only the destination
-        // and viewport need measuring to reveal the full card/shelf.
-        const target = rect(el.closest<HTMLElement>('.shorts-shelf') || el);
+        // Logical neighbours are already resolved by ID. Measure only the
+        // destination and viewport to position the card or Shorts shelf.
+        const target = rect(el.closest<HTMLElement>('.virtual-row,.shorts-shelf') || el);
         const bounds = rect(grid), style = computed(grid);
         const top = bounds.top + (parseFloat(style.scrollPaddingTop) || 0);
         const bottom = bounds.bottom - (parseFloat(style.scrollPaddingBottom) || 0);
-        const delta = target.top < top ? target.top - top : target.bottom > bottom ? target.bottom - bottom : 0;
-        if (Math.abs(delta) <= 1) return false;
-        const behavior = window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches ? 'smooth' : 'instant';
-        grid.scrollTo({ top: Math.max(0, grid.scrollTop + delta), behavior });
+        // Keep visible rows still. Oversized rows anchor at the top so moving
+        // between cards in the same row cannot alternate between its edges.
+        const delta = target.height > bottom - top || target.top < top ? target.top - top
+          : target.bottom > bottom ? target.bottom - bottom : 0;
+        const scrollTop = Math.max(0, Math.min(grid.scrollHeight - grid.clientHeight, grid.scrollTop + delta));
+        if (Math.abs(scrollTop - grid.scrollTop) <= 1) return false;
+        grid.scrollTo({ top: scrollTop, behavior });
         invalidateGeometry();
         return true;
       }
@@ -336,7 +376,6 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
       const delta = navigation.rowScroll(from, items, { top: bounds.top + top, bottom: bounds.bottom - bottom });
       // Reveal the entire row, including its title and channel, at a row boundary.
       if (Math.abs(delta) <= 1) return false;
-      const behavior = window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches ? 'smooth' : 'instant';
       grid.scrollTo({ top: Math.max(0, grid.scrollTop + delta), behavior });
       invalidateGeometry();
       return true;
@@ -344,7 +383,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     const section = config.getSection?.(el) || 'content';
     if (activeScope !== document || config.sections?.[section]?.layout !== 'grid' || config.sections?.[section]?.alignRows === false) {
       const before = rect(el);
-      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior });
       const after = el.getBoundingClientRect();
       if (before.top !== after.top || before.left !== after.left) invalidateGeometry();
       if (reads) reads.rects = new WeakMap();
@@ -357,7 +396,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     if (Math.abs(delta) > 1) {
       const top = Math.max(0, scrollY + delta);
       if (top === scrollY) return false;
-      window.scrollTo({ left: scrollX, top, behavior: 'instant' });
+      window.scrollTo({ left: scrollX, top, behavior });
       invalidateGeometry();
       return true;
     }
@@ -365,6 +404,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
   }
   function select(el?: HTMLElement | null | undefined, scroll = true, keepColumn = false): void {
     if (!reads) return withReads(() => select(el, scroll, keepColumn));
+    if (el !== current) boundaryAnimation?.cancel();
     if (el !== current) endAdjustment();
     const scrolled = scroll && el ? alignSelection(el) : false;
     (config.getContainer?.(current) || current)?.classList?.remove('ytg-selected');
@@ -395,6 +435,23 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     update(!scrolled);
     remember();
   }
+  let boundaryAnimation: Animation | undefined;
+  lifecycle.cleanup(() => boundaryAnimation?.cancel());
+  function shakeBoundary(direction: Direction) {
+    if (!current || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ||
+      config.shouldShowSelection?.({ scope: activeScope }) === false || config.getPriorityLayer?.()) return;
+    // Animate independently of the layout transform; repeated input never stacks shakes.
+    if (boundaryAnimation?.playState === 'running') return;
+    const target = config.ownsSelectionPaint?.(current)
+      ? (config.getSelectionTarget?.(current) || config.getContainer?.(current) || current)
+      : overlay ? shadow.querySelector<HTMLElement>('#ring') : ring;
+    const x = direction === 'left' ? -4 : direction === 'right' ? 4 : 0;
+    const y = direction === 'up' ? -4 : direction === 'down' ? 4 : 0;
+    boundaryAnimation = target?.animate?.([
+      { translate: '0px 0px' }, { translate: `${x}px ${y}px`, offset: .3 },
+      { translate: `${-x / 2}px ${-y / 2}px`, offset: .65 }, { translate: '0px 0px' }
+    ], { duration: 200, easing: 'ease-out' });
+  }
   function navigate(direction: Direction): void {
     if (!reads) return withReads(() => navigate(direction));
     syncScope();
@@ -402,7 +459,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     // Browse shelves also own horizontal scrolling and logical neighbours.
     if (activeScope === document && current?.closest?.('[data-ytg-browse-grid]') &&
       !current.dispatchEvent(new CustomEvent('ytg-browse-direction', { bubbles: true, composed: true, cancelable: true,
-        detail: { direction, focus: (node: HTMLElement) => select(node, true, true) } }))) return;
+        detail: { direction, boundary: () => shakeBoundary(direction), focus: (node: HTMLElement) => select(node, true, true) } }))) return;
     const list = candidates();
     if (!current || !list.includes(current)) {
       select(initial(list));
@@ -440,7 +497,10 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
         // is an alignment preference, not an obstruction to the visible cards.
         scroll = !row.every(item => item.rect.top >= bounds.top - 1 && item.rect.top + item.rect.height <= bounds.bottom + 1);
       }
+      boundaryAnimation?.cancel();
       select(best.el, scroll, true);
+    } else {
+      shakeBoundary(direction);
     }
     // No target means stay on the current card; never scroll by an arbitrary distance.
   }
@@ -467,6 +527,15 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
       }
       if (current && config.beforeActivate?.(current) === true) return 'handled';
       if (!current) return 'blocked';
+      if (activeScope === document && current.closest('#ytg-browse-grid') && current.animate &&
+          window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) {
+        current.getAnimations().filter(animation => animation.id === 'ytg-press').forEach(animation => animation.cancel());
+        const animation = current.animate([{ scale: '.97', offset: 0 }], {
+          duration: 100, easing: 'cubic-bezier(.2,.8,.2,1)', id: 'ytg-press'
+        });
+        const release = lifecycle.cleanup(() => animation.cancel());
+        animation.onfinish = animation.oncancel = release;
+      }
       current.click(); return 'handled';
     }
     remember();
@@ -482,7 +551,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
       enabled, navigating: navigating || !!config.isNavigating?.(), menu: !!priority,
       native: scope() !== document, panel: !!config.getInputLayer?.(), help: helpVisible });
     if (result.disposition === 'blocked') return 'blocked';
-    const owner = result.effects[0]?.value;
+    const owner = result.effects[0]?.value ?? 'region';
     if (owner === 'menu') {
       const handled = outcome(priority?.handle(action));
       return handled === 'pass' ? 'blocked' : handled;
@@ -491,12 +560,14 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     if (owner === 'native') return pageAction(action);
     if (owner === 'panel') {
       const handled = outcome(config.handleLayer?.(action));
+      updateSceneHint();
       return handled === 'pass' ? 'blocked' : handled;
     }
     if (owner === 'help') {
       if (action === 'back' || action === 'help') { helpVisible = false; setHelp(false); return 'handled'; }
       return 'blocked';
     }
+    if (owner !== 'region') owner satisfies never;
     // Shortcut policy lives outside the navigation core.
     if (config.handleShortcut) {
       const result = outcome(config.handleShortcut(action));
@@ -579,7 +650,7 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     else if (candidates().includes(target)) select(target, false);
   });
   lifecycle.listen(document, 'focusin', followFocus);
-  lifecycle.listen(document, 'yt-navigate-start', () => { remember(); navigating = true; });
+  lifecycle.listen(document, 'yt-navigate-start', () => { remember(); navigating = true; updateSceneHint(); });
   for (const event of ['yt-navigate-finish', 'yt-navigate-cancel', 'yt-navigate-error']) lifecycle.listen(document, event, () => { navigating = false; });
   function routeChanged(event: { type: string; }) {
     invalidateTargets();

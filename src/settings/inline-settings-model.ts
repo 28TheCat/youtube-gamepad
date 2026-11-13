@@ -8,6 +8,7 @@ import { YTGamepadActions } from '../shared/actions';
 import { positionsOnPad } from './bindings';
 import { ui } from '../ui/ui-api';
 import { YTGamepadDiagnosticStore as diagnostics } from '../diagnostics/diagnostics-store.ts';
+import type { InteractionTrace } from '../diagnostics/interaction-trace.ts';
 import { t, applyLanguage, languageDefault, normalizeLanguage, type UILanguage } from '../shared/i18n';
 
 type Layout = 'watch' | 'browse';
@@ -49,7 +50,7 @@ const defaults = {
   repeatDelay: 150, repeatInterval: 80, bindings: {}, bindingLayouts: null, shortcutLayouts: null
 };
 
-export function createInlineSettingsModel(root: ShadowRoot, container: HTMLElement) {
+export function createInlineSettingsModel(root: ShadowRoot, container: HTMLElement, interactionTrace?: InteractionTrace) {
   const state = reactive({
     values: null as Settings | null,
     category: '' as Category,
@@ -146,7 +147,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     state.bindingAction = '';
     state.bindingKey = key;
     state.shortcutError = '';
-    const action = Object.keys(currentBindings()).find(action => schema.keys[currentBindings()[action]] === key);
+    const action = actionForButton(key);
     void focus(`assign-${action || actions[0]}`);
   }
   function back() {
@@ -184,17 +185,19 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
   async function clearDiagnostics() {
     try {
       const result = await chrome.runtime.sendMessage({ type: 'ytg-clear-inline-diagnostics' });
+      if (result?.ok) interactionTrace?.clear();
       feedback(result?.ok ? 'Diagnostic records cleared.' : 'Could not clear records. Please try again.');
     } catch { feedback('Could not clear records. Please try again.'); }
   }
   async function exportDiagnostics() {
     let url: string | undefined;
     try {
+      const interactionReplay = interactionTrace?.snapshot();
       const saved = await chrome.storage.local.get(diagnostics.key);
       if (disposed) return;
       const entries = diagnostics.bounded(saved[diagnostics.key]);
       const report = { formatVersion: 1, extensionVersion: chrome.runtime.getManifest().version,
-        exportedAt: new Date().toISOString(), entries };
+        exportedAt: new Date().toISOString(), entries, interactionReplay };
       url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
       const link = document.createElement('a');
       link.href = url;
@@ -240,9 +243,14 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
   }
   const layouts = [{ id: 'watch', label: schema.layouts.watch }, { id: 'browse', label: schema.layouts.browse }] as const;
   const actions = Object.keys(schema.labels);
+  function actionForButton(key: string) {
+    const bindings = currentBindings();
+    return actions.find(action => schema.keys[bindings[action]] === key);
+  }
+  const canRecordShortcut = (key: string) => schema.canOverrideWithShortcut(state.layout, actionForButton(key));
   function recordShortcut(event: KeyboardEvent) {
     event.preventDefault(); event.stopPropagation();
-    if (!state.values || !state.bindingKey || state.saving || event.repeat || event.isComposing) return;
+    if (!state.values || !state.bindingKey || state.saving || event.repeat || event.isComposing || !canRecordShortcut(state.bindingKey)) return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     if (event.ctrlKey || event.altKey || event.metaKey || !Object.hasOwn(schema.keyboardActions, key)) {
       state.shortcutError = 'Use a supported page shortcut without Ctrl, Alt or Win.'; return;
@@ -252,15 +260,15 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     shortcutLayouts[state.layout][state.bindingKey] = key;
     void save({ shortcutLayouts }, 'shortcut-recorder', 'Button bindings saved.');
   }
-  const shortcutFor = (key: string) => state.values?.rightHandMode ? '' : state.values?.shortcutLayouts[state.layout]?.[key] || '';
+  const shortcutFor = (key: string) => state.values?.rightHandMode || !canRecordShortcut(key) ? '' : state.values?.shortcutLayouts[state.layout]?.[key] || '';
   const summaryFor = (key: string) => {
     const shortcut = shortcutFor(key);
     if (shortcut) return `${schema.shortcutLabel(shortcut)} · ${t(YTGamepadActions.get(schema.keyboardActions[shortcut])!.label)}`;
-    const action = Object.keys(currentBindings()).find(action => schema.keys[currentBindings()[action]] === key);
+    const action = actionForButton(key);
     return action ? schema.contextLabel(action, state.layout) : 'Unassigned';
   };
   return { state, schema, layouts, actions, start, dispose, open, selectLayout, selectAction, selectButton, back, toggle, bind, adjust,
-    recordShortcut, shortcutFor, summaryFor,
+    canRecordShortcut, recordShortcut, shortcutFor, summaryFor,
     assignAction: (action: string) => {
       if (!state.bindingKey) return;
       const index = Object.keys(schema.keys).find(index => schema.keys[Number(index)] === state.bindingKey);

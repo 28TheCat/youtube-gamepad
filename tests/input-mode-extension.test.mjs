@@ -12,10 +12,29 @@ test('search retains controller prompts across echoed keys, jitter, page focus a
   await page.bringToFront(); await pad({ connected: true }); await page.waitForTimeout(120);
   await page.waitForFunction(() => document.documentElement.classList.contains('ytg-theater'));
   const press = async button => {
-    await pad({ connected: true }); await page.waitForTimeout(80);
-    await pad({ connected: true, button }); await page.waitForTimeout(65); await pad({ connected: true });
+    await pad({ connected: true });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.evaluate(button => new Promise((resolve, reject) => {
+      const finish = () => {
+        clearTimeout(timer); window.removeEventListener('yt-gamepad-action', finish, true);
+        document.documentElement.setAttribute('data-test-pad', JSON.stringify({ connected: true }));
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        window.removeEventListener('yt-gamepad-action', finish, true);
+        reject(new Error('Gamepad action was not sampled'));
+      }, 5000);
+      window.addEventListener('yt-gamepad-action', finish, true);
+      document.documentElement.setAttribute('data-test-pad', JSON.stringify({ connected: true, button }));
+    }), button);
   };
-  await press(9); await press(0); await menu.locator('[data-vue-search]').waitFor(); await page.waitForTimeout(80);
+  const sceneHint = page.locator('#yt-gamepad-overlay #scene-hint');
+  await press(12);
+  await sceneHint.waitFor();
+  assert.match(await sceneHint.getAttribute('data-ytg-hint'), /^A Open · Y Search/);
+  await press(9);
+  await sceneHint.waitFor({ state: 'hidden' });
+  await press(0); await menu.locator('[data-vue-search]').waitFor(); await page.waitForTimeout(80);
   const input = menu.locator('#query');
   await press(0);
   assert.equal(await input.inputValue(), 'A');

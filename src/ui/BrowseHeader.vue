@@ -13,6 +13,19 @@ import type { NotificationSnapshot } from '../sites/youtube-notifications';
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useBrowseStore } from '../app/browse-store';
 const store = useBrowseStore();
+const refreshButton = ref<HTMLButtonElement>();
+let refreshAnimation: Animation | undefined;
+watch(() => store.refreshing, refreshing => {
+  if (!refreshing || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  refreshAnimation?.cancel();
+  refreshAnimation = refreshButton.value?.querySelector('svg')?.animate(
+    [{ transform: 'rotate(0deg)' }, { transform: 'rotate(720deg)' }],
+    { duration: 600, easing: 'cubic-bezier(.25,.46,.45,.94)' }
+  );
+}, { flush: 'post' });
+function refreshFeed() {
+  if (!store.loading) props.refreshHome?.();
+}
 const { t } = useI18n();
 const account = ref<AccountSnapshot>();
 const accountLoading = ref(false), accountFailed = ref(false);
@@ -120,6 +133,7 @@ onMounted(() => {
 });
 const reloadNotifications = () => { if (!notificationOpen.value) loadNotifications('count'); };
 onBeforeUnmount(() => {
+  refreshAnimation?.cancel();
   for (const release of releases) release();
   disposed = true; ++generation; page.destroy?.();
   document.removeEventListener('yt-navigate-start', routeChanged);
@@ -141,6 +155,9 @@ onBeforeUnmount(() => {
     </button>
     <div id="ytg-client-search"></div>
     <BrowseModeSwitch :state="browseMode.state" :change="browseMode.change" />
+    <button v-if="store.snapshot.route?.split('?')[0] === '/' && refreshHome" ref="refreshButton" class="client-refresh" type="button" :aria-label="t('Refresh recommendations')" :title="t('Refresh recommendations')" :aria-disabled="store.loading" :aria-busy="store.refreshing" @click="refreshFeed">
+      <InterfaceIcon name="refresh" />
+    </button>
     <button ref="notificationButton" class="notification-entry" type="button" :aria-label="t('Notification center')" aria-haspopup="dialog" :aria-expanded="notificationOpen" @click="ui.openPanel('notifications')">
       <InterfaceIcon name="bell" /><span v-if="notifications?.count" class="notification-count">{{ notifications.count > 99 ? '99+' : notifications.count }}</span>
     </button>

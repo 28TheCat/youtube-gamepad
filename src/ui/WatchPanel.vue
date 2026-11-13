@@ -51,7 +51,7 @@ const vHint: Directive<HTMLElement, [ControllerStyle, string]> = {
     <div class="detail-children">
       <div class="detail-branch reply-summary">
         <span class="reply-threadline" aria-hidden="true"><span class="reply-connection"></span><span v-if="thread.replies.length" class="reply-continuation"></span></span>
-        <p class="detail-reply-count">{{ thread.replyCount ? t('{count} replies', { count: thread.replyCount }) : t('Replies') }}</p>
+        <p class="detail-reply-count">{{ thread.replyCount ? t(thread.replyCount === 1 ? '1 reply' : '{count} replies', { count: thread.replyCount }) : t('Replies') }}</p>
       </div>
       <div class="detail-replies" :aria-label="t('Replies')">
         <div v-for="item in thread.replies.slice(0, replyLimit)" :key="item.key" class="detail-branch">

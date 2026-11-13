@@ -33,9 +33,9 @@ function pressed(action: string) {
 </script>
 <template>
     <nav class="toolbar" :aria-label="t('Video controls')">
-        <div v-for="(group, groupIndex) in visiblePrimaryGroups" :key="groupIndex" class="group" :class="{ 'channel-group': groupIndex === 0, 'transport-group': groupIndex === 1 }">
-          <button v-for="[action, symbol] in group" :key="action" class="control" :class="{ play: action === 'playPause', avatar: action === 'channel' }"
-            :data-action="action" :data-focus-id="action" :title="action === 'channel' ? page.channel || t('Channel') : label(action)" :aria-label="label(action)" :aria-pressed="pressed(action)" :aria-haspopup="action === 'subscribe' && page.subscribed ? 'dialog' : undefined"
+        <div v-for="(group, groupIndex) in visiblePrimaryGroups" :key="groupIndex" :class="groupIndex === 0 ? 'channel-group' : 'group transport-group'">
+          <button v-for="[action, symbol] in group" :key="action" :class="{ 'channel-control': groupIndex === 0, control: groupIndex !== 0, play: action === 'playPause', avatar: action === 'channel' }"
+            :data-action="action" :data-focus-id="action" :title="action === 'channel' ? (windowed ? undefined : page.channel || t('Channel')) : label(action)" :aria-label="label(action)" :aria-pressed="pressed(action)" :aria-haspopup="action === 'subscribe' && page.subscribed ? 'dialog' : undefined"
             :disabled="['seekBack', 'seekForward'].includes(action) && !canSeek" @click="activate(action)">
             <template v-if="action === 'channel'"><ChannelAvatar class="channel-portrait" :src="page.avatar" :name="page.channel" :lazy="false" /><span class="channel-name"><span class="channel-label">{{ page.channel || t('Channel') }}</span><ChannelBadge :badge="page.channelBadge" /></span></template>
             <template v-else-if="action === 'subscribe' && page.subscribed"><InterfaceIcon class="subscription-bell" :name="page.notificationPreference === 'NONE' ? 'bell-off' : page.notificationPreference === 'ALL' ? 'bell-all' : 'bell'" /><span>{{ t('Subscribed') }}</span><InterfaceIcon class="subscription-chevron" name="down" /></template>
@@ -47,6 +47,7 @@ function pressed(action: string) {
           <div v-for="(group, index) in visibleSecondaryGroups" :key="index" class="cluster">
             <template v-for="[action, symbol] in group" :key="action">
             <MediaActionButton v-if="action === 'like' || action === 'comments' || action === 'save' || action === 'mute'" :action="action" :class="{ 'player-option': action === 'mute' }"
+              :like-count="action === 'like' ? page.likeCount : undefined"
               :active="action === 'like' ? !!page.liked : action === 'mute' ? video.muted : action === 'comments' ? commentsOpen : undefined"
               :data-action="action" :data-focus-id="action" @activate="activate(action)" />
             <button v-else class="control" :class="{ 'player-option': ['captions', 'settings', 'goLive'].includes(action) }" :data-action="action" :data-focus-id="action"

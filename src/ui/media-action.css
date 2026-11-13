@@ -8,3 +8,4 @@
 :host .media-action.control:disabled{opacity:.4;cursor:default}
 :host .media-action.control:is(:focus-visible,.selected,[data-selected]){outline:3px solid var(--ytg-focus-color,#fff);outline-offset:4px}
 :host .drawer-body .media-action.control{width:100%;justify-content:flex-start;border-radius:12px;padding-inline:16px;margin-top:12px}
+:host-context(html) .toolbar .right-group .cluster .media-action.control.has-like-count{width:auto;gap:6px;padding-inline:10px;font-size:14px;border-radius:var(--ytg-pill-radius)}

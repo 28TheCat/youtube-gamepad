@@ -5,17 +5,31 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 function setup(pathname = '/watch', connected = true) {
   const events = {}, classes = new Map(), location = { pathname, search: '', origin: 'https://www.youtube.com', assign(path) { this.assigned = path; } };
-  let backs = 0, jumps = [];
-  const video = { duration: 100, currentTime: 95, volume: .98, paused: false, pause() { this.paused = true; }, play() { this.paused = false; return Promise.resolve(); } };
+  let backs = 0, jumps = [], timeoutId = 0;
+  const timeouts = new Map();
+  const video = { duration: 100, currentTime: 95, volume: .98, paused: false, readyState: 3, videoWidth: 1280,
+    pause() { this.paused = true; }, play() { this.paused = false; return Promise.resolve(); } };
   let adapter, captions = 0, menus = 0;
   const button = { getAttribute: () => null, click() { captions++; } };
   const playButton = { click() { video.paused ? video.play() : video.pause(); } };
   const window = { addEventListener(name, fn) { events[name] = fn; }, postMessage() {}, YTGamepadInput: { connected }, YTGamepad: { registerSite(config) { adapter = config; } }, YTGamepadMenu: { configure() {}, close() {}, handle() { menus++; } } };
   const document = { querySelectorAll: () => [], addEventListener(name, fn) { events[name] = fn; }, querySelector(selector) { return selector === '.ytp-play-button' ? playButton : ['.ytp-subtitles-button', '.ytp-settings-button'].includes(selector) ? button : video; }, documentElement: { dataset: {}, classList: { contains: name => classes.get(name) === true, toggle(name, enabled) { classes.set(name, enabled); } } } };
+  document.documentElement.getAttribute = () => null;
+  document.documentElement.append = () => {};
+  document.createElement = () => ({ append() {}, remove() {}, setAttribute() {} });
+  document.addEventListener = (name, fn) => {
+    const previous = events[name];
+    events[name] = name === 'playing' && previous ? event => { previous(event); fn(event); } : fn;
+  };
   const history = { back() { backs++; }, go(delta) { jumps.push(delta); }, pushState(_state, _title, href) { const url = new URL(href, location.origin); location.pathname = url.pathname; location.search = url.search; }, replaceState(_state, _title, href) { if (href) { const url = new URL(href, location.origin); location.pathname = url.pathname; location.search = url.search; } } };
-  const context = { URL, window, document, location, history, innerHeight: 800, getComputedStyle: node => ({ display: 'block', position: node?.position || 'static' }) };
+  const context = { URL, URLSearchParams, window, document, location, history, innerHeight: 800,
+    MutationObserver: class { observe() {} disconnect() {} },
+    requestAnimationFrame: () => 1, cancelAnimationFrame() {},
+    setTimeout(fn, delay) { if (delay === 8000) timeouts.set(++timeoutId, fn); return timeoutId; },
+    clearTimeout(id) { timeouts.delete(id); },
+    getComputedStyle: node => ({ display: 'block', position: node?.position || 'static' }) };
   for (const file of ['src/app/route-state.ts', 'src/app/state-machine.ts', 'src/sites/youtube.ts', 'src/app/coordinator.ts']) runInNewContext(moduleSource(file), context);
-  return { history, window, document, adapter, video, location, events, classes, jumps, get backs() { return backs; }, get captions() { return captions; }, get menus() { return menus; } };
+  return { history, window, document, adapter, video, location, events, classes, jumps, timeouts, get backs() { return backs; }, get captions() { return captions; }, get menus() { return menus; } };
 }
 
 test('theater layout works without a controller and respects manual settings', () => {
@@ -106,14 +120,14 @@ test('confirming a video enters fullscreen layout and B returns to its source li
   assert.deepEqual(s.jumps, [-1]);
 });
 
-test('only controller activation prepares playback and canceled navigation restores browsing', () => {
+test('controller activation prepares playback and a timed-out navigation restores browsing', () => {
   const s = setup('/');
-  assert.equal(s.events.click, undefined);
   assert.equal(s.classes.get('ytg-playback'), false);
   s.adapter.beforeActivate({ getAttribute: () => '/watch?v=123' });
   assert.equal(s.classes.get('ytg-playback'), false);
   assert.equal(s.window.YTGamepadCoordinator.navigating, true);
-  s.events['yt-navigate-finish']();
+  [...s.timeouts.values()][0]();
+  assert.equal(s.window.YTGamepadCoordinator.navigating, false);
   assert.equal(s.classes.get('ytg-playback'), false);
 });
 
@@ -143,6 +157,7 @@ test('leaving after playing recommendations returns across the video chain to th
   s.history.pushState({}, '', '/watch?v=first'); s.events['yt-navigate-finish']();
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=second');
   s.history.pushState({}, '', '/watch?v=second'); s.events['yt-navigate-finish']();
+  s.events.playing({ target: s.video });
   s.adapter.interceptAction('back');
   assert.deepEqual(s.jumps, [-2]); assert.equal(s.backs, 0);
 });
@@ -251,12 +266,13 @@ test('canceled and same-video navigation do not add depth', () => {
   const s = setup('/results'); playFromList(s);
   assert.equal(s.window.YTGamepadCoordinator.prepareVideo('/watch?v=first'), false);
   s.window.YTGamepadCoordinator.prepareVideo('/watch?v=canceled');
-  s.events['yt-navigate-cancel']();
-  s.adapter.interceptAction('back');
+  [...s.timeouts.values()][0]();
+  assert.equal(s.window.YTGamepadCoordinator.navigating, false);
+  s.adapter.onAction('back', { scope: s.document });
   assert.deepEqual(s.jumps, [-1]);
 });
 test('unconfirmed pushes, replaced routes and traversal return safely to the source', () => {
-  for (const change of ['missingPush', 'extraPush', 'replace', 'back', 'forward', 'cancelAfterPush']) {
+  for (const change of ['missingPush', 'extraPush', 'replace', 'back', 'forward']) {
     const s = setup('/results'); playFromList(s);
     s.window.YTGamepadCoordinator.prepareVideo('/watch?v=second');
     if (change === 'missingPush') s.location.search = '?v=second';
@@ -264,9 +280,9 @@ test('unconfirmed pushes, replaced routes and traversal return safely to the sou
     else s.history.pushState({}, '', '/watch?v=second');
     if (change === 'extraPush') s.history.pushState({}, '', '/watch?v=unrelated');
     if (change === 'back' || change === 'forward') { s.location.search = change === 'back' ? '?v=first' : '?v=other'; s.events.popstate(); }
-    if (change === 'cancelAfterPush') s.events['yt-navigate-cancel']();
-    else s.events['yt-navigate-finish']();
-    s.adapter.interceptAction('back');
+    s.events['yt-navigate-finish']();
+    if (change === 'missingPush') [...s.timeouts.values()][0]();
+    s.adapter.onAction('back', { scope: s.document });
     assert.deepEqual(s.jumps, [], change);
     assert.equal(s.location.assigned, '/results', change);
   }
@@ -291,6 +307,26 @@ test('disable during navigation cleans interaction state and preserves the retur
   s.events['yt-gamepad-local-settings']({ detail: { enabled: true } });
   s.adapter.interceptAction('back');
   assert.deepEqual(s.jumps, [-1]);
-  s.location.pathname = '/results'; s.events['yt-navigate-finish']();
+  s.location.pathname = '/results'; s.events.popstate(); s.events['yt-navigate-finish']();
   assert.equal(s.window.YTGamepadCoordinator.navigating, false);
+});
+
+test('late site notifications and an expired deadline cannot settle a newer video open', () => {
+  const s = setup('/results'), coordinator = s.window.YTGamepadCoordinator;
+  playFromList(s);
+  assert.equal(coordinator.prepareVideo('/watch?v=stale'), true);
+  const expired = [...s.timeouts.values()][0];
+  expired();
+  assert.equal(coordinator.interactionState.app.lastNavigation.phase, 'cancelled');
+  assert.equal(coordinator.prepareVideo('/watch?v=next'), true);
+  const current = coordinator.interactionState.app.navigation;
+  for (const event of ['yt-navigate-finish', 'yt-navigate-cancel', 'yt-navigate-error']) s.events[event]();
+  expired();
+  assert.equal(coordinator.interactionState.app.navigation, current);
+  assert.equal(coordinator.interactionState.app.watchDepth, 1);
+  s.history.pushState({}, '', '/watch?v=next');
+  assert.equal(coordinator.interactionState.app.lastNavigation.id, current.id);
+  assert.equal(coordinator.interactionState.app.lastNavigation.phase, 'completed');
+  s.events['yt-navigate-finish']();
+  assert.equal(coordinator.interactionState.app.watchDepth, 2);
 });

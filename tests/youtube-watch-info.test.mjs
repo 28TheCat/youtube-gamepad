@@ -114,13 +114,24 @@ test('video details come from player/next APIs and reuse the selected page accou
   s.service.destroy();
 });
 test('like/dislike and subscription toggle only after confirmed writes', async () => {
-  const s = fixture(); await ready(s);
+  const s = fixture({ handler: url => {
+    if (!url.endsWith('/next')) return;
+    const response = next();
+    const rating = response.contents.twoColumnWatchNextResults.results.results.contents[0]
+      .videoPrimaryInfoRenderer.videoActions.menuRenderer.topLevelButtons[0].segmentedLikeDislikeButtonRenderer;
+    rating.likeButton.toggleButtonRenderer.defaultIcon = { iconType: 'LIKE' };
+    rating.likeButton.toggleButtonRenderer.accessibility = { label: '28,000 likes' };
+    return response;
+  } });
+  assert.equal((await ready(s)).likeCount, 28000);
   assert.equal(await s.service.act('like'), true);
   assert.equal(s.service.read().liked, true);
+  assert.equal(s.service.read().likeCount, 28001);
   assert.equal(s.calls.at(-1).body.target.videoId, 'first');
   assert.equal(await s.service.act('like'), true);
   assert.ok(s.calls.at(-1).url.endsWith('/like/removelike'));
   assert.equal(s.service.read().liked, false);
+  assert.equal(s.service.read().likeCount, 28000);
   assert.equal(await s.service.act('dislike'), true);
   assert.equal(s.service.read().disliked, true);
   assert.equal(await s.service.act('subscribe'), true);

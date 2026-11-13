@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from '../shared/use-i18n';
 const { t } = useI18n();
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { onMounted, onUnmounted, ref, watch, watchEffect } from 'vue';
 import { useSettingsStore } from './store';
 import type { SettingKey } from '../shared/settings';
 import { usePageAppearance } from '../shared/page-appearance';
@@ -14,6 +14,7 @@ import DiagnosticsPanel from './DiagnosticsPanel.vue';
 import CategorySettings from './CategorySettings.vue';
 import GamepadTestPanel from './GamepadTestPanel.vue';
 const settings = useSettingsStore();
+watchEffect(() => { document.title = t('YouTube Gamepad · All settings'); });
 function resetGridColumns() { void settings.saveValues(Object.fromEntries(Object.entries(videoGridDefaults).filter(([key]) => key.startsWith("gridColumns")))); }
 usePageAppearance();
 const aliases: Record<string, string> = { general: 'general', display: 'display', shortcuts: 'controller', gamepad: 'controller', gamepadTest: 'test', diagnostics: 'help', connectionHelp: 'help' };
@@ -61,14 +62,14 @@ onUnmounted(() => {
 <div class="setting-row">
   <div class="setting-copy"><label for="uiLanguage">{{ t('Interface language') }}</label><p>{{ t('Language changes apply immediately and save automatically.') }}</p></div>
   <select id="uiLanguage" :value="settings.values.uiLanguage" @change="settings.saveValues({ uiLanguage: ($event.target as HTMLSelectElement).value === 'zh-CN' ? 'zh-CN' : 'en' })">
-    <option value="en">{{ t("English") }}</option><option value="zh-CN">简体中文</option>
+    <option value="en" lang="en">English</option><option value="zh-CN" lang="zh-CN">简体中文</option>
   </select>
 </div>
 <div class="setting-row">
 <div class="setting-copy"><label for="enabled">{{ t("Enable gamepad controls") }}</label><p id="enabledHelp">{{ t("Browse videos, control playback, and open the quick menu with your gamepad.") }}</p></div>
 <input class="toggle" id="enabled" :checked="settings.values.enabled" @change="saveSetting('enabled', $event)" type="checkbox" aria-describedby="enabledHelp">
 </div>
-<details class="help"><summary>{{ t("How to use gamepad controls") }}</summary><div class="help-content"><p>{{ t("Turning off gamepad controls restores the YouTube interface.") }}</p><p :data-ytg-hint="t('During playback, press Start to open the quick menu to search, toggle captions, adjust volume, or open all settings.')">{{ t("During playback, press Start to open the quick menu to search, toggle captions, adjust volume, or open all settings.") }}</p></div></details>
+<details class="help"><summary>{{ t("How to use gamepad controls") }}</summary><div class="help-content"><p>{{ t("Turning off gamepad controls restores the YouTube interface.") }}</p><p data-ytg-hint="Press Start to open the quick menu. During playback, the menu includes captions and volume controls."></p></div></details>
 <PlaybackParameterSettings :values="settings.values" :disabled="!settings.ready || settings.saving" @save="settings.saveValues" />
 </section>
 <section id="display" data-category="display" aria-labelledby="displayTitle" :hidden="category !== 'display'">
@@ -116,7 +117,7 @@ onUnmounted(() => {
 <GamepadTestPanel v-if="category === 'test'" />
 <section id="connectionHelp" data-category="help" aria-labelledby="connectionTitle" :hidden="category !== 'help'">
 <div class="section-heading"><h2 id="connectionTitle">{{ t("Connection and controls") }}</h2><p>{{ t("Connect a standard-layout gamepad, click the YouTube page, then press a gamepad button.") }}</p></div>
-<p :data-ytg-hint="t('D-pad / left stick: Select. A Confirm, B Back, Start Quick menu.')">{{ t("D-pad / left stick: Select. A Confirm, B Back, Start Quick menu.") }}</p>
+<p data-ytg-hint="D-pad / left stick: Select. A Confirm, B Back, Start Quick menu."></p>
 <p>{{ t('During playback, hold the right stick button (R3) for temporary 2× speed. Release to restore your previous speed. Unavailable when R3 is assigned another playback action.') }}</p>
 <details class="help"><summary>{{ t("Gamepad not responding?") }}</summary><div class="help-content"><p>{{ t("Check that your gamepad is connected and gamepad controls are enabled under General. Return to YouTube, click the page, then press a gamepad button.") }}</p><p><a href="#gamepadTest">{{ t('Open gamepad detection & calibration') }}</a></p><p>{{ t("If the issue persists, export the local diagnostic records below to help troubleshoot.") }}</p></div></details>
 </section>

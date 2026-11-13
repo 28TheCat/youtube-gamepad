@@ -51,8 +51,10 @@ export interface WatchPageSnapshot extends RouteSnapshot {
   readonly notificationPreference?: NotificationPreference;
   readonly waiting?: boolean; readonly avatar?: string; readonly subscribed?: boolean;
   readonly liked?: boolean; readonly disliked?: boolean; readonly viewCount?: string | number | null;
+  readonly likeCount?: number;
 }
 export interface CommentReplySnapshot {
+  readonly replyTo?: string;
   readonly key: string; readonly author: string; readonly text: string;
   readonly avatar?: string;
   readonly translationTarget?: string;
@@ -132,13 +134,15 @@ export interface MenuPort extends SearchDataPort {
   perform(action: Action): OperationResult | Promise<OperationResult>;
   dispatchAction(action: Action): Disposition;
 }
-export interface NavigationSnapshot {
-  readonly target?: string | null; readonly pushed?: number; readonly traversal?: boolean;
-}
+export type NavigationSnapshot =
+  | { readonly source: 'extension'; readonly id: number; readonly phase: 'requested' | 'waiting';
+      readonly target: string | null; readonly traversal: boolean }
+  | { readonly source: 'site'; readonly phase: 'waiting'; readonly target?: never; readonly traversal: boolean };
 export interface AppSnapshot {
   readonly mode: Mode; readonly enabled: boolean; readonly route: string; readonly settledRoute: string;
   readonly returnRoute: string | null; readonly openingVideo: boolean; readonly watchDepth: number;
   readonly navigation: NavigationSnapshot | null; readonly returning: boolean; readonly chainVerified: boolean;
+  readonly lastNavigation?: { readonly id: number; readonly phase: 'completed' | 'cancelled' };
   readonly adaptation?: AdaptationSnapshot;
 }
 export interface WatchSnapshot {
@@ -154,14 +158,52 @@ export interface MenuSnapshot {
   readonly frame: 'LETTER_LAYOUT' | 'NUMBER_LAYOUT'; readonly language: 'en' | 'zh-CN';
 }
 export interface InteractionSnapshot { readonly app: AppSnapshot; readonly watch: WatchSnapshot; readonly menu: MenuSnapshot }
-export interface Effect { readonly type: string; readonly value?: string | number | boolean }
-export interface TransitionResult { readonly nextState: InteractionSnapshot; readonly effects: readonly Effect[]; readonly disposition: Disposition }
+type Signal<Type extends string> = { [Name in Type]: { readonly type: Name; readonly value?: never } }[Type];
+type Command<Type extends string, Value> = { readonly type: Type; readonly value: Value };
+
+export type RouteEffect = Signal<'pause' | 'closeMenu' | 'historyBack'>
+  | Command<'historyGo', number>
+  | Command<'assign', string>;
+export type PlaybackEffect = Signal<'pageBack' | 'nativeControlFocus' | 'renderMode'>
+  | Command<'media', 'seekBack' | 'seekForward'>
+  | Command<'mode', Mode>
+  | Command<'showControls', 'controls' | 'recommendations'>;
+export type WatchEffect = Signal<'closePanel' | 'panelClick' | 'loadComments' | 'focus' | 'loadRecommendations'>
+  | Command<'panelScroll', number>
+  | Command<'activate', string | undefined>
+  | Command<'recommendation', string | undefined>
+  | Command<'mode', Mode>;
+export type MenuEffect = Signal<'openSearch' | 'openMenu' | 'closeMenu' | 'languageFocus' | 'compositionFocus'
+  | 'mainFocus' | 'space' | 'backspace' | 'pageBack' | 'pageForward' | 'keyboardCandidates'
+  | 'keyboardSymbols' | 'cursorBack' | 'cursorForward' | 'shift' | 'submit' | 'click'>
+  | Command<'navigate', Direction>;
+type InputOwnerEffect = Command<'owner', 'menu' | 'native' | 'panel' | 'help' | 'region'>;
+type EffectsByEvent = {
+  PAGE_BACK: RouteEffect;
+  AUTO_HIDE: Extract<PlaybackEffect, { type: 'renderMode' }>;
+  BASE_INPUT: Extract<PlaybackEffect, { type: 'media' | 'showControls' | 'pageBack' }>;
+  NATIVE_CONTROLS_INPUT: Extract<PlaybackEffect, { type: 'media' | 'nativeControlFocus' | 'mode' }>;
+  WATCH_INPUT: WatchEffect;
+  MENU_INPUT: MenuEffect;
+  MENU_BACK: Extract<MenuEffect, { type: 'languageFocus' | 'compositionFocus' | 'mainFocus' | 'closeMenu' }>;
+  INPUT_OWNER: InputOwnerEffect;
+};
+export type EffectFor<Type extends InteractionEvent['type']> = Type extends keyof EffectsByEvent ? EffectsByEvent[Type] : never;
+export type Effect = EffectFor<InteractionEvent['type']>;
+export interface TransitionResult<Event extends InteractionEvent = InteractionEvent> {
+  readonly nextState: InteractionSnapshot;
+  readonly effects: readonly EffectFor<Event['type']>[];
+  readonly disposition: Disposition;
+}
 export type RouteEvent =
-  | { type: 'PREPARE_VIDEO'; target: string; route: string }
+  | { type: 'PREPARE_VIDEO'; id: number; target: string; route: string }
+  | { type: 'REQUEST_WAIT'; id: number }
+  | { type: 'REQUEST_FINISH'; id: number; route: string; evidence: 'pushState' | 'replaceState' | 'popstate' }
+  | { type: 'REQUEST_CANCEL'; id: number; route: string }
   | { type: 'NAV_START' }
   | { type: 'HISTORY'; method: string; route: string; changed: boolean }
   | { type: 'NAV_FINISH' | 'NAV_CANCEL' | 'POPSTATE'; route: string }
-  | { type: 'PAGE_BACK'; route: string; temporaryLayer: boolean };
+  | { type: 'PAGE_BACK'; id: number; route: string; temporaryLayer: boolean };
 export type InteractionEvent = RouteEvent
   | { type: 'APP_INIT'; route: string }
   | { type: 'ADAPTATION'; route: string; status: AdaptationSnapshot['status']; reason?: string }
@@ -189,7 +231,7 @@ export type InteractionEvent = RouteEvent
   | { type: 'MENU_INPUT'; action: Action };
 export interface InteractionStore {
   readonly state: InteractionSnapshot;
-  dispatch(event: InteractionEvent): TransitionResult;
+  dispatch<Event extends InteractionEvent>(event: Event): TransitionResult<Event>;
 }
 export type Dispose = () => void;
 /** In-process messages only. Consumers supply a discriminated message union. */
@@ -219,7 +261,7 @@ export interface ControllerStyle {
   hint<T extends HTMLElement>(node: T, text: string): T;
   bind<T extends HTMLElement>(node: T, text: string, attribute?: string): T;
   badge<T extends HTMLElement>(node: T, key: string): T;
-  configureBindings(raw?: unknown): void;
+  configureBindings(raw?: unknown, mapping?: Readonly<Record<number, string>>): void;
   identify(id?: string): ControllerStyle['family']; format(text: string): string;
 }
 export interface FocusTarget {
@@ -245,7 +287,7 @@ export interface DiagnosticState { route?: string; mode?: Mode; adaptation?: str
 export interface Diagnostics { record(module: string, operation: string, error: unknown, state?: DiagnosticState): void }
 export interface ApplicationMessage { source: string; values?: Settings; entry?: unknown }
 export interface ApplicationChannel { publish(message: ApplicationMessage): void; subscribe(listener: (message: ApplicationMessage) => void): Dispose }
-export interface InputDependencies { localChannel?: ApplicationChannel; runtime: Runtime; controllerStyle: ControllerStyle; isSearchOpen(): boolean; temporarySpeed?(held: boolean): boolean; canRepeatMedia?(): boolean; canHandleInput?(): boolean; scroll?(delta: number): void }
+export interface InputDependencies { localChannel?: ApplicationChannel; runtime: Runtime; controllerStyle: ControllerStyle; isSearchOpen(): boolean; temporarySpeed?(held: boolean): boolean; canRepeatMedia?(): boolean; canHandleInput?(): boolean; inputContext?(): string; scroll?(delta: number): void }
 export interface SiteDependencies { pageAccess?: import("../src/bridge/page-protocol").PageAccess; runtime: Runtime; diagnostics?: Diagnostics; focusManager?: FocusManager }
   export interface InputSourceTrace { source: string; decision: 'switch' | 'preserve' | 'ignored'; previousMode: 'mouse' | 'gamepad' | 'keyboard'; mode: 'mouse' | 'gamepad' | 'keyboard'; time: number }
   export interface InputModule { readonly connected: boolean; readonly mode: 'mouse' | 'gamepad' | 'keyboard'; readonly recentSources?: readonly InputSourceTrace[]; isHeld?(action: Action): boolean; cancelSeeking?(): void; configure(values: Partial<Settings>): void; destroy(): void }
@@ -388,7 +430,7 @@ export interface MenuDependencies extends SharedDependencies {
 export interface WatchPanels {
   open(action: 'description' | 'comments' | 'playlists' | 'subscription'): void; hide(): void; close(): void;
   back(): boolean;
-  refresh(): void; load(): void; readonly buttons: HTMLElement[]; destroy(): void;
+  refresh(): void; load(): void; readonly buttons: HTMLElement[]; readonly items: HTMLElement[]; destroy(): void;
 }
 export type WatchView = Record<'host' | 'surface' | 'recommendations' | 'dialog' | 'sheet' | 'panelTitle'
   | 'description' | 'close' | 'status', HTMLElement> & {
@@ -414,36 +456,40 @@ export interface CoordinatorModule {
 export interface ModuleFactory<Dependencies, Instance> { create(dependencies: Dependencies): Instance }
 export interface StateMachineModule {
   createState(route?: string): InteractionSnapshot;
-  transition(state: InteractionSnapshot, event: InteractionEvent): TransitionResult;
+  transition<Event extends InteractionEvent>(state: InteractionSnapshot, event: Event): TransitionResult<Event>;
   freezeSnapshot(state: InteractionSnapshot): InteractionSnapshot;
 }
 export interface RouteStateModule {
   handles(type: string): boolean;
-  transition(app: AppSnapshot, event: RouteEvent): { app: AppSnapshot; effects: readonly Effect[]; disposition: Disposition };
+  transition(app: AppSnapshot, event: RouteEvent): { app: AppSnapshot; effects: readonly RouteEffect[]; disposition: Disposition };
 }
 export interface BindingsSchema {
     keyboardActions: Record<string, string>;
     normalizeShortcuts(raw?: unknown): Record<string, Record<string, string>>;
+    canOverrideWithShortcut(layout: string, action?: string): boolean;
     shortcutLabel(key: string): string;
   defaults: Record<string,number>; rightHand: Record<string,number>; keys: Record<number,string>; labels: Record<string,string>; layouts: Record<string,string>;
   normalize(raw?: unknown): Record<string,number>;
   normalizeLayouts(raw?: unknown, legacy?: unknown): Record<string,Record<string,number>>;
+  layoutForPath(path: string): 'watch' | 'browse';
+  buttonActions(bindings: Record<string, number>, layout: string, shortcuts?: Record<string, string>, searchOpen?: boolean): Record<number, string>;
   contextLabel(action: string, layout: string): string;
 }
 export interface RouteControllerModule {
-  start(): void; prepareVideo(href: string | null): boolean; pageBack(): void; execute(effect: Effect): void; destroy(): void;
+  start(): void; prepareVideo(href: string | null): number | false; cancelRequest(id: number): void;
+  pageBack(): void; execute(effect: RouteEffect): void; destroy(): void;
 }
 declare global {
   interface Window {
     YTGamepadRuntime: Runtime; YTGamepadInteraction: InteractionStore;
     YTGamepadStateMachine: {
       createState(route?: string): InteractionSnapshot;
-      transition(state: InteractionSnapshot, event: InteractionEvent): TransitionResult;
+      transition<Event extends InteractionEvent>(state: InteractionSnapshot, event: Event): TransitionResult<Event>;
       freezeSnapshot(state: InteractionSnapshot): InteractionSnapshot;
     };
     YTGamepadRouteState: {
       handles(type: string): boolean;
-      transition(app: AppSnapshot, event: RouteEvent): { app: AppSnapshot; effects: readonly Effect[]; disposition: Disposition };
+      transition(app: AppSnapshot, event: RouteEvent): { app: AppSnapshot; effects: readonly RouteEffect[]; disposition: Disposition };
     };
     YTGamepadFocus: FocusManager; YTGamepadNavigation: Navigation;
     YTGamepadBindings: { defaults: Record<string, number>; keys: Record<number, string>; labels: Record<string, string>; normalize(raw?: unknown): Record<string, number>; layouts: Record<string, string>; normalizeLayouts(raw?: unknown, legacy?: unknown): Record<string, Record<string, number>>; contextLabel(action: string, layout: string): string };
@@ -461,7 +507,8 @@ declare global {
     YTGamepadSearch: { create(port: SearchPort): SearchInstance };
     YTGamepadWatchPanels: { create(port: WatchPanelsPort): WatchPanels };
     YTGamepadRouteController: { create(port: RoutePort): {
-      start(): void; prepareVideo(href: string | null): boolean; pageBack(): void; execute(effect: Effect): void; destroy(): void;
+      start(): void; prepareVideo(href: string | null): number | false; cancelRequest(id: number): void;
+      pageBack(): void; execute(effect: RouteEffect): void; destroy(): void;
     } };
   }
 }

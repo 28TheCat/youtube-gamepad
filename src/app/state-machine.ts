@@ -1,4 +1,4 @@
-import type { Disposition, Effect, InteractionEvent, InteractionSnapshot, MenuSnapshot, RouteEvent, StateMachineModule, WatchSnapshot } from '../../types/ports';
+import type { Disposition, Effect, EffectFor, InteractionEvent, InteractionSnapshot, MenuSnapshot, RouteEvent, StateMachineModule, TransitionResult, WatchSnapshot } from '../../types/ports';
 
 import { YTGamepadRouteState } from './route-state.ts';
 export let YTGamepadStateMachine!: StateMachineModule;
@@ -18,9 +18,14 @@ export let YTGamepadStateMachine!: StateMachineModule;
   });
   const isWatch = (route: string) => route.split('?')[0] === '/watch';
   const clamp = (index: number, count: number) => Math.max(0, Math.min(Math.max(0, count - 1), index));
-  function transition(state: InteractionSnapshot, event: InteractionEvent) {
+  function transition<Event extends InteractionEvent>(state: InteractionSnapshot, event: Event): TransitionResult<Event>;
+  function transition(state: InteractionSnapshot, event: InteractionEvent): TransitionResult {
     let app = state.app, watch = state.watch, menu = state.menu;
-    const effects: Effect[] = [], effect = (type: string, value?: string | number | boolean) => effects.push({ type, value });
+    const effects: Effect[] = [];
+    // Each branch can emit only the commands declared for its event.
+    function emit<Type extends InteractionEvent['type']>(_type: Type, command: EffectFor<NoInfer<Type>>) {
+      effects.push(command);
+    }
     let disposition: Disposition = 'handled';
     if (['WATCH_INPUT', 'MENU_INPUT', 'MENU_BACK', 'BASE_INPUT', 'NATIVE_CONTROLS_INPUT'].includes(event.type) &&
         (!app.enabled || app.navigation || app.returning)) {
@@ -35,13 +40,13 @@ export let YTGamepadStateMachine!: StateMachineModule;
       case 'INPUT_OWNER': {
         // DOM visibility and generic owner availability are supplied as observations.
         if (!event.enabled || event.navigating || !app.enabled || app.navigation || app.returning) disposition = 'blocked';
-        else if (event.menu) effect('owner', 'menu');
+        else if (event.menu) emit(event.type, { type: 'owner', value: 'menu' });
         else if (event.native) {
-          if (['up', 'down', 'left', 'right', 'confirm', 'back'].includes(event.action)) effect('owner', 'native');
+          if (['up', 'down', 'left', 'right', 'confirm', 'back'].includes(event.action)) emit(event.type, { type: 'owner', value: 'native' });
           else disposition = 'blocked';
-        } else if (event.panel) effect('owner', 'panel');
-        else if (event.help) effect('owner', 'help');
-        else effect('owner', 'region');
+        } else if (event.panel) emit(event.type, { type: 'owner', value: 'panel' });
+        else if (event.help) emit(event.type, { type: 'owner', value: 'help' });
+        else emit(event.type, { type: 'owner', value: 'region' });
         break;
       }
       case 'APP_INIT': app = createState(event.route).app; break;
@@ -56,32 +61,36 @@ export let YTGamepadStateMachine!: StateMachineModule;
           mode: event.enabled ? (!app.enabled && isWatch(event.route) ? 'playback' : app.mode) : 'browse' };
         if (!event.enabled) {
           app = { ...app, returnRoute: null, watchDepth: 0, chainVerified: false, openingVideo: false };
+          if (app.navigation?.source === 'extension' && !app.navigation.traversal) {
+            const result = routeState.transition(app, { type: 'REQUEST_CANCEL', id: app.navigation.id, route: event.route });
+            app = { ...result.app, returnRoute: null, chainVerified: false };
+          }
           menu = { ...menuInitial(), language: menu.language }; watch = { ...watch, adjusting: false, panel: '' };
         }
         break;
       case 'AUTO_HIDE':
         if (app.enabled && app.mode === 'controls' && watch.row === 'controls' && !watch.panel && !menu.opened &&
           event.playing && !event.temporaryLayer && !app.navigation && !app.returning && event.idle > 5000) {
-          app = { ...app, mode: 'playback' }; effect('renderMode');
+          app = { ...app, mode: 'playback' }; emit(event.type, { type: 'renderMode' });
         }
         break;
       case 'BASE_INPUT':
         if (!app.enabled || app.navigation || app.returning) { disposition = 'blocked'; break; }
         if (!isWatch(event.route) || app.mode !== 'playback') { disposition = 'pass'; break; }
-        if (event.action === 'left' || event.action === 'right') effect('media', event.action === 'left' ? 'seekBack' : 'seekForward');
-        else if (event.action === 'confirm') effect('showControls', 'controls');
-        else if (event.action === 'back') effect('pageBack');
-        else if (event.action === 'up' || event.action === 'down') effect('showControls', event.action === 'down' ? 'recommendations' : 'controls');
+        if (event.action === 'left' || event.action === 'right') emit(event.type, { type: 'media', value: event.action === 'left' ? 'seekBack' : 'seekForward' });
+        else if (event.action === 'confirm') emit(event.type, { type: 'showControls', value: 'controls' });
+        else if (event.action === 'back') emit(event.type, { type: 'pageBack' });
+        else if (event.action === 'up' || event.action === 'down') emit(event.type, { type: 'showControls', value: event.action === 'down' ? 'recommendations' : 'controls' });
         else disposition = 'pass';
         break;
       case 'NATIVE_CONTROLS_INPUT':
         if (!isWatch(event.route) || app.mode !== 'controls') disposition = 'pass';
         else if (event.progress && event.action === 'confirm') watch = { ...watch, adjusting: !watch.adjusting };
         else if (event.progress && event.action === 'back' && watch.adjusting) watch = { ...watch, adjusting: false };
-        else if (event.progress && event.action === 'back') effect('nativeControlFocus');
-        else if (event.action === 'back') effect('mode', 'playback');
+        else if (event.progress && event.action === 'back') emit(event.type, { type: 'nativeControlFocus' });
+        else if (event.action === 'back') emit(event.type, { type: 'mode', value: 'playback' });
         else if (event.progress && ['left', 'right'].includes(event.action)) {
-          if (watch.adjusting) effect('media', event.action === 'left' ? 'seekBack' : 'seekForward');
+          if (watch.adjusting) emit(event.type, { type: 'media', value: event.action === 'left' ? 'seekBack' : 'seekForward' });
         } else if (event.progress && watch.adjusting) disposition = 'blocked';
         else { watch = { ...watch, adjusting: false }; disposition = 'pass'; }
         break;
@@ -106,21 +115,21 @@ export let YTGamepadStateMachine!: StateMachineModule;
       case 'WATCH_INPUT': {
         const action = event.action;
         if (watch.panel && !watch.commentsParked) {
-          if (action === 'back') { watch = { ...watch, panel: '' }; effect('closePanel'); }
-          else if (action === 'confirm') effect('panelClick');
+          if (action === 'back') { watch = { ...watch, panel: '' }; emit(event.type, { type: 'closePanel' }); }
+          else if (action === 'confirm') emit(event.type, { type: 'panelClick' });
           else if (action === 'up' || action === 'down') {
-            if (watch.panel === 'description' || event.scrollDelta) effect('panelScroll', event.scrollDelta || (action === 'up' ? -180 : 180));
+            if (watch.panel === 'description' || event.scrollDelta) emit(event.type, { type: 'panelScroll', value: event.scrollDelta || (action === 'up' ? -180 : 180) });
             else {
               watch = { ...watch, panelIndex: Math.max(0, Math.min(event.commentCount, watch.panelIndex + (action === 'up' ? -1 : 1))) };
-              if (!event.commentCount && action === 'down' && watch.panel === 'comments') effect('loadComments'); effect('focus');
+              if (!event.commentCount && action === 'down' && watch.panel === 'comments') emit(event.type, { type: 'loadComments' }); emit(event.type, { type: 'focus' });
             }
           } else disposition = 'blocked';
           break;
         }
         if (watch.row === 'progress' && watch.adjusting) {
           if (action === 'confirm' || action === 'back') {
-            watch = { ...watch, adjusting: false }; effect('focus');
-          } else if (action === 'left' || action === 'right') effect('activate', action === 'left' ? 'seekBack' : 'seekForward');
+            watch = { ...watch, adjusting: false }; emit(event.type, { type: 'focus' });
+          } else if (action === 'left' || action === 'right') emit(event.type, { type: 'activate', value: action === 'left' ? 'seekBack' : 'seekForward' });
           else disposition = 'blocked';
           break;
         }
@@ -140,7 +149,7 @@ export let YTGamepadStateMachine!: StateMachineModule;
             if (action === 'left') watch = { ...watch, row: 'player', index: 0 };
             else if (action === 'up' && watch.index > 0) watch = { ...watch, index: watch.index - 1, recommendationIndex: watch.index - 1 };
             else if (action === 'down' && watch.index + 1 < event.cardCount) watch = { ...watch, index: watch.index + 1, recommendationIndex: watch.index + 1 };
-            else if (action === 'down') effect('loadRecommendations');
+            else if (action === 'down') emit(event.type, { type: 'loadRecommendations' });
           } else if (watch.row === 'progress') {
             if (action === 'up') watch = { ...watch, row: 'player', index: 0 };
             else if (action === 'down') watch = { ...watch, row: 'controls', index: playerControls.includes(watch.controlIndex) ? watch.controlIndex : watch.playIndex };
@@ -156,20 +165,20 @@ export let YTGamepadStateMachine!: StateMachineModule;
             if (next !== undefined) watch = { ...watch, index: next, controlIndex: next };
             else if (action === 'right' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
           }
-          effect('focus'); break;
+          emit(event.type, { type: 'focus' }); break;
         }
         if (action === 'back') {
-          if (event.windowed && watch.row === 'metadata') { watch = { ...watch, row: 'player', index: 0 }; effect('focus'); }
+          if (event.windowed && watch.row === 'metadata') { watch = { ...watch, row: 'player', index: 0 }; emit(event.type, { type: 'focus' }); }
           else if (watch.row === 'recommendations' || watch.row === 'progress') {
-            watch = { ...watch, row: event.windowed ? 'player' : 'controls', index: event.windowed ? 0 : watch.controlIndex }; effect('focus');
-          } else if (event.windowed && watch.row === 'controls') { watch = { ...watch, row: 'player', index: 0 }; effect('focus'); }
-          else effect('mode', 'playback');
+            watch = { ...watch, row: event.windowed ? 'player' : 'controls', index: event.windowed ? 0 : watch.controlIndex }; emit(event.type, { type: 'focus' });
+          } else if (event.windowed && watch.row === 'controls') { watch = { ...watch, row: 'player', index: 0 }; emit(event.type, { type: 'focus' }); }
+          else emit(event.type, { type: 'mode', value: 'playback' });
         } else if (action === 'confirm') {
-          if (watch.row === 'player') effect('activate', 'fullscreen');
-          else if (watch.row === 'metadata') effect('activate', 'description');
-          else if (watch.row === 'progress') { watch = { ...watch, adjusting: true }; effect('focus'); }
-          else if (watch.row === 'recommendations') effect('recommendation', event.recommendationKey);
-          else effect('activate', event.controlAction);
+          if (watch.row === 'player') emit(event.type, { type: 'activate', value: 'fullscreen' });
+          else if (watch.row === 'metadata') emit(event.type, { type: 'activate', value: 'description' });
+          else if (watch.row === 'progress') { watch = { ...watch, adjusting: true }; emit(event.type, { type: 'focus' }); }
+          else if (watch.row === 'recommendations') emit(event.type, { type: 'recommendation', value: event.recommendationKey });
+          else emit(event.type, { type: 'activate', value: event.controlAction });
         } else if (action === 'left' || action === 'right') {
           if (watch.row === 'progress') disposition = 'blocked';
           else {
@@ -182,17 +191,17 @@ export let YTGamepadStateMachine!: StateMachineModule;
             if (watch.row === 'controls' && event.availableControls) {
               index = (action === 'left' ? [...event.availableControls].reverse().find(i => i < watch.index) : event.availableControls.find((i) => i > watch.index)) ?? watch.index;
             }
-            watch = { ...watch, index, [watch.row === 'controls' ? 'controlIndex' : 'recommendationIndex']: index }; effect('focus');
+            watch = { ...watch, index, [watch.row === 'controls' ? 'controlIndex' : 'recommendationIndex']: index }; emit(event.type, { type: 'focus' });
           }
         } else if (action === 'up') {
           if (watch.row === 'controls' && event.canSeek === false) { disposition = 'blocked'; break; }
-          if (watch.row === 'progress') { effect('mode', 'playback'); break; }
+          if (watch.row === 'progress') { emit(event.type, { type: 'mode', value: 'playback' }); break; }
           const columns = Math.max(1, event.cardColumns || event.cardCount || 1);
           if (watch.row === 'recommendations' && watch.index >= columns) {
             const index = watch.index - columns;
             watch = { ...watch, index, recommendationIndex: index };
           } else watch = { ...watch, row: watch.row === 'recommendations' ? 'controls' : 'progress', index: watch.controlIndex };
-          effect('focus');
+          emit(event.type, { type: 'focus' });
         } else if (action === 'down') {
           if (watch.row === 'progress') watch = { ...watch, row: 'controls', index: watch.controlIndex };
           else if (watch.row === 'controls' && event.cardCount) watch = { ...watch, row: 'recommendations', index: clamp(watch.recommendationIndex, event.cardCount) };
@@ -202,9 +211,9 @@ export let YTGamepadStateMachine!: StateMachineModule;
             if (nextRow < event.cardCount) {
               const index = clamp(watch.index + columns, event.cardCount);
               watch = { ...watch, index, recommendationIndex: index };
-            } else effect('loadRecommendations');
+            } else emit(event.type, { type: 'loadRecommendations' });
           }
-          effect('focus');
+          emit(event.type, { type: 'focus' });
         } else disposition = 'pass';
         break;
       }
@@ -220,27 +229,31 @@ export let YTGamepadStateMachine!: StateMachineModule;
       case 'MENU_LANGUAGE': menu = { ...menu, choosingLanguage: event.value }; break;
       case 'MENU_MAIN': menu = { ...menu, view: 'main' }; break;
       case 'MENU_INPUT':
-        if (event.action === 'search') effect(menu.opened && menu.view === 'search' ? 'space' : 'openSearch');
-        else if (event.action === 'help') effect(menu.opened ? 'closeMenu' : 'openMenu');
+        if (event.action === 'search') emit(event.type, { type: menu.opened && menu.view === 'search' ? 'space' : 'openSearch' });
+        else if (event.action === 'help') emit(event.type, { type: menu.opened ? 'closeMenu' : 'openMenu' });
         else if (!menu.opened) disposition = 'pass';
         else if (event.action === 'back') return transition(state, { type: 'MENU_BACK' });
-        else if (menu.view === 'search' && ['keyboardSymbols', 'keyboardCandidates'].includes(event.action)) effect(event.action);
-        else if (menu.view === 'search' && ['playPause', 'mute', 'seekBack', 'seekForward', 'volumeDown', 'volumeUp'].includes(event.action)) {
-          const commands: Partial<Record<import('../../types/ports').Action,string>> = { playPause: 'backspace', mute: 'space', seekBack: menu.composing ? 'pageBack' : 'cursorBack', seekForward: menu.composing ? 'pageForward' : 'cursorForward', volumeDown: 'shift', volumeUp: 'submit' };
-          effect(commands[event.action]!);
-        } else if (event.action === 'confirm') effect('click');
-        else if (['up', 'down', 'left', 'right'].includes(event.action)) effect('navigate', event.action);
+        else if (menu.view === 'search' && (event.action === 'keyboardSymbols' || event.action === 'keyboardCandidates')) emit(event.type, { type: event.action });
+        else if (menu.view === 'search' && (event.action === 'playPause' || event.action === 'mute' ||
+          event.action === 'seekBack' || event.action === 'seekForward' || event.action === 'volumeDown' || event.action === 'volumeUp')) {
+          const commands = { playPause: 'backspace', mute: 'space', seekBack: menu.composing ? 'pageBack' : 'cursorBack',
+            seekForward: menu.composing ? 'pageForward' : 'cursorForward', volumeDown: 'shift', volumeUp: 'submit' } as const;
+          emit(event.type, { type: commands[event.action] });
+        } else if (event.action === 'confirm') emit(event.type, { type: 'click' });
+        else if (event.action === 'up' || event.action === 'down' || event.action === 'left' || event.action === 'right') {
+          emit(event.type, { type: 'navigate', value: event.action });
+        }
         else disposition = 'blocked';
         break;
       case 'MENU_BACK':
         if (!menu.opened) { disposition = 'pass'; break; }
         if (menu.view === 'search' && menu.choosingLanguage) {
-          menu = { ...menu, choosingLanguage: false }; effect('languageFocus');
+          menu = { ...menu, choosingLanguage: false }; emit(event.type, { type: 'languageFocus' });
         } else if (menu.view === 'search' && menu.composing) {
-          menu = { ...menu, composing: '', candidatePage: 0 }; effect('compositionFocus');
+          menu = { ...menu, composing: '', candidatePage: 0 }; emit(event.type, { type: 'compositionFocus' });
         } else if (menu.view !== 'main' && (menu.view !== 'search' || menu.openedFrom === 'quickMenu')) {
-          menu = { ...menu, view: 'main' }; effect('mainFocus');
-        } else { menu = { ...menuInitial(), language: menu.language }; effect('closeMenu'); }
+          menu = { ...menu, view: 'main' }; emit(event.type, { type: 'mainFocus' });
+        } else { menu = { ...menuInitial(), language: menu.language }; emit(event.type, { type: 'closeMenu' }); }
         break;
       default: disposition = 'pass';
     }
@@ -248,6 +261,7 @@ export let YTGamepadStateMachine!: StateMachineModule;
   }
   function freeze(state: InteractionSnapshot) {
     if (state.app.navigation) Object.freeze(state.app.navigation);
+    if (state.app.lastNavigation) Object.freeze(state.app.lastNavigation);
     if (state.app.adaptation) Object.freeze(state.app.adaptation);
     Object.freeze(state.app); Object.freeze(state.watch); Object.freeze(state.menu); return Object.freeze(state);
   }

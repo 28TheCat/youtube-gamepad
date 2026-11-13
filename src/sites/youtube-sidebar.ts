@@ -38,12 +38,33 @@ export function createSidebarService() {
       };
       const icons: Record<string, string> = { WHAT_TO_WATCH: 'home', SUBSCRIPTIONS: 'subscriptions', ACCOUNT_BOX: 'person',
         WATCH_HISTORY: 'history', PLAYLISTS: 'playlists', WATCH_LATER: 'later', LIKES: 'like', MY_VIDEOS: 'videos',
-        CREATOR_STUDIO: 'videos', LIVE: 'live', SETTINGS: 'settings', SEARCH: 'search' };
-      const ids: Record<string, string> = { '/': 'home', '/feed/subscriptions': 'subscriptions', '/feed/history': 'history',
-        '/feed/playlists': 'playlists', '/playlist?list=WL': 'later', '/playlist?list=LL': 'liked' };
+        CREATOR_STUDIO: 'videos', LIVE: 'live', SETTINGS: 'settings', SEARCH: 'search',
+        SHORTS: 'shorts', YOUTUBE_SHORTS_BRAND_24: 'shorts', DOWNLOADS: 'downloads', MY_CHANNEL: 'person' };
+      const destinations = new Map<string, { id?: string; icon: string }>([
+        ['/', { id: 'home', icon: 'home' }],
+        ['/feed/subscriptions', { id: 'subscriptions', icon: 'subscriptions' }],
+        ['/feed/you', { icon: 'person' }],
+        ['/feed/history', { id: 'history', icon: 'history' }],
+        ['/feed/playlists', { id: 'playlists', icon: 'playlists' }],
+        ['/feed/library', { icon: 'playlists' }],
+        ['/feed/downloads', { icon: 'downloads' }],
+        ['/feed/my_videos', { icon: 'videos' }],
+        ['/playlist?list=WL', { id: 'later', icon: 'later' }],
+        ['/playlist?list=LL', { id: 'liked', icon: 'like' }],
+      ]);
+      function destination(href: string, personal: boolean): { id?: string; icon: string } | undefined {
+        const url = new URL(href, 'https://www.youtube.com');
+        const path = url.pathname.replace(/\/$/, '') || '/';
+        if (url.hostname === 'studio.youtube.com' && /^\/channel\/[^/]+\/videos(?:\/|$)/.test(path)) return { icon: 'videos' };
+        if (url.hostname !== 'www.youtube.com') return;
+        if (path === '/shorts' || path.startsWith('/shorts/')) return { icon: 'shorts' };
+        if (personal && /^\/(?:channel\/UC[\w-]+|@[^/]+)$/.test(path)) return { icon: 'person' };
+        const key = path === '/playlist' ? `${path}?list=${url.searchParams.get('list')}` : path;
+        return destinations.get(key);
+      }
       let budget = 2000, sequence = 0;
       const subscribed = new Set<string>();
-      function entry(raw: any, subscriptions: boolean): SidebarEntry | undefined {
+      function entry(raw: any, subscriptions: boolean, personal: boolean): SidebarEntry | undefined {
         if (!raw || typeof raw !== 'object') return;
         const endpoint = raw.navigationEndpoint || raw.serviceEndpoint;
         const browseId = endpoint?.browseEndpoint?.browseId;
@@ -64,11 +85,13 @@ export function createSidebarService() {
           result.subscribedChannelIds!.push(channel);
           result.subscriptions!.push({ id: channel, label, href: `/channel/${channel}/videos`, avatar, ...status });
         }
-        return { id: channel ? `subscription:${channel}` : ids[href] ||
-          (raw.icon?.iconType === 'MY_VIDEOS' || raw.icon?.iconType === 'CREATOR_STUDIO' ? 'videos' : `guide:${sequence++}`),
-          label, href, icon: icons[raw.icon?.iconType] || 'explore', ...(avatar ? { avatar } : {}), ...status };
+        const target = destination(href, personal);
+        const icon = target?.icon || (Object.hasOwn(icons, raw.icon?.iconType) ? icons[raw.icon.iconType] : 'explore');
+        return { id: channel ? `subscription:${channel}` : destinations.get(href)?.id ||
+          (icon === 'videos' ? 'videos' : `guide:${sequence++}`),
+          label, href, icon, ...(avatar ? { avatar } : {}), ...status };
       }
-      function entries(items: any[], subscriptions = false, depth = 0): SidebarEntry[] {
+      function entries(items: any[], subscriptions = false, depth = 0, personal = false): SidebarEntry[] {
         if (depth > 8 || !Array.isArray(items)) return [];
         const result: SidebarEntry[] = [], seen = new Set<string>();
         for (const item of items) {
@@ -77,15 +100,16 @@ export function createSidebarService() {
           const raw = item?.guideEntryRenderer || item?.guideDownloadsEntryRenderer?.entryRenderer?.guideEntryRenderer ||
             (signIn ? { ...signIn, formattedTitle: signIn.text, icon: { iconType: 'ACCOUNT_BOX' } } : undefined);
           if (raw) {
-            const value = entry(raw, subscriptions);
+            const value = entry(raw, subscriptions, personal);
             if (value && !seen.has(value.href)) { seen.add(value.href); result.push(value); }
             continue;
           }
           const group = item?.guideCollapsibleSectionEntryRenderer || item?.guideCollapsibleEntryRenderer;
           if (!group) continue;
           const headerRaw = group.headerEntry?.guideEntryRenderer;
-          const header = entry(headerRaw, subscriptions);
-          const children = entries(group.sectionItems || group.expandableItems, subscriptions, depth + 1);
+          const header = entry(headerRaw, subscriptions, personal);
+          const children = entries(group.sectionItems || group.expandableItems, subscriptions, depth + 1,
+            personal || header?.href.split('?')[0] === '/feed/you');
           if (!children.length) continue;
           const label = header?.label || text(headerRaw?.formattedTitle || headerRaw?.title) ||
             text(group.expanderItem?.guideEntryRenderer?.formattedTitle || group.expanderItem?.guideEntryRenderer?.title) || text(group.formattedTitle);

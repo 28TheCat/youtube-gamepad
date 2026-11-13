@@ -8,6 +8,7 @@ export const schema = YTGamepadBindings as unknown as {
   defaults: Bindings; rightHand: Bindings; keys: Record<number, string>; labels: Record<BindingAction, string>;
   layouts: Record<Layout, string>;
   normalizeLayouts(raw?: unknown, legacy?: unknown): BindingLayouts;
+  normalizeShortcuts(raw?: unknown): Record<string, Record<string, string>>;
   contextLabel(action: BindingAction, layout: Layout): string;
 };
 export const actions = Object.keys(schema.labels) as BindingAction[];

@@ -14,6 +14,7 @@ export interface WatchInfoSnapshot {
   channelBadge?: 'verified' | 'artist';
   notificationPreference?: import('../../types/ports').NotificationPreference;
   subscribed: boolean; liked: boolean; disliked: boolean;
+  likeCount?: number;
   canLike: boolean; canSubscribe: boolean; canSave: boolean;
   loading: boolean; failed: boolean; working: boolean;
 }
@@ -100,6 +101,11 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
           const next = await client().actions.execute('/next', { videoId: target.videoId, parse: true });
           const secondary = next.contents_memo?.getType(YTNodes.VideoSecondaryInfo)?.[0];
           const primary = next.contents_memo?.getType(YTNodes.VideoPrimaryInfo)?.[0];
+          const buttons = primary?.menu?.top_level_buttons;
+          const modernRating = buttons?.firstOfType(YTNodes.SegmentedLikeDislikeButtonView);
+          const legacyRating = buttons?.firstOfType(YTNodes.SegmentedLikeDislikeButton)?.like_button;
+          const likeCount = modernRating?.like_count ??
+            (legacyRating?.is(YTNodes.ToggleButton) ? legacyRating.like_count : undefined);
           const owner = secondary?.owner?.author;
           const button = secondary?.subscribe_button;
           const channel = button?.is(YTNodes.SubscribeButton) ? button.channel_id : owner?.id;
@@ -107,7 +113,7 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
           if (!channel || !/^UC[\w-]+$/.test(channel) || responseId && responseId !== target.videoId) throw Error('Channel information unavailable');
           info = { basic_info: { id: target.videoId, channel_id: channel, title: primary?.title?.toString() || '',
             author: owner?.name || '', short_description: secondary?.description?.toString() || '',
-            view_count: undefined, is_live: undefined, is_liked: undefined, is_disliked: undefined, allow_ratings: undefined }, secondary_info: secondary };
+            view_count: undefined, like_count: likeCount, is_live: undefined, is_liked: undefined, is_disliked: undefined, allow_ratings: undefined }, secondary_info: secondary };
         }
         if (captured !== state || destroyed) return;
         const basic = info.basic_info;
@@ -127,6 +133,8 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
         captured.notificationPreference = preferenceId === 2 ? 'ALL' : preferenceId === 1 ? 'PERSONALIZED' : preferenceId === 3 ? 'NONE' : undefined;
         captured.canSubscribe = !!channelId && typeof subscribed === 'boolean' && client().session.logged_in;
         const liked = basic.is_liked, disliked = basic.is_disliked;
+        captured.likeCount = typeof basic.like_count === 'number' && Number.isSafeInteger(basic.like_count) && basic.like_count >= 0
+          ? basic.like_count : undefined;
         captured.liked = liked === true; captured.disliked = disliked === true;
         captured.canLike = basic.allow_ratings !== false && typeof liked === 'boolean' &&
           typeof disliked === 'boolean' && client().session.logged_in;
@@ -171,11 +179,15 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
         current.notificationPreference = undefined;
       } else {
         if (!state.canLike) return false;
+        const wasLiked = current.liked;
         const removing = action === 'like' ? state.liked : state.disliked;
         if (removing) await interaction.removeRating(id);
         else if (action === 'like') await interaction.like(id);
         else await interaction.dislike(id);
         current.liked = !removing && action === 'like'; current.disliked = !removing && action === 'dislike';
+        if (current.likeCount !== undefined && current.liked !== wasLiked) {
+          current.likeCount = Math.max(0, current.likeCount + (current.liked ? 1 : -1));
+        }
       }
       return true;
     }, false);

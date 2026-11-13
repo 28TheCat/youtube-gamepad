@@ -34,7 +34,7 @@ const failedAvatar = ref('');
 const key = computed(() => props.focusKey || props.item.key);
 const canOpen = computed(() => !!props.openThread && 'replies' in props.item && (props.item.hasReplies || props.item.replies.length > 0));
 const replyLabel = computed(() => 'replyCount' in props.item && props.item.replyCount
-  ? t('View {count} replies', { count: props.item.replyCount }) : t('View replies'));
+  ? t(props.item.replyCount === 1 ? 'View 1 reply' : 'View {count} replies', { count: props.item.replyCount }) : t('View replies'));
 </script>
 
 <template>
@@ -47,6 +47,7 @@ const replyLabel = computed(() => 'replyCount' in props.item && props.item.reply
     <div class="comment-main">
       <div class="comment-header">
         <span class="comment-author">{{ item.author || t('Reply') }}</span>
+        <span v-if="item.replyTo" class="comment-reply-target">{{ t('Replying to {author}', { author: item.replyTo }) }}</span>
       </div>
       <div class="comment-body">
         <component :is="canOpen ? 'button' : 'p'" class="comment-text" :data-focus-id="`comment:${key}`"

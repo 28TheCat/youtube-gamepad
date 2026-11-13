@@ -23,7 +23,7 @@ function adjust(key: Exclude<VideoGridKey, 'gridAutoSwitch' | 'gridLayout'>, del
     <h4>{{ t("视频卡片网格") }}</h4>
     <p>{{ t("设置不同视频卡片区域宽度下显示的列数。当区域宽度大于等于设定值时，使用对应的列数。") }}</p>
     <div class="video-grid-modes" role="group" :aria-label="t('视频卡片布局')">
-      <button v-for="mode in [{ key: 'adaptive' as const, label: t('自适应网格') }, { key: 'oneColumn' as const, label: t('单列列表') }, { key: 'twoColumns' as const, label: t('双列列表') }]" :key="mode.key" type="button" :data-setting="`gridLayout-${mode.key}`" :aria-pressed="values.gridLayout === mode.key" :disabled="disabled" @click="emit('save', { gridLayout: mode.key }, `gridLayout-${mode.key}`)">{{ t(mode.label) }}</button>
+      <button v-for="mode in [{ key: 'adaptive' as const, label: 'Adaptive grid' }, { key: 'oneColumn' as const, label: 'Single-column list' }, { key: 'twoColumns' as const, label: 'Two-column list' }]" :key="mode.key" type="button" :data-setting="`gridLayout-${mode.key}`" :aria-pressed="values.gridLayout === mode.key" :disabled="disabled" @click="emit('save', { gridLayout: mode.key }, `gridLayout-${mode.key}`)">{{ t(mode.label) }}</button>
     </div>
     <div class="video-grid-panel">
       <div class="grid-setting-row">
@@ -38,11 +38,11 @@ function adjust(key: Exclude<VideoGridKey, 'gridAutoSwitch' | 'gridLayout'>, del
       <div class="grid-setting-row">
         <div><h5>{{ t("封面占比") }}</h5><p>{{ t("分别设置单列与双列横向视频卡片中封面所占的宽度。") }}</p></div>
         <div class="grid-cover-controls">
-          <div v-for="item in [{ key: 'gridSingleCover' as const, label: t('单列布局') }, { key: 'gridDoubleCover' as const, label: t('双列布局') }]" :key="item.key" class="grid-cover">
+          <div v-for="item in [{ key: 'gridSingleCover' as const, label: 'Single-column layout' }, { key: 'gridDoubleCover' as const, label: 'Two-column layout' }]" :key="item.key" class="grid-cover">
             <label :for="item.key">{{ t(item.label) }}</label>
             <input :id="item.key" type="range" min="30" max="70" step="5" :disabled="disabled" :value="values[item.key]" @input="preview[item.key] = Number(($event.target as HTMLInputElement).value)" @change="change(item.key, $event)">
             <output :for="item.key">{{ preview[item.key] ?? values[item.key] }}%</output>
-            <template v-if="gamepad"><button v-for="delta in [-5, 5]" :key="delta" type="button" :data-setting="`${item.key}-${delta > 0 ? 'plus' : 'minus'}`" :disabled="disabled" :aria-label="t('{direction} {label} thumbnail width', { direction: t(delta > 0 ? 'Increase' : 'Decrease'), label: item.label })" @click="adjust(item.key, delta, 30, 70)">{{ delta > 0 ? '+' : '−' }}</button></template>
+            <template v-if="gamepad"><button v-for="delta in [-5, 5]" :key="delta" type="button" :data-setting="`${item.key}-${delta > 0 ? 'plus' : 'minus'}`" :disabled="disabled" :aria-label="t('{direction} thumbnail width for {label}', { direction: t(delta > 0 ? 'Increase' : 'Decrease'), label: t(item.label) })" @click="adjust(item.key, delta, 30, 70)">{{ delta > 0 ? '+' : '−' }}</button></template>
           </div>
         </div>
       </div>

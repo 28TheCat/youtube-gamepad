@@ -46,7 +46,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
         if (event.type === 'WATCH_FOCUS') state.panelIndex = event.index;
         if (event.type === 'WATCH_PANEL_COUNT') state.panelIndex = Math.min(state.panelIndex, event.count);
       },
-      focus() { [close, ...window.panels.buttons][state.panelIndex]?.focus({ preventScroll: true }); },
+      focus() { window.panels.items[state.panelIndex]?.focus({ preventScroll: true }); },
       controllerStyle: { bind(node, text, attribute) { if (attribute) node.setAttribute(attribute, text); else node.textContent = text; }, hint() {},
         badge(node, key) { node.dataset.ytgKey = key; node.textContent = key; return node; } },
       controller: { readRoute: () => ({ key: window.routeKey }), readComments: () => structuredClone(window.records), readCommentsStatus: () => window.commentStatus,
@@ -69,6 +69,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
     window.panels.open('comments');
   }, { layout, styles: readFileSync(new URL('../src/ui/watch.css', import.meta.url), 'utf8') });
   const host = page.locator('#panels'), detail = host.locator('[data-comment-detail]');
+  assert.equal(await host.getByRole('button', { name: 'Back', exact: true }).count(), layout === 'windowed' ? 0 : 1);
   assert.equal(await host.locator('button.comment-header, .comment-header[tabindex], .comment-author[data-focus-id]').count(), 0,
     'commenter names do not create navigation stops');
   assert.equal(await page.evaluate(() => window.panels.buttons.filter(node => node.dataset.focusId?.startsWith('comment:'))
@@ -136,6 +137,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
   assert.deepEqual(await page.evaluate(() => window.requests), [['comments', true], ['replies', 'parent-10']]);
   await host.getByRole('button', { name: 'Back to comments', exact: true }).click();
   assert.equal(await detail.count(), 0);
+  assert.equal(await host.getByRole('button', { name: 'Back', exact: true }).count(), layout === 'windowed' ? 0 : 1);
   assert.equal(await page.evaluate(() => window.sheet.scrollTop), scrollBefore);
   assert.equal(await page.evaluate(() => document.querySelector('#panels').shadowRoot.activeElement.dataset.focusId), 'replies:parent-10');
   assert.equal(await host.locator('.comment-reply').count(), 0);
@@ -186,6 +188,38 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
   await page.evaluate(() => { window.panels.hide(); window.routeKey = 'second'; window.records = []; window.panels.open('comments'); });
   assert.equal(await detail.count(), 0, 'route changes clear thread history');
   assert.equal(await page.evaluate(() => window.panels.back()), false);
+});
+
+for (const reducedMotion of ['no-preference', 'reduce']) test(`menu enters from below and fades out in place (${reducedMotion})`, async t => {
+  const page = await browserPage(t);
+  await page.emulateMedia({ reducedMotion });
+  await page.setContent('<!doctype html><html><body></body></html>');
+  await page.addStyleTag({ content: readFileSync(new URL('../src/ui/theme.css', import.meta.url), 'utf8') });
+  const result = await page.evaluate(async styles => {
+    const host = document.createElement('div'); document.body.append(host);
+    const root = host.attachShadow({ mode: 'open' }), style = document.createElement('style');
+    style.textContent = styles;
+    const panel = document.createElement('section'); panel.textContent = 'Quick menu'; root.append(style, panel);
+    const frame = () => new Promise(requestAnimationFrame);
+    getComputedStyle(host).display;
+    host.style.display = 'flex'; host.setAttribute('data-open', '');
+    await frame(); await frame();
+    const opening = panel.getAnimations().flatMap(animation => animation.effect.getKeyframes()).map(keyframe => keyframe.translate);
+    await Promise.all(host.getAnimations({ subtree: true }).map(animation => animation.finished));
+    host.removeAttribute('data-open'); host.setAttribute('data-closing', ''); host.style.display = 'none';
+    const closing = { translate: getComputedStyle(panel).translate,
+      fades: host.getAnimations().some(animation => animation.effect.getKeyframes().some(keyframe => keyframe.opacity === '0')) };
+    await frame();
+    host.removeAttribute('data-closing'); host.style.display = 'flex';
+    await Promise.all(host.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})));
+    return { opening, closing, reopened: getComputedStyle(host).display === 'flex' && getComputedStyle(host).opacity === '1' };
+  }, readFileSync(new URL('../src/ui/menu.css', import.meta.url), 'utf8'));
+  if (reducedMotion === 'no-preference') {
+    assert.ok(result.opening.includes('0px 30px'), 'entrance starts 30px below the final position');
+    assert.ok(result.closing.fades, 'closing retains the fade through display:none');
+  } else assert.deepEqual(result.opening, []);
+  assert.ok(['none', '0px', '0px 0px'].includes(result.closing.translate), 'closing stays at the final position');
+  assert.ok(result.reopened, 'reopening interrupts the exit without hiding the new panel');
 });
 
 for (const layout of ['windowed', 'fullscreen']) test(`comments use independent motion rules and never expand into a full-screen backdrop (${layout})`, async t => {

@@ -16,7 +16,8 @@ export function coreFixture(size = 1000) {
   const node = (index = -1) => ({
     isConnected: true, style: {}, dataset: {}, attributes: {}, classList: { add() {}, remove() {}, contains() { return false; } },
     append() {}, replaceChildren(...children) { this.children = children; }, attachShadow() { return node(); }, contains(el) { return el === this; },
-    closest() { return null; }, getAttribute(name) { return this.attributes[name] ?? null; }, setAttribute(name, value) { this.attributes[name] = value; },
+    closest() { return null; }, querySelectorAll() { return []; },
+    getAttribute(name) { return this.attributes[name] ?? null; }, setAttribute(name, value) { this.attributes[name] = value; },
     focus() { document.activeElement = this; events.focusin?.({ target: this }); },
     scrollIntoView() {},
     getBoundingClientRect() {
@@ -28,7 +29,7 @@ export function coreFixture(size = 1000) {
   const nodes = Array.from({ length: size }, (_, i) => node(i));
   const document = { body: node(), documentElement: node(), createElement: () => node(),
     addEventListener: listen, contains: () => true,
-    querySelectorAll(selector) { counts.queries++; return selector === '[role="dialog"]' ? [] : nodes; }
+    querySelectorAll(selector) { counts.queries++; return selector === '[role="dialog"]' || selector.includes(':hover') ? [] : nodes; }
   };
   const window = { addEventListener: listen, scrollTo() {} };
   const context = { window, document, location: { pathname: '/', search: '' }, innerWidth: 1200, innerHeight: 800,
@@ -37,7 +38,7 @@ export function coreFixture(size = 1000) {
     MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} }
   };
   for (const file of ['src/navigation/navigation.ts', 'src/navigation/core.ts']) runInNewContext(moduleSource(file), context);
-  runInNewContext(moduleSource('src/sites/youtube.ts'), { window });
+  runInNewContext(moduleSource('src/sites/youtube.ts'), context);
   window.YTGamepad.registerSite({ selectors: 'cards', getSection: () => 'content',
     sections: { content: { layout: 'grid' } }, getKey: el => String(nodes.indexOf(el)),
     ignoreMutation: window.YTGamepadSite.createNavigationConfig({}).ignoreMutation,

@@ -21,6 +21,8 @@ test('language settings persist, update open tabs and popup, and keep keyboard p
     assert.equal(await tab.evaluate(() => localStorage.getItem('ytg-keyboard-language')), 'en');
   }
   await options.getByRole('heading', { name: '通用', exact: true }).waitFor();
+  await options.waitForFunction(() => document.title === 'YouTube Gamepad · 全部设置');
+  assert.deepEqual(await options.locator('#uiLanguage option').allTextContents(), ['English', '简体中文']);
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${id}/src/popup/popup.html`);
   await popup.getByRole('button', { name: '在 YouTube 上打开设置' }).waitFor();
@@ -33,6 +35,7 @@ test('language settings persist, update open tabs and popup, and keep keyboard p
   await page.getByRole('button', { name: '切换输入语言', exact: true }).waitFor();
   await options.selectOption('#uiLanguage', 'en');
   await page.getByRole('button', { name: 'Switch input language', exact: true }).waitFor();
+  await options.waitForFunction(() => document.title === 'YouTube Gamepad · All settings');
   assert.equal(await page.locator('#yt-gamepad-menu #query').inputValue(), 'Settings', 'language updates preserve user input');
   await page.reload();
   await page.locator('#ytg-sidebar-settings').click();

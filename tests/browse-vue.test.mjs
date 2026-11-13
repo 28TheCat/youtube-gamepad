@@ -550,6 +550,16 @@ test('long feeds bound mounted cards, mount offscreen gamepad neighbours and res
   });
   const before = await grid.evaluate(node => node.scrollTop);
   assert.ok(before > 0);
+  const alignment = await grid.evaluate((node, id) => {
+    const card = node.querySelector(`[data-browse-id="${id}"]`).closest('.virtual-row').getBoundingClientRect();
+    const viewport = node.getBoundingClientRect();
+    const padding = getComputedStyle(node);
+    return { top: card.top - viewport.top - parseFloat(padding.scrollPaddingTop),
+      bottom: viewport.bottom - parseFloat(padding.scrollPaddingBottom) - card.bottom,
+      snap: getComputedStyle(node).scrollSnapType };
+  }, selected);
+  assert.ok(alignment.top >= -2 && alignment.bottom >= -2, `selected row stays visible: ${JSON.stringify(alignment)}`);
+  assert.equal(alignment.snap, 'none');
   assert.ok(await grid.locator('[data-browse-id]').count() < 100);
   await page.evaluate(id => window.__pageDOM.querySelector(`[data-browse-id="${id}"]`).click(), selected);
   await page.waitForURL('**/watch?*');
@@ -635,10 +645,29 @@ for (const count of [12, 70]) test(`Shorts shelf with ${count} cards scrolls and
   for (let index = 7; index >= 0; index--) await move('left', index);
   await move('left', count - 1);
   await move('right', 0);
+  await page.waitForFunction(() => window.__pageDOM.querySelector('.shorts-row').scrollLeft === 0);
   assert.equal(await page.locator('.shorts-row').evaluate(node => node.scrollLeft), 0);
   const next = page.locator('[data-shorts-scroll="next"]'), previous = page.locator('[data-shorts-scroll="previous"]');
   assert.equal(await previous.locator('svg').getAttribute('data-icon'), 'mingcute:left-line');
   assert.equal(await next.locator('svg').getAttribute('data-icon'), 'mingcute:right-line');
+  if (count === 12) {
+    const slide = await page.evaluate(async () => {
+      const row = window.__pageDOM.querySelector('.shorts-row');
+      const start = performance.now(), samples = [];
+      window.__pageDOM.querySelector('[data-shorts-scroll="next"]').click();
+      while (performance.now() - start < 600) {
+        await new Promise(requestAnimationFrame);
+        samples.push({ time: performance.now() - start, left: row.scrollLeft });
+      }
+      return samples;
+    });
+    const end = slide.at(-1).left;
+    assert.ok(end > 0);
+    assert.ok(slide.some(sample => sample.time < 400 && sample.left > 0 && sample.left < end - 1), 'next slides through intermediate positions');
+    assert.ok(slide.find(sample => sample.left === end).time >= 400, 'slide lasts approximately 500ms');
+    await previous.click();
+    await page.waitForFunction(() => window.__pageDOM.querySelector('.shorts-row').scrollLeft === 0);
+  }
   await next.click();
   await page.waitForFunction(() => window.__pageDOM.querySelector('.shorts-row').scrollLeft > 0);
   await previous.click();
@@ -651,6 +680,18 @@ for (const count of [12, 70]) test(`Shorts shelf with ${count} cards scrolls and
   await next.click();
   await page.waitForFunction(() => window.__pageDOM.querySelector('.shorts-row').scrollLeft === 0);
   assert.ok(await page.locator('.shorts-card').count() < 30);
+  if (count === 12) {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const positions = await page.evaluate(async () => {
+      const row = window.__pageDOM.querySelector('.shorts-row');
+      window.__pageDOM.querySelector('[data-shorts-scroll="next"]').click();
+      const immediate = row.scrollLeft;
+      for (let i = 0; i < 3; i++) await new Promise(requestAnimationFrame);
+      return { immediate, after: row.scrollLeft };
+    });
+    assert.ok(positions.immediate > 0, 'reduced motion positions the next card immediately');
+    assert.equal(positions.after, positions.immediate);
+  }
 });
 
 for (const height of [600, 900]) test(`mouse wheel stops at the entire Shorts shelf from either side and its cards remain clickable at height ${height}`, { timeout: 30000 }, async t => {
@@ -2302,6 +2343,14 @@ test('Home sidebar and YouTube brand each request a fresh recommendation batch',
   });
   await page.locator('.client-brand').click();
   await page.locator('.home-loading-line').waitFor();
+  const refreshMotion = await page.locator('.client-refresh svg').evaluate(svg => {
+    const animation = svg.getAnimations()[0];
+    return { duration: animation?.effect.getTiming().duration,
+      end: animation?.effect.getKeyframes().at(-1).transform };
+  });
+  assert.deepEqual(refreshMotion, { duration: 600, end: 'rotate(720deg)' });
+  await page.locator('.client-refresh').evaluate(button => button.click());
+  assert.equal(batches, 3, 'refresh while loading does not start another request');
   await page.waitForTimeout(200);
   assert.equal(await page.evaluate(() => window.__pageDOM.querySelector('[data-browse-id="video:batch2"]') === window.__retainedHomeCard), true);
   assert.equal(await page.locator('.feed-skeleton').count(), 0, 'refresh preserves the current batch instead of displaying a skeleton screen');
@@ -2313,4 +2362,52 @@ test('Home sidebar and YouTube brand each request a fresh recommendation batch',
   assert.ok(frames.every(frame => frame.count > 0 && frame.opacity === '1' && !frame.hidden), JSON.stringify(frames));
   assert.equal(batches, 3);
   assert.equal(await page.locator('[data-browse-id="video:batch2"]').count(), 0);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.locator('.client-refresh svg').evaluate(svg => svg.getAnimations().forEach(animation => animation.cancel()));
+  await page.locator('.client-refresh').click();
+  await page.locator('[data-browse-id="video:batch4"]').waitFor();
+  assert.equal(await page.locator('.client-refresh svg').evaluate(svg => svg.getAnimations().length), 0);
+});
+
+for (const source of ['/', '/results?search_query=music&sp=original']) test(`B returns to the saved card and scroll on ${source}`, { timeout: 30000 }, async t => {
+  const page = await browserPage(t);
+  let feedRequests = 0;
+  await page.route('https://i.ytimg.com/**', route => route.abort());
+  await page.route('https://www.youtube.com/**', route => {
+    if (route.request().url().includes('/youtubei/')) {
+      const endpoint = source === '/' ? '/browse' : '/search';
+      if (!route.request().url().includes(endpoint)) return route.fulfill({ json: {} });
+      feedRequests++;
+      const items = Array.from({ length: 60 }, (_, i) => modernVideo('return' + i));
+      return route.fulfill({ json: source === '/' ? { contents: items } : { contents: { twoColumnSearchResultsRenderer: { primaryContents: { sectionListRenderer: { contents: [{ itemSectionRenderer: { contents: items } }] } } } } } });
+    }
+    return route.fulfill({ contentType: 'text/html', body: '<html><body><ytd-app><ytd-page-manager></ytd-page-manager></ytd-app></body></html>' });
+  });
+  await page.goto('https://www.youtube.com' + source);
+  await page.evaluate(() => {
+    window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientName: 'WEB', clientVersion: 'test' } } : undefined };
+    window.__pageDOM.querySelector('ytd-app').navigate_ = endpoint => {
+      document.dispatchEvent(new Event('yt-navigate-start'));
+      history.pushState({}, '', endpoint.commandMetadata.webCommandMetadata.url);
+      document.dispatchEvent(new Event('yt-navigate-finish'));
+    };
+    window.addEventListener('popstate', () => {
+      document.dispatchEvent(new Event('yt-navigate-start'));
+      setTimeout(() => document.dispatchEvent(new Event('yt-navigate-finish')), 0);
+    });
+  });
+  await mainBundle(page);
+  const card = page.locator('[data-browse-id="video:return35"]');
+  await card.waitFor(); await card.focus();
+  const grid = page.locator('[data-ytg-browse-grid]');
+  const before = await grid.evaluate(node => node.scrollTop);
+  assert.ok(before > 0);
+  await page.evaluate(() => window.YTGamepad.act('confirm'));
+  await page.waitForURL('**/watch?v=return35');
+  await page.evaluate(() => window.YTGamepad.act('back'));
+  await page.waitForURL('https://www.youtube.com' + source);
+  await card.waitFor();
+  await page.waitForFunction(() => window.__pageDOM.activeElement?.dataset.browseId === 'video:return35');
+  assert.ok(Math.abs(await grid.evaluate(node => node.scrollTop) - before) <= 1);
+  assert.equal(feedRequests, 1, 'return preserves loaded results without requesting them again');
 });

@@ -24,11 +24,15 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
       replies: key => { port.controller.request('replies', key); }
     });
     let managedFocus = false;
+    const hasClose = () => renderedPanel !== 'comments' || !!comments.state.thread ||
+      document.documentElement.dataset.ytgPlaybackLayout !== 'windowed';
+    const panelItems = () => hasClose() ? [close, ...commentButtons] : commentButtons;
+    const lastPanelIndex = () => Math.max(0, panelItems().length - 1);
     const drawer = createDrawer({
       element: () => dialog, content: () => sheet,
       activeElement: () => (dialog.getRootNode?.() as ShadowRoot | undefined)?.activeElement as HTMLElement | null,
       route: () => port.controller.readRoute().key,
-      items: () => [close, ...commentButtons], index: () => watchState().panelIndex,
+      items: panelItems, index: () => watchState().panelIndex,
       opened(modal) { if (modal && focusManager) { focusManager.open(dialog, 'watch'); managedFocus = true; } },
       cleared: clearPanel,
       restoreReturn(target, restore) {
@@ -36,8 +40,8 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
         else if (restore && target?.isConnected && !target.closest('[hidden],[inert]')) target.focus({ preventScroll: true });
       },
       restoreDetail(position) {
-        const index = commentButtons.findIndex(button => button.dataset.focusId === position.id);
-        send({ type: 'WATCH_FOCUS', region: 'panel', index: index >= 0 ? index + 1 : Math.min(position.index, commentButtons.length) });
+        const index = panelItems().findIndex(button => button.dataset.focusId === position.id);
+        send({ type: 'WATCH_FOCUS', region: 'panel', index: index >= 0 ? index : Math.min(position.index, lastPanelIndex()) });
         focus();
       }
     });
@@ -64,7 +68,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
           sort: value => port.controller.request('commentSort', value),
           translate: key => { port.controller.request('translateComment', key); }
         }),
-        changed() { commentButtons = renderer?.buttons() || []; send({ type: 'WATCH_PANEL_COUNT', count: commentButtons.length }); },
+        changed() { commentButtons = renderer?.buttons() || []; send({ type: 'WATCH_PANEL_COUNT', count: lastPanelIndex() }); },
         subscriptionAction: updateSubscription, savePlaylist: togglePlaylist, retryPlaylists: loadPlaylists
       });
       renderer.update({ panel, text: port.descriptionText, records, unavailable,
@@ -110,7 +114,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     function unmount() { renderer?.dispose(); renderer = undefined; commentButtons = []; commentKey = ''; }
   function clearPanel() {
     if (renderedPanel === 'comments') savedComments = { route: commentRoute, top: sheet.scrollTop,
-      index: watchState().panelIndex, id: commentButtons[watchState().panelIndex - 1]?.dataset.focusId || '',
+      index: watchState().panelIndex, id: panelItems()[watchState().panelIndex]?.dataset.focusId || '',
       thread: comments.state.thread, limit: comments.state.limit };
     renderedPanel = '';
     comments.reset();
@@ -173,9 +177,9 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     paint('comments', records, unavailable);
     const nextReply = comments.state.nextIndex === undefined ? undefined : records.find(item => item.key === comments.state.thread)?.replies[comments.state.nextIndex];
     if (nextReply) { activeId = 'comment:reply:' + JSON.stringify([comments.state.thread, nextReply.key]); comments.state.nextIndex = undefined; }
-    const index = activeId ? commentButtons.findIndex(button => button.dataset.focusId === activeId) : -1;
-    if (index >= 0) send({ type: 'WATCH_FOCUS', region: 'panel', index: index + 1 });
-    send({ type: 'WATCH_PANEL_COUNT', count: commentButtons.length }); if (!port.controller.navigating && !port.controller.hasTemporaryLayer?.()) focus();
+    const index = activeId ? panelItems().findIndex(button => button.dataset.focusId === activeId) : -1;
+    if (index >= 0) send({ type: 'WATCH_FOCUS', region: 'panel', index });
+    send({ type: 'WATCH_PANEL_COUNT', count: lastPanelIndex() }); if (!port.controller.navigating && !port.controller.hasTemporaryLayer?.()) focus();
   }
   function loadComments() {
     if (destroyed || watchState().panel !== 'comments') return;
@@ -225,8 +229,8 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
         if (comments.state.thread) {
           controllerStyle.bind(close, 'Back to comments'); controllerStyle.bind(panelTitle, 'Replies'); controllerStyle.bind(dialog, 'Replies', 'aria-label');
         }
-        const index = saved.id ? commentButtons.findIndex(button => button.dataset.focusId === saved.id) : -1;
-        send({ type: 'WATCH_FOCUS', region: 'panel', index: index >= 0 ? index + 1 : Math.min(saved.index, commentButtons.length) });
+        const index = saved.id ? panelItems().findIndex(button => button.dataset.focusId === saved.id) : -1;
+        send({ type: 'WATCH_FOCUS', region: 'panel', index: index >= 0 ? index : Math.min(saved.index, lastPanelIndex()) });
         focus(); sheet.scrollTop = saved.top;
       }
     }
@@ -235,7 +239,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     drawer.close(false);
   }
   return { open, hide, close: closePanel, back, refresh: readComments, load: loadComments,
-    get buttons() { return commentButtons; },
+    get buttons() { return commentButtons; }, get items() { return panelItems(); },
     destroy() { if (destroyed) return; hide(); destroyed = true; dialog.removeEventListener('click', outsideClick); window.removeEventListener('resize', positionSubscription); window.removeEventListener('scroll', positionSubscription, true); }
   };
   } };

@@ -6,6 +6,7 @@ export interface BrowseState { category?: string; gridScroll?: number }
 export interface BrowseRestore { activated?: boolean; previousFeed?: string }
 export interface NavigationConfig extends Partial<NavigationPolicy> {
   overlays?: string;
+  getPageHint?(): string;
   beforeActivate?(el: HTMLElement): boolean | void;
   selectors?: string; overlayItems?: string; defaultSection?: string;
   sections?: Record<string, NavigationSection>;

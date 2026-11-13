@@ -3,6 +3,26 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { launchExtension } from './helpers/extension.mjs';
 
+test('popup and help prompts follow layout bindings, language changes and the right-hand preset', { timeout: 60000 }, async t => {
+  const { context, worker, options, id } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({
+    bindingLayouts: { browse: { confirm: 1, back: 0 }, watch: { confirm: 3, search: 0 } }
+  }));
+  await options.locator('[data-category-link="help"]').click();
+  const help = options.locator('#connectionHelp [data-ytg-hint]');
+  await options.waitForFunction(() => document.querySelector('#connectionHelp [data-ytg-hint]')?.textContent.includes('B Confirm, A Back'));
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${id}/src/popup/popup.html`);
+  await popup.waitForFunction(() => document.querySelector('.quick-guide')?.textContent.includes('B Confirm · A Back'));
+  await worker.evaluate(() => chrome.storage.local.set({ uiLanguage: 'zh-CN' }));
+  await popup.waitForFunction(() => document.querySelector('.quick-guide')?.textContent.includes('B 确认 · A 返回'));
+  await options.waitForFunction(() => document.querySelector('#connectionHelp [data-ytg-hint]')?.textContent.includes('B 确认，A 返回'));
+  assert.match(await help.getAttribute('aria-label'), /B 确认，A 返回/);
+  await worker.evaluate(() => chrome.storage.local.set({ rightHandMode: true }));
+  await popup.waitForFunction(() => document.querySelector('.quick-guide')?.textContent.includes('A 确认 · B 返回 · RB 菜单'));
+  await options.waitForFunction(() => document.querySelector('#connectionHelp [data-ytg-hint]')?.textContent.includes('右摇杆'));
+});
+
 test('playback parameter settings persist, reject invalid input and follow external changes', { timeout: 45000 }, async t => {
   const { options, worker } = await launchExtension(t);
   await options.locator('#seekStep').waitFor();
@@ -131,12 +151,14 @@ test('Vue options migrate legacy settings, synchronize pages and preserve both b
   assert.equal(await options.locator('#binding-confirm').inputValue(), '0');
   await options.locator('#binding-search').selectOption('8');
   await options.waitForFunction(() => !document.querySelector('#binding-search').disabled);
+  await worker.evaluate(() => chrome.storage.local.set({ shortcutLayouts: { watch: { X: 'm' }, browse: { Y: 'c' } } }));
   await options.locator('#resetBindings').click();
   await options.waitForFunction(() => !document.querySelector('#resetBindings').disabled);
-  const saved = await worker.evaluate(() => chrome.storage.local.get('bindingLayouts'));
+  const saved = await worker.evaluate(() => chrome.storage.local.get(['bindingLayouts', 'shortcutLayouts']));
   assert.equal(saved.bindingLayouts.watch.confirm, 1);
   assert.equal(saved.bindingLayouts.browse.confirm, 0);
   assert.equal(saved.bindingLayouts.browse.search, 3);
+  assert.deepEqual(saved.shortcutLayouts, { watch: { X: 'm' }, browse: {} });
   await worker.evaluate(() => chrome.storage.local.set({ repeatDelay: 440 }));
   await options.waitForFunction(() => document.querySelector('#repeatDelay').value === '440');
 });

@@ -20,7 +20,7 @@ export function mainFixture() {
       __VUE_OPTIONS_API__: false, __VUE_PROD_DEVTOOLS__: false, __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false },
     plugins: [{ name: 'main-fixture', enforce: 'pre', resolveId: value => value.replaceAll('\\', '/') === id ? id : undefined,
       load: value => value === id ? source : undefined,
-      transform(code, path) { if (path.replaceAll('\\','/').endsWith('/src/app/application.ts')) return code.replace('export const localChannel = createApplicationChannel();', 'const localChannel = undefined;').replace('configureDiagnosticsChannel(localChannel);', '').replace(/const disposeContent = startContent\(localChannel, \(\) => YTGamepadRuntime.destroy\(\)(?:, settingsApplied)?\);/, 'const disposeContent = () => {};').replace('await initialSettings;', 'settingsApplied(); await initialSettings;'); } },
+      transform(code, path) { if (path.replaceAll('\\','/').endsWith('/src/app/application.ts')) return code.replace('export const localChannel = createApplicationChannel();', 'const localChannel = undefined;').replace('configureDiagnosticsChannel(localChannel);', '').replace(/const disposeContent = startContent\(localChannel, \(\) => YTGamepadRuntime.destroy\(\)(?:, settingsApplied)?(?:,\s*\{ snapshot: interaction\.snapshotTrace, clear: interaction\.clearTrace \})?\);/, 'const disposeContent = () => {};').replace('await initialSettings;', 'settingsApplied(); await initialSettings;'); } },
       vue({ template: { compilerOptions: { hoistStatic: false, isCustomElement: tag => tag === 'selectedcontent' } } })],
     build: { write: false, minify: false, target: 'es2022',
       lib: { entry: id, formats: ['iife'], name: 'MainFixture' } }

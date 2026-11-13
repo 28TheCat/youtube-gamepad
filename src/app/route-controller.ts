@@ -1,53 +1,116 @@
-import type { InteractionEvent, ModuleFactory, RouteControllerModule, RoutePort } from '../../types/ports';
+import type { InteractionEvent, ModuleFactory, RouteControllerModule, RouteEffect, RoutePort } from '../../types/ports';
+import { sameWatchDestination } from '../shared/watch-destination';
+import { isInnerTubeBrowseRoute } from '../shared/explore-pages';
 
-export let YTGamepadRouteController!: ModuleFactory<RoutePort,RouteControllerModule>;
-// Owns browser history interception and route notifications; rules stay in route-state.
+const requestTimeout = 8000;
+
+export let YTGamepadRouteController!: ModuleFactory<RoutePort, RouteControllerModule>;
 (() => {
   if (YTGamepadRouteController) return;
-    YTGamepadRouteController = {
-    /** @param {import('../../types/ports.js').RoutePort} port */
-    create(port: import('../../types/ports.js').RoutePort) {
+  YTGamepadRouteController = {
+  create(port) {
     const lifecycle = port.runtime.scope('route');
-    const send = (event: InteractionEvent) => port.interaction.dispatch(event);
+    const send = <Event extends InteractionEvent>(event: Event) => port.interaction.dispatch(event);
     const app = () => port.interaction.state.app;
-    let started = false;
-    function cancel() { send({ type: 'NAV_CANCEL', route: port.routeNow() }); port.renderMode(); }
-    function finish() {
+    let started = false, sequence = 0;
+    let deadline: { id: number; timer: number | undefined } | undefined;
+    const pending = () => {
+      const navigation = app().navigation;
+      return navigation?.source === 'extension' ? navigation : null;
+    };
+    function clearDeadline(id: number) {
+      if (deadline?.id !== id) return;
+      lifecycle.clearTimeout(deadline.timer);
+      deadline = undefined;
+    }
+    function cancelRequest(id: number) {
+      clearDeadline(id);
+      if (lifecycle.destroyed || pending()?.id !== id) return;
+      send({ type: 'REQUEST_CANCEL', id, route: port.routeNow() });
+      port.renderMode();
+    }
+    function wait(id: number) {
+      if (deadline) clearDeadline(deadline.id);
+      send({ type: 'REQUEST_WAIT', id });
+      deadline = { id, timer: lifecycle.timeout(() => cancelRequest(id), requestTimeout) };
+    }
+    function rememberParent(route: string) {
+      try { port.history.replaceState({ ...port.history.state, ytGamepadParentRoute: route }, ''); } catch { /* Keep navigation usable. */ }
+    }
+    function finishRequest(id: number, route: string, evidence: 'pushState' | 'replaceState' | 'popstate') {
       const previous = app();
-      if (previous.navigation && !previous.navigation.traversal && previous.settledRoute && previous.settledRoute !== port.routeNow()) {
-        try { port.history.replaceState({ ...port.history.state, ytGamepadParentRoute: previous.settledRoute }, ''); } catch { /* Keep navigation usable. */ }
+      if (send({ type: 'REQUEST_FINISH', id, route, evidence }).disposition !== 'handled') return;
+      clearDeadline(id);
+      if (!previous.navigation?.traversal && evidence === 'pushState' && previous.chainVerified) rememberParent(previous.route);
+      port.renderMode();
+    }
+    function syncSite(type: 'NAV_FINISH' | 'NAV_CANCEL') {
+      const previous = app(), route = port.routeNow();
+      if (send({ type, route }).disposition !== 'handled') return;
+      if (type === 'NAV_FINISH' && previous.navigation && !previous.navigation.traversal &&
+        previous.settledRoute !== route) rememberParent(previous.settledRoute);
+      if (previous !== app() || type === 'NAV_FINISH') port.renderMode();
+    }
+    function observeHistory(method: 'pushState' | 'replaceState', route: string, changed: boolean) {
+      const request = pending();
+      // YouTube's lifecycle events carry no request ID. Settle video opens
+      // from the observed URL commit, never from an unlabelled finish or error.
+      if (changed && request && sameWatchDestination(request.target, route)) {
+        finishRequest(request.id, route, method);
+        return;
       }
-      send({ type: 'NAV_FINISH', route: port.routeNow() });
-      if (previous.mode !== app().mode || previous.settledRoute !== app().settledRoute || previous.navigation) port.renderMode();
+      send({ type: 'HISTORY', method, route, changed });
+      if (changed) port.renderMode();
     }
     function prepareVideo(href: string | null) {
       if (lifecycle.destroyed || !port.enabled() || !href || app().navigation || app().returning) return false;
-      let target;
-      try { target = new URL(href, port.location.origin); } catch (_) { return false; }
+      let target: URL;
+      try { target = new URL(href, port.location.origin); } catch { return false; }
+      const route = port.routeNow(), destination = target.pathname + target.search;
       if (target.origin !== port.location.origin || target.pathname !== '/watch' || !target.searchParams.get('v') ||
-          target.pathname + target.search === port.routeNow()) return false;
-      const result = send({ type: 'PREPARE_VIDEO', route: port.routeNow(), target: target.pathname + target.search });
+          destination === route) return false;
+      const id = ++sequence;
+      const result = send({ type: 'PREPARE_VIDEO', id, route, target: destination });
       if (result.disposition === 'blocked') return false;
-      port.renderMode(); return true;
+      wait(id);
+      port.renderMode(); return id;
     }
-    function execute(effect: import('../../types/ports').Effect) {
+    function execute(effect: RouteEffect) {
       if (lifecycle.destroyed) return;
       switch (effect.type) {
         case 'pause': port.pause(); break;
         case 'closeMenu': port.closeMenu(); break;
-        case 'historyGo': port.history.go(effect.value as number); break;
+        case 'historyGo': port.history.go(effect.value); break;
         case 'historyBack': port.history.back(); break;
-        case 'assign': port.location.assign(effect.value as string); break;
+        case 'assign': port.location.assign(effect.value); break;
+        default: effect satisfies never;
       }
+    }
+    function hasPreviousBrowseEntry() {
+      // A full document video open loses the in-memory chain. The browser can
+      // still identify the adjacent entry that holds the saved browse snapshot.
+      const navigation = (port.window as Window & { navigation?: {
+        currentEntry: { index: number } | null;
+        entries(): { index: number; url: string | null }[];
+      } }).navigation;
+      const index = navigation?.currentEntry?.index;
+      if (index === undefined || index < 1) return false;
+      const url = navigation.entries().find(entry => entry.index === index - 1)?.url;
+      return !!url && isInnerTubeBrowseRoute(url);
     }
     function pageBack() {
       if (lifecycle.destroyed) return;
-      const result = send({ type: 'PAGE_BACK', route: port.routeNow(), temporaryLayer: port.hasTemporaryLayer() });
+      const id = ++sequence;
+      const result = send({ type: 'PAGE_BACK', id, route: port.routeNow(), temporaryLayer: port.hasTemporaryLayer() });
       if (result.disposition === 'blocked') return;
-      port.renderMode(); result.effects.forEach(effect => {
-        if (effect.type === 'assign' && typeof port.history.state?.ytGamepadParentRoute === 'string') port.history.back();
-        else execute(effect);
-      });
+      wait(id);
+      port.renderMode();
+      try {
+        for (const effect of result.effects) {
+          if (effect.type === 'assign' && (typeof port.history.state?.ytGamepadParentRoute === 'string' || hasPreviousBrowseEntry())) port.history.back();
+          else execute(effect);
+        }
+      } catch (error) { cancelRequest(id); throw error; }
     }
     function start() {
       if (started || lifecycle.destroyed) return;
@@ -60,8 +123,7 @@ export let YTGamepadRouteController!: ModuleFactory<RoutePort,RouteControllerMod
             const value = JSON.parse(detail);
             if (value.version !== 1 || !['pushState','replaceState'].includes(value.method) ||
                 value.route !== port.routeNow() || typeof value.changed !== 'boolean') return;
-            send({ type: 'HISTORY', method: value.method, route: value.route, changed: value.changed });
-            if (value.changed) port.renderMode();
+            observeHistory(value.method, value.route, value.changed);
           } catch { /* Ignore malformed page notifications. */ }
         });
       } else for (const method of ['pushState', 'replaceState'] as const) {
@@ -70,8 +132,8 @@ export let YTGamepadRouteController!: ModuleFactory<RoutePort,RouteControllerMod
         const wrapped = function (this: History, ...args: Parameters<History['pushState']>) {
           const before = port.routeNow(), result = original.apply(this, args);
           if (!lifecycle.destroyed) {
-            send({ type: 'HISTORY', method, route: port.routeNow(), changed: before !== port.routeNow() });
-            if (before !== port.routeNow()) port.renderMode();
+            const route = port.routeNow();
+            observeHistory(method, route, before !== route);
           }
           return result;
         };
@@ -80,11 +142,17 @@ export let YTGamepadRouteController!: ModuleFactory<RoutePort,RouteControllerMod
         lifecycle.cleanup(() => { if (port.history[method] === wrapped) port.history[method] = original; });
       }
       lifecycle.listen(port.document, 'yt-navigate-start', () => { send({ type: 'NAV_START' }); port.onStart(); });
-      lifecycle.listen(port.document, 'yt-navigate-finish', finish);
-      lifecycle.listen(port.document, 'yt-navigate-cancel', cancel);
-      lifecycle.listen(port.document, 'yt-navigate-error', cancel);
-      lifecycle.listen(port.window, 'popstate', () => { send({ type: 'POPSTATE', route: port.routeNow() }); port.renderMode(); });
+      lifecycle.listen(port.document, 'yt-navigate-finish', () => syncSite('NAV_FINISH'));
+      lifecycle.listen(port.document, 'yt-navigate-cancel', () => syncSite('NAV_CANCEL'));
+      lifecycle.listen(port.document, 'yt-navigate-error', () => syncSite('NAV_CANCEL'));
+      lifecycle.listen(port.window, 'popstate', () => {
+        const request = pending(), route = port.routeNow();
+        if (request?.traversal) { finishRequest(request.id, route, 'popstate'); return; }
+        if (request) cancelRequest(request.id);
+        send({ type: 'POPSTATE', route }); port.renderMode();
+      });
     }
-    return { start, prepareVideo, pageBack, execute, destroy: lifecycle.destroy };
-  } };
+    return { start, prepareVideo, cancelRequest, pageBack, execute, destroy: lifecycle.destroy };
+  }
+  };
 })();

@@ -1,12 +1,14 @@
 import type { InputDependencies, InputModule, ModuleFactory } from '../../types/ports';
 import { YTGamepadBindings } from './bindings.ts';
+import { findPrimaryController } from './primary-controller.ts';
 export let YTGamepadInput: InputModule | undefined, YTGamepadInputModule!: ModuleFactory<InputDependencies,InputModule>;
 (() => {
   /** @param {import('../../types/ports.js').InputDependencies} dependencies */
-  function create({ runtime, controllerStyle, isSearchOpen, localChannel, temporarySpeed, canRepeatMedia, canHandleInput, scroll }: import('../../types/ports.js').InputDependencies) {
+  function create({ runtime, controllerStyle, isSearchOpen, localChannel, temporarySpeed, canRepeatMedia, canHandleInput, inputContext, scroll }: import('../../types/ports.js').InputDependencies) {
   const lifecycle = runtime.scope('input');
   const defaults = { enabled: true, rightHandMode: false, deadzone: 0.35, repeatDelay: 150, repeatInterval: 80 };
-  let settings = { ...defaults }, previous = new Set(), heldDirection = '', nextRepeat = 0, index: number|null = null;
+  let settings = { ...defaults }, previous = new Set<number>(), heldDirection = '', nextRepeat = 0, index: number|null = null;
+  let generation = 0, directionNeedsNeutral = false, scrollNeedsNeutral = false;
   let inputMode: 'gamepad' | 'mouse' | 'keyboard' = 'mouse', mousePosition: { x: number; y: number; }|null = null, mouseTravel = { x: 0, y: 0, time: 0 }, waitForNeutral = false;
   const modeStorageKey = 'yt-gamepad-input-mode';
   try {
@@ -21,10 +23,17 @@ export let YTGamepadInput: InputModule | undefined, YTGamepadInputModule!: Modul
     if (recentSources.length > 32) recentSources.shift();
   }
   let speedPress: number | null = null;
-  let speedRoute = '';
   let scrollTime: number | null = null;
-  function stopScroll() { if (scrollTime !== null) scroll?.(0); scrollTime = null; }
-  const stopSpeed = () => { if (speedPress !== null) temporarySpeed?.(false); speedPress = null; };
+  function stopScroll() {
+    if (scrollTime === null) return;
+    scrollTime = null;
+    scroll?.(0);
+  }
+  function stopSpeed() {
+    if (speedPress === null) return;
+    speedPress = null;
+    temporarySpeed?.(false);
+  }
   function setMode(value: 'gamepad' | 'mouse' | 'keyboard', source: string) {
     if (inputMode === value) { trace(source, 'preserve'); return; }
     const previousMode = inputMode;
@@ -36,123 +45,195 @@ export let YTGamepadInput: InputModule | undefined, YTGamepadInputModule!: Modul
     mouseTravel = { x: 0, y: 0, time: 0 };
     document.documentElement.classList.toggle('ytg-gamepad-input', value === 'gamepad');
     document.documentElement.dataset.ytgInputMode = value;
-    if (value !== 'gamepad') { waitForNeutral = true; stopSpeed(); cancelMedia(); stopScroll(); }
+    if (value !== 'gamepad') suspendHolds();
     window.dispatchEvent(new CustomEvent('yt-gamepad-input-mode', { detail: { mode: value, previousMode, source } }));
   }
-  const emit = (action: unknown) => {
-    if (!mediaActions.includes(String(action))) cancelMedia();
+  const emit = (action: string, phase: 'press' | 'repeat') => {
+    if (!mediaActions.includes(action)) cancelMedia();
     stopSpeed();
-    lastGamepadAt = now(); lastGamepadAction = String(action);
+    lastGamepadAt = now(); lastGamepadAction = action;
     setMode('gamepad', 'gamepad-action');
-    window.dispatchEvent(new CustomEvent('yt-gamepad-action', { detail: { action } }));
+    window.dispatchEvent(new CustomEvent('yt-gamepad-action', { detail: { action, phase } }));
   };
   const mediaActions = ['seekBack', 'seekForward', 'volumeDown', 'volumeUp'];
   const heldButtons = new Map<number, { action: string; next: number; context: 'search' | 'media' }>();
-  function endButton(button: number, cancelled: boolean) {
+  function endButton(button: number, phase: 'release' | 'cancel') {
     const held = heldButtons.get(button);
     heldButtons.delete(button);
-    if (held?.context === 'media') window.dispatchEvent(new CustomEvent('yt-gamepad-button-end', { detail: { action: held.action, cancelled } }));
+    if (held?.context === 'media') window.dispatchEvent(new CustomEvent('yt-gamepad-button-end', { detail: { action: held.action, cancelled: phase === 'cancel' } }));
   }
-  function cancelMedia() { for (const [button, held] of heldButtons) if (held.context === 'media') endButton(button, true); }
-  const reset = () => { stopSpeed(); cancelMedia(); stopScroll(); previous.clear(); heldDirection = ''; heldButtons.clear(); index = null; };
+  function cancelMedia() { for (const [button, held] of heldButtons) if (held.context === 'media') endButton(button, 'cancel'); }
+  function cancelHolds(keepDirection = false) {
+    ++generation;
+    for (const button of heldButtons.keys()) endButton(button, 'cancel');
+    stopSpeed();
+    scrollNeedsNeutral ||= scrollTime !== null;
+    stopScroll();
+    if (!keepDirection) {
+      directionNeedsNeutral ||= !!heldDirection;
+      heldDirection = '';
+    }
+  }
+  function reset() {
+    cancelHolds();
+    previous.clear();
+  }
+  function suspendHolds() {
+    waitForNeutral = true;
+    reset();
+  }
   let connected = false;
   const detect = () => {
-    const pads = Array.from(navigator.getGamepads?.() || []).filter(p => p?.connected && p.mapping === 'standard').filter((p): p is Gamepad => p !== null);
-    const active = (p: Gamepad) => p.buttons.some((b) => b.pressed) ||
-      p.axes.slice(settings.rightHandMode ? 2 : 0, settings.rightHandMode ? 4 : 2).some((axis) => Math.abs(axis) > settings.deadzone) ||
-      !!scroll && Math.abs(p.axes[settings.rightHandMode ? 1 : 3] || 0) > settings.deadzone;
-    const current = pads.find(p => p.index === index);
-    const pad = (current && active(current) ? current : pads.find(active)) || current || pads[0];
+    const pad = findPrimaryController(index);
+    const nextIndex = pad?.index ?? null;
+    if (index !== null && nextIndex !== index) release('disconnect', true);
+    index = nextIndex;
     controllerStyle.use(pad);
     const next = Boolean(pad);
     if (next !== connected) {
       connected = next;
-      if (!connected) release('disconnect', true);
       window.dispatchEvent(new CustomEvent('yt-gamepad-connection', { detail: { connected } }));
     }
     return pad;
   };
   const release = (source: string, resetMode = false) => {
-    reset(); waitForNeutral = true; mousePosition = null; mouseTravel = { x: 0, y: 0, time: 0 };
+    suspendHolds(); mousePosition = null; mouseTravel = { x: 0, y: 0, time: 0 };
     if (resetMode) { lastGamepadAt = -Infinity; lastGamepadAction = ''; }
     if (resetMode) setMode('mouse', source); else trace(source, 'preserve');
   };
   YTGamepadInput = { destroy: lifecycle.destroy, get connected() { return connected; }, get mode() { return inputMode; },
     get recentSources() { return recentSources.map(entry => ({ ...entry })); },
     isHeld: action => [...heldButtons.values()].some(held => held.context === 'media' && held.action === action),
-    cancelSeeking() { for (const [button, held] of heldButtons) if (held.context === 'media' && ['seekBack', 'seekForward'].includes(held.action)) endButton(button, true); },
-    configure(values) { settings = { ...defaults, ...values }; shortcuts = YTGamepadBindings.normalizeShortcuts(values.shortcutLayouts); layouts = YTGamepadBindings.normalizeLayouts(values.bindingLayouts, values.bindings); updateBindings(layouts[activeLayout]); reset(); waitForNeutral = true; if (!settings.enabled) release('disabled', true); } };
+    cancelSeeking() { for (const [button, held] of heldButtons) if (held.context === 'media' && ['seekBack', 'seekForward'].includes(held.action)) endButton(button, 'cancel'); },
+    configure(values) { settings = { ...defaults, ...values }; shortcuts = YTGamepadBindings.normalizeShortcuts(values.shortcutLayouts); layouts = YTGamepadBindings.normalizeLayouts(values.bindingLayouts, values.bindings); updateBindings(layouts[activeLayout]); if (settings.enabled) suspendHolds(); else release('disabled', true); } };
   document.documentElement.dataset.ytgInputMode = inputMode;
   document.documentElement.classList.toggle('ytg-gamepad-input', inputMode === 'gamepad');
   let bindings = YTGamepadBindings.normalize();
   let layouts = YTGamepadBindings.normalizeLayouts(), activeLayout = '';
   let shortcuts = YTGamepadBindings.normalizeShortcuts();
-  const layoutNow = () => globalThis.location?.pathname === '/watch' || globalThis.location?.pathname.startsWith('/shorts/') ? 'watch' : 'browse';
+  const layoutNow = () => YTGamepadBindings.layoutForPath(globalThis.location?.pathname || '');
+  const routeNow = () => (globalThis.location?.pathname || '') + (globalThis.location?.search || '');
+  const shortsSwitching = () => document.documentElement.dataset.ytgShortsSwitching !== undefined;
+  let lastRoute = routeNow(), lastSearchOpen = false, lastContext: string | undefined;
   activeLayout = layoutNow();
-  let buttons: Record<number,string> = {};
+  let pageButtons: Record<number, string>, settingsButtons: Record<number, string>, searchButtons: Record<number, string>;
+  let displayedMapping: Record<number, string> | undefined;
+  function currentMapping(searchOpen = isSearchOpen()) {
+    const mapping = searchOpen ? searchButtons
+      : document.querySelector?.('#yt-gamepad-menu')?.hasAttribute('data-settings') ? settingsButtons : pageButtons;
+    if (mapping !== displayedMapping) {
+      displayedMapping = mapping;
+      controllerStyle.configureBindings?.(bindings, mapping);
+    }
+    return mapping;
+  }
   const updateBindings = (raw?: unknown) => {
     document.documentElement.dataset.ytgNavigationStick = settings.rightHandMode ? 'right' : 'left';
     bindings = YTGamepadBindings.normalize(settings.rightHandMode ? YTGamepadBindings.rightHand : raw);
-    buttons = Object.fromEntries(Object.entries(bindings).filter(([action]) => !action.startsWith('keyboard')).map(([action, button]) => [button, action]));
-    controllerStyle.configureBindings?.(bindings);
+    settingsButtons = YTGamepadBindings.buttonActions(bindings, activeLayout);
+    searchButtons = YTGamepadBindings.buttonActions(bindings, activeLayout, undefined, true);
+    pageButtons = settings.rightHandMode ? settingsButtons : YTGamepadBindings.buttonActions(bindings, activeLayout, shortcuts[activeLayout]);
+    currentMapping();
     window.dispatchEvent(new CustomEvent('yt-gamepad-navigation-stick', { detail: {} }));
   };
   updateBindings();
   function poll(time: number) {
     lifecycle.frame(poll);
     const layout = layoutNow();
+    const route = routeNow();
     if (layout !== activeLayout) {
-      activeLayout = layout; updateBindings(layouts[layout]); reset(); waitForNeutral = true;
+      activeLayout = layout;
+      updateBindings(layouts[layout]);
+      release('route-change');
+    } else if (route !== lastRoute) {
+      if (shortsSwitching()) cancelHolds(true);
+      else release('route-change');
     }
+    lastRoute = route;
+    const searchOpen = isSearchOpen();
+    const mapping = currentMapping(searchOpen);
     const pad = detect();
-    if (!settings.enabled || document.hidden || !document.hasFocus()) { reset(); return; }
-    if (!pad) { reset(); return; }
-    if (index !== pad.index) { reset(); index = pad.index; }
+    if (!inputAllowed() || document.hidden || !document.hasFocus()) {
+      if (!waitForNeutral) release('input-unavailable');
+      return;
+    }
+    if (!pad) return;
     const pressed = new Set(pad.buttons.map((b, i) => b.pressed ? i : -1).filter(i => i >= 0));
     const stick = settings.rightHandMode ? 2 : 0;
     const x = pad.axes[stick] || 0, y = pad.axes[stick + 1] || 0;
     const scrollY = Math.max(-1, Math.min(1, pad.axes[settings.rightHandMode ? 1 : 3] || 0));
     const releaseZone = settings.deadzone * .75;
-    if (waitForNeutral) {
-      if (Math.max(Math.abs(x), Math.abs(y), scroll ? Math.abs(scrollY) : 0) > releaseZone || [...pressed].some(i => i in buttons || [6, 7, 8, 10, 11, 12, 13, 14, 15].includes(i))) return;
-      waitForNeutral = false;
-      reset(); index = pad.index;
-    }
-    const searchOpen = isSearchOpen();
+    const context = inputContext?.();
+    if (context !== lastContext || searchOpen !== lastSearchOpen) cancelHolds();
+    lastContext = context;
+    lastSearchOpen = searchOpen;
     const mediaEnabled = !searchOpen && layout === 'watch' && (canRepeatMedia?.() ?? true);
-    const mapping = searchOpen ? { ...buttons, [bindings.keyboardSymbols]: 'keyboardSymbols', [bindings.keyboardCandidates]: 'keyboardCandidates' } : { ...buttons };
-    // Keep configuration navigable even when A/B have custom page shortcuts.
-    if (!settings.rightHandMode && !document.querySelector?.('#yt-gamepad-menu')?.hasAttribute('data-settings')) {
-      for (const [key, shortcut] of Object.entries(shortcuts[layout] || {})) {
-        const button = Object.keys(YTGamepadBindings.keys).find(index => YTGamepadBindings.keys[Number(index)] === key);
-        if (button !== undefined) mapping[Number(button)] = YTGamepadBindings.keyboardActions[shortcut];
+    if (waitForNeutral) {
+      if (Math.max(Math.abs(x), Math.abs(y), scroll ? Math.abs(scrollY) : 0) > releaseZone || [...pressed].some(i => i in mapping || i === 11 || i >= 12 && i <= 15)) return;
+      waitForNeutral = false;
+      directionNeedsNeutral = false;
+      scrollNeedsNeutral = false;
+    }
+    const frameGeneration = generation;
+    function stillOwnsInput() {
+      if (generation !== frameGeneration) return false;
+      if (!inputAllowed() || document.hidden || !document.hasFocus() || routeNow() !== route) {
+        release('input-changed');
+        return false;
       }
+      const nextSearchOpen = isSearchOpen(), nextContext = inputContext?.();
+      if (nextSearchOpen === searchOpen && nextContext === context) return true;
+      previous = pressed;
+      lastSearchOpen = nextSearchOpen;
+      lastContext = nextContext;
+      cancelHolds();
+      return false;
     }
     for (const [button, action] of Object.entries(mapping)) {
       if (pressed.has(Number(button)) && !previous.has(Number(button))) {
         const context = searchOpen && ['playPause', 'seekBack', 'seekForward'].includes(action) ? 'search'
           : mediaEnabled && mediaActions.includes(action) ? 'media' : null;
         if (context) heldButtons.set(Number(button), { action, next: time + settings.repeatDelay, context });
-        emit(action);
+        emit(action, 'press');
+        if (!stillOwnsInput()) return;
       }
     }
     for (const [button, held] of heldButtons) {
-      if (held.context === 'media' ? !mediaEnabled : !searchOpen) { endButton(button, true); continue; }
-      if (!pressed.has(button)) { endButton(button, false); continue; }
-      if (time >= held.next) { held.next = time + settings.repeatInterval; emit(held.action); }
+      if (held.context === 'media' ? !mediaEnabled : !searchOpen) { endButton(button, 'cancel'); continue; }
+      if (!pressed.has(button)) { endButton(button, 'release'); continue; }
+      if (time >= held.next) {
+        held.next = time + settings.repeatInterval;
+        emit(held.action, 'repeat');
+        if (!stillOwnsInput()) return;
+      }
     }
     let direction = pressed.has(12) ? 'up' : pressed.has(13) ? 'down' : pressed.has(14) ? 'left' : pressed.has(15) ? 'right' : '';
-    if (!direction && Math.max(Math.abs(x), Math.abs(y)) > (heldDirection ? releaseZone : settings.deadzone)) {
-      direction = Math.abs(x) > Math.abs(y) ? (x > 0 ? 'right' : 'left') : (y > 0 ? 'down' : 'up');
+    if (!direction && Math.max(Math.abs(x), Math.abs(y)) > (heldDirection || directionNeedsNeutral ? releaseZone : settings.deadzone)) {
+      const horizontal = heldDirection === 'left' || heldDirection === 'right';
+      const strengths: Record<string, number> = { left: -x, right: x, up: -y, down: y };
+      const heldStrength = strengths[heldDirection] || 0;
+      const otherStrength = Math.abs(horizontal ? y : x);
+      // Keep the current direction near diagonals until the other axis is clearly stronger.
+      direction = heldStrength > releaseZone && otherStrength <= heldStrength * 1.25
+        ? heldDirection
+        : Math.abs(x) > Math.abs(y) ? (x > 0 ? 'right' : 'left') : (y > 0 ? 'down' : 'up');
     }
-    if (direction !== heldDirection) {
+    if (directionNeedsNeutral) {
+      if (!direction) directionNeedsNeutral = false;
+    } else if (direction !== heldDirection) {
       heldDirection = direction;
       nextRepeat = time + settings.repeatDelay;
-      if (direction) emit(direction);
+      if (direction) {
+        emit(direction, 'press');
+        if (!stillOwnsInput()) return;
+      }
     } else if (direction && time >= nextRepeat) {
-      emit(direction); nextRepeat = time + settings.repeatInterval;
+      emit(direction, 'repeat'); nextRepeat = time + settings.repeatInterval;
+      if (!stillOwnsInput()) return;
     }
-    if (scroll && !searchOpen && (canHandleInput?.() ?? true) && Math.abs(scrollY) > (scrollTime !== null ? releaseZone : settings.deadzone)) {
+    if (Math.abs(scrollY) <= releaseZone) scrollNeedsNeutral = false;
+    else if (searchOpen) scrollNeedsNeutral = true;
+    if (scroll && !searchOpen && !scrollNeedsNeutral && Math.abs(scrollY) > (scrollTime !== null ? releaseZone : settings.deadzone)) {
       const elapsed = scrollTime === null ? 16 : Math.max(0, Math.min(50, time - scrollTime));
       const strength = Math.max(0, (Math.abs(scrollY) - settings.deadzone) / (1 - settings.deadzone));
       if (scrollTime === null) {
@@ -165,10 +246,8 @@ export let YTGamepadInput: InputModule | undefined, YTGamepadInputModule!: Modul
     } else stopScroll();
     // R3 is physical, and never overrides a user's ordinary button binding.
     // Only a fresh press can arm it; cancellation cannot restart a held press.
-    if (temporarySpeed && layout === 'watch' && !searchOpen && scrollTime === null && !mapping[11] && pressed.has(11)) {
-      const route = location.pathname + location.search;
-      if (!previous.has(11)) { speedPress = time; speedRoute = route; }
-      if (speedPress !== null && route !== speedRoute) stopSpeed();
+    if (temporarySpeed && mediaEnabled && scrollTime === null && !mapping[11] && pressed.has(11)) {
+      if (!previous.has(11)) speedPress = time;
       if (speedPress !== null && time - speedPress >= 350) {
         lastGamepadAt = now(); lastGamepadAction = '';
         setMode('gamepad', 'gamepad-speed');
@@ -259,18 +338,25 @@ export let YTGamepadInput: InputModule | undefined, YTGamepadInputModule!: Modul
   else lifecycle.listen(window, 'message', escapeBack);
   lifecycle.listen(document, 'visibilitychange', () => { if (document.hidden) release('hidden'); });
   // Shorts buffer held directions across their own in-place queue changes.
-  lifecycle.listen(document, 'yt-navigate-start', () => {
-    if (document.documentElement.dataset.ytgShortsSwitching === undefined) release('route-start');
-    else { stopSpeed(); cancelMedia(); }
+  lifecycle.listen(document, 'ytg-shorts-queue-move', () => {
+    const route = routeNow();
+    if (!lastRoute.startsWith('/shorts/') || !route.startsWith('/shorts/') || route === lastRoute) return;
+    lastRoute = route;
+    cancelHolds(true);
   });
-  lifecycle.listen(document, 'yt-navigate-finish', () => { if (document.documentElement.dataset.ytgShortsSwitching === undefined) release('route-finish'); });
+  for (const event of ['yt-navigate-start', 'yt-navigate-finish', 'yt-navigate-cancel', 'yt-navigate-error']) {
+    lifecycle.listen(document, event, () => {
+      if (shortsSwitching()) cancelHolds(true);
+      else release(event);
+    });
+  }
   lifecycle.listen(window, 'popstate', () => release('history'));
   lifecycle.listen(window, 'pagehide', () => release('pagehide'));
   lifecycle.listen(window, 'blur', () => release('blur'));
   lifecycle.listen(window, 'gamepadconnected', detect);
   lifecycle.listen(window, 'gamepaddisconnected', e => {
-    if (e.gamepad?.index === index) release('disconnect', true);
     detect();
+    if (e.gamepad?.index === index) release('disconnect', true);
   });
   lifecycle.frame(poll);
   const published = YTGamepadInput;

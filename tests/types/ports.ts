@@ -34,7 +34,7 @@ window.YTGamepadMenu.connect(menu);
 window.YTGamepadInputModule.create({ runtime: window.YTGamepadRuntime, controllerStyle: window.YTGamepadControllerStyle });
 
 // Event discriminants must retain their corresponding payload contracts.
-import type { InteractionStore } from '../../types/ports.js';
+import type { Effect, InteractionStore, RouteControllerModule } from '../../types/ports.js';
 declare const interaction: InteractionStore;
 interaction.dispatch({ type: 'MODE', route: '/watch?v=test', value: 'controls' });
 interaction.dispatch({ type: 'MENU_SET_LANGUAGE', value: 'en' });
@@ -44,3 +44,18 @@ interaction.dispatch({ type: 'MODE', route: '/watch?v=test', value: 'fullscreen'
 interaction.dispatch({ type: 'WATCH_INPUT', action: 'confirm' });
 // @ts-expect-error search languages are a closed set
 interaction.dispatch({ type: 'MENU_SET_LANGUAGE', value: 'invalid-language' });
+
+declare function acceptEffect(effect: Effect): void;
+declare const routes: RouteControllerModule;
+routes.execute({ type: 'historyGo', value: -2 });
+acceptEffect({ type: 'focus' });
+// @ts-expect-error a history jump requires a step count
+acceptEffect({ type: 'historyGo' });
+// @ts-expect-error the step count must be numeric
+acceptEffect({ type: 'historyGo', value: '-2' });
+// @ts-expect-error focus carries no payload
+acceptEffect({ type: 'focus', value: 1 });
+// @ts-expect-error misspelled commands are rejected
+acceptEffect({ type: 'historyGO', value: -2 });
+// @ts-expect-error menu input can emit menu commands only
+interaction.dispatch({ type: 'MENU_INPUT', action: 'back' }).effects.forEach(routes.execute);

@@ -11,6 +11,7 @@ import { sameRecommendations } from './playback-presentation';
 import { createPlaybackModel } from '../playback/playback-model';
 import { currentLanguage } from '../shared/i18n';
 import mediaActionCSS from './media-action.css?inline';
+import channelControlsCSS from './channel-controls.css?inline';
 
 export function createVueWatchView({ activate, seek, closePanel, controllerStyle, styles }: WatchViewDependencies, mount?: (node: HTMLElement) => void): WatchView {
   const host = document.createElement('div'); host.id = 'ytg-watch'; host.hidden = true; host.lang = currentLanguage();
@@ -21,7 +22,7 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
     if (text !== undefined) node.textContent = text;
     return node;
   };
-  const style = make('style'); style.textContent = styles.watch + mediaActionCSS;
+  const style = make('style'); style.textContent = styles.watch + mediaActionCSS + channelControlsCSS;
   // Separate Vue roots keep high-frequency progress/focus work out of metadata
   // and list rendering. The shell and control DOM identities remain stable.
   const surface = make('div', 'surface'), bottom = make('section', 'bottom');
@@ -174,10 +175,10 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
       queue = nextQueue.map(item => ({ ...item })); playlistTitle = value.playlistTitle || ''; playlistTotal = value.playlistTotal;
       if (!hasCollection()) { collectionOpen = false; collectionBackdrop.hidden = true; surface.classList.remove('fullscreen-collection-open'); }
       else if (!hadCollection && windowed()) collectionOpen = true;
-      const next: Metadata = { title: value.title, channel: value.channel, viewCount: value.viewCount, metadataFailed: value.metadataFailed,
+      const next: Metadata = { title: value.title, channel: value.channel, viewCount: value.viewCount, likeCount: value.likeCount, metadataFailed: value.metadataFailed,
         channelBadge: value.channelBadge, avatar: value.avatar, notificationPreference: value.notificationPreference, subscribed: value.subscribed, liked: value.liked, disliked: value.disliked };
       const headingChanged = ['title', 'channel', 'channelBadge', 'viewCount', 'metadataFailed'].some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
-      const controlsChanged = ['channel', 'channelBadge', 'avatar', 'notificationPreference', 'subscribed', 'liked', 'disliked'].some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
+      const controlsChanged = ['channel', 'channelBadge', 'avatar', 'notificationPreference', 'subscribed', 'liked', 'disliked', 'likeCount'].some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
       metadata = next;
       if (headingChanged) render(h(PlaybackMetadata, { page: metadata, activate }), headingRoot);
       if (controlsChanged || queueChanged) paintControls();

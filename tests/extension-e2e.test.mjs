@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { launchExtension, fixture, ready, virtualPad } from './helpers/extension.mjs';
+import { assertInteractionReplay } from '../scripts/replay-interaction.mjs';
 
 test('isolated application reads MAIN-only metadata and follows MAIN history without accepting page settings', { timeout: 60000 }, async t => {
   const { context, worker } = await launchExtension(t);
@@ -94,6 +96,42 @@ async function setup(t) {
   assert.deepEqual(await page.evaluate(() => Object.keys(window).filter(name => name.startsWith('YTGamepad'))), [], 'production modules stay private');
   return { ...env, page };
 }
+
+test('exported interaction events replay browser focus and history decisions', { timeout: 60000 }, async t => {
+  const { page } = await setup(t);
+  const menu = page.locator('#yt-gamepad-menu');
+  await page.evaluate(() => {
+    history.pushState({}, '', '/?private-trace-query=1');
+    document.dispatchEvent(new Event('yt-navigate-finish'));
+  });
+  await page.keyboard.press('F1');
+  const settings = menu.getByRole('button', { name: 'All settings', exact: true });
+  await settings.waitFor();
+  const focused = () => menu.evaluate(element => element.shadowRoot?.activeElement?.dataset.menuAction);
+  assert.equal(await focused(), 'search');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await focused(), 'playPause');
+
+  await page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'hidden' });
+  assert.match(page.url(), /private-trace-query/);
+  await page.keyboard.press('Escape');
+  await page.waitForURL('https://www.youtube.com/');
+  await page.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));
+
+  await page.keyboard.press('F1');
+  await settings.click();
+  await menu.getByRole('button', { name: 'Help & diagnostics', exact: true }).click();
+  const pendingDownload = page.waitForEvent('download');
+  await menu.locator('[data-setting="exportDiagnostics"]').click();
+  const download = await pendingDownload;
+  const report = await readFile(await download.path(), 'utf8');
+  assert.doesNotMatch(report, /private-trace-query/);
+  const { interactionReplay } = JSON.parse(report);
+  assert.ok(interactionReplay.steps.some(step => step.effects.some(effect => effect.type === 'navigate' && effect.value === 'down')));
+  assert.ok(interactionReplay.steps.some(step => step.effects.some(effect => effect.type === 'historyBack')));
+  assertInteractionReplay(interactionReplay);
+});
 
 test('bundled popup loads and persists its enable switch', { timeout: 60000 }, async t => {
   const { context, worker, id } = await launchExtension(t);

@@ -91,6 +91,14 @@ test('actual gamepad input controls the active Short, switches reels, respects d
   await press(0);
   assert.equal(await page.locator('#active').getAttribute('data-paused'), 'true');
   assert.equal(await page.locator('#inactive').getAttribute('data-paused'), 'false');
+  const mediaHint = bar.locator('.hints p').nth(1);
+  await mediaHint.waitFor();
+  assert.match(await mediaHint.getAttribute('data-ytg-hint'), /Play \/ pause.*Rewind \/ forward.*Volume/);
+  await press(9);
+  await bar.locator('.drawer').waitFor();
+  await mediaHint.waitFor({ state: 'hidden' });
+  await press(1);
+  await mediaHint.waitFor();
   await press(2);
   assert.equal(await page.locator('#active').getAttribute('data-paused'), 'false');
   await page.evaluate(() => {

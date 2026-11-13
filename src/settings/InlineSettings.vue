@@ -10,11 +10,16 @@ import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { createInlineSettingsModel, categories, physicalNames, positions, adjustments } from './inline-settings-model';
 import CategorySettings from './CategorySettings.vue';
 import ControllerBindingOverview from './ControllerBindingOverview.vue';
+import type { InteractionTrace } from '../diagnostics/interaction-trace.ts';
+import { YTGamepadControllerStyle } from '../input/controller-style';
 
-const props = defineProps<{ root: ShadowRoot; container: HTMLElement }>();
-const model = createInlineSettingsModel(props.root, props.container);
+const props = defineProps<{ root: ShadowRoot; container: HTMLElement; interactionTrace?: InteractionTrace }>();
+const model = createInlineSettingsModel(props.root, props.container, props.interactionTrace);
 const { state, schema } = model;
 const actionListOpen = ref(false);
+const vGamepadHint = {
+  mounted(node: HTMLElement, { value }: { value: string }) { YTGamepadControllerStyle?.hint(node, value); }
+};
 onMounted(model.start);
 onBeforeUnmount(model.dispose);
 </script>
@@ -44,7 +49,7 @@ onBeforeUnmount(model.dispose);
       <h4>{{ t('Interface language') }}</h4>
       <div class="inline-layout-tabs" role="group" :aria-label="t('Interface language')">
         <button v-for="language in [{ id: 'en' as const, label: 'English' }, { id: 'zh-CN' as const, label: '简体中文' }]"
-          :key="language.id" type="button" :data-setting="`language-${language.id}`" :disabled="state.saving"
+          :key="language.id" :lang="language.id" type="button" :data-setting="`language-${language.id}`" :disabled="state.saving"
           :aria-pressed="state.values.uiLanguage === language.id" @click="model.setLanguage(language.id)">{{ language.label }}</button>
       </div>
       <p>{{ t('Language changes apply immediately and save automatically.') }}</p>
@@ -102,12 +107,15 @@ onBeforeUnmount(model.dispose);
     </template>
     <template v-else-if="state.category === 'controller' && state.bindingKey">
       <p>{{ t('选择此按键要执行的功能。已使用的功能会交换绑定，修改自动保存。') }}</p>
-      <label for="inline-shortcut-recorder">{{ t('Record a page shortcut') }}</label>
-      <input id="inline-shortcut-recorder" data-shortcut-recorder data-setting="shortcut-recorder" readonly
-        :disabled="state.saving" :value="model.shortcutFor(state.bindingKey) ? schema.shortcutLabel(model.shortcutFor(state.bindingKey)) : ''"
-        :placeholder="t('Click here, then press a key')" @keydown="model.recordShortcut">
-      <p>{{ t('Page shortcuts: Enter, Esc, Space, /, F1, PageUp, PageDown, arrows, −, =, J, K, L, M, C. Browser and Windows shortcuts are unavailable.') }}</p>
-      <p v-if="state.shortcutError" role="alert">{{ t(state.shortcutError) }}</p>
+      <template v-if="model.canRecordShortcut(state.bindingKey)">
+        <label for="inline-shortcut-recorder">{{ t('Record a page shortcut') }}</label>
+        <input id="inline-shortcut-recorder" data-shortcut-recorder data-setting="shortcut-recorder" readonly
+          :disabled="state.saving" :value="model.shortcutFor(state.bindingKey) ? schema.shortcutLabel(model.shortcutFor(state.bindingKey)) : ''"
+          :placeholder="t('Click here, then press a key')" @keydown="model.recordShortcut">
+        <p>{{ t('Page shortcuts: Enter, Esc, Space, /, F1, PageUp, PageDown, arrows, −, =, J, K, L, M, C. Browser and Windows shortcuts are unavailable.') }}</p>
+        <p v-if="state.shortcutError" role="alert">{{ t(state.shortcutError) }}</p>
+      </template>
+      <p v-else>{{ t('This button is assigned to a direct playback control.') }}</p>
       <button v-for="action in model.actions" :key="action" class="inline-binding-button" type="button"
         :data-setting="`assign-${action}`" :disabled="state.saving"
         :aria-pressed="!model.shortcutFor(state.bindingKey) && model.keyFor(action) === state.bindingKey" @click="model.assignAction(action)">
@@ -126,7 +134,7 @@ onBeforeUnmount(model.dispose);
       </button>
     </template>
     <template v-if="state.category === 'help'">
-      <p>{{ t("Connect a standard-layout gamepad, click YouTube, then press a gamepad button. The D-pad and left stick navigate; the bottom button confirms.") }}</p>
+      <p v-gamepad-hint="'Connect a standard-layout gamepad, click YouTube, then press a gamepad button. Use the D-pad / left stick to move and A to confirm.'"></p>
       <p>{{ t("During search, Play / pause deletes, Rewind / Forward moves the cursor, and Volume down / up changes letter case / submits.") }}</p>
       <button type="button" data-setting="exportDiagnostics" :disabled="state.saving" @click="model.exportDiagnostics">{{ t("Export diagnostics JSON") }}</button>
       <button type="button" data-setting="clearDiagnostics" :disabled="state.saving" @click="model.clearDiagnostics">{{ t("Clear diagnostic records") }}</button>

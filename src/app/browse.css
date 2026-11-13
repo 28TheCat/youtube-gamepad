@@ -23,6 +23,8 @@ html.ytg-browse:not([data-ytg-native]) :is(#video-title,#video-title-link){
 }
 html.ytg-browse:not([data-ytg-native]) :is(a#thumbnail,.yt-lockup-view-model__content-image){
   border-radius:var(--ytg-card-radius)!important;
+  outline:var(--ytg-focus-width) solid transparent;
+  outline-offset:var(--ytg-focus-offset);
 }
 
 /* Emphasize the thumbnail without moving the native navigation geometry. */
@@ -32,7 +34,7 @@ html.ytg-browse.ytg-gamepad-input:not([data-ytg-native]) .ytg-selected :is(a#thu
   outline-offset:var(--ytg-focus-offset);
 }
 @media(prefers-reduced-motion:no-preference){
-  html.ytg-browse:not([data-ytg-native]) :is(a#thumbnail,.yt-lockup-view-model__content-image){transition:box-shadow var(--ytg-focus-duration) var(--ytg-focus-easing)}
+  html.ytg-browse:not([data-ytg-native]) :is(a#thumbnail,.yt-lockup-view-model__content-image){transition:outline-color var(--ytg-focus-duration) var(--ytg-focus-easing),box-shadow var(--ytg-focus-duration) var(--ytg-focus-easing)}
 }
 
 /* Browse and non-immersive watch pages share our banner; retain native actions. */

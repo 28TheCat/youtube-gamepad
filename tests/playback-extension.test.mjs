@@ -41,6 +41,77 @@ document.querySelector('#movie_player').getPlayerResponse=()=>({videoDetails:{vi
 const nextFixture = { contents: { twoColumnWatchNextResults: { secondaryResults: { secondaryResults: { results:
   Array.from({length:6}, (_, i) => ({compactVideoRenderer:{videoId:`r${i}`,title:{simpleText:`Recommendation ${i}`}}}))
 } } } } };
+
+test('layered Back returns from a full document video to its category, loaded cards and scroll', { timeout: 60000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, playbackLayout: 'windowed' }));
+  let requests = 0;
+  await context.route('https://i.ytimg.com/**', route => route.abort());
+  await context.route('https://www.youtube.com/**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/next')) return route.fulfill({ json: nextFixture });
+    if (url.pathname.endsWith('/browse')) {
+      requests++;
+      const body = route.request().postDataJSON(), key = body.continuation || body.browseId;
+      return route.fulfill({ json: {
+        contents: [
+          ...['All', 'Music'].map((label, index) => ({ chipCloudChipRenderer: {
+            text: { simpleText: label }, isSelected: index === 0,
+            navigationEndpoint: { browseEndpoint: { browseId: index ? 'music' : 'FEwhat_to_watch' } }
+          } })),
+          ...Array.from({ length: 40 }, (_, index) => ({ videoRenderer: {
+            videoId: key + '-' + index, title: { simpleText: key + ' video ' + index }
+          } })),
+          { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'next' } } } }
+        ]
+      } });
+    }
+    if (url.pathname.includes('/youtubei/')) return route.fulfill({ json: {} });
+    return route.fulfill({ contentType: 'text/html', body: url.pathname === '/watch' ? fixture :
+      '<html><body><ytd-app><ytd-page-manager></ytd-page-manager></ytd-app><script>window.ytcfg={get:()=>({client:{clientVersion:"test"}})}</script></body></html>' });
+  });
+  const page = await context.newPage();
+  page.on('pageerror', error => t.diagnostic(error.message));
+  await page.goto('https://www.youtube.com/');
+  await page.evaluate(() => history.replaceState({ ...history.state, originalEntry: true }, ''));
+  const grid = page.locator('#ytg-browse-grid');
+  await grid.getByRole('button', { name: 'Music', exact: true }).click();
+  await grid.locator('[data-browse-id="video:music-0"]').waitFor();
+  await grid.getByRole('button', { name: 'Load more videos', exact: true }).dispatchEvent('click');
+  const card = grid.locator('[data-browse-id="video:next-20"]');
+  await card.waitFor();
+  await card.focus();
+  const top = await grid.locator('[data-ytg-browse-grid]').evaluate(node => node.scrollTop);
+  assert.ok(top > 0);
+  await card.dispatchEvent('click');
+  await page.waitForURL('**/watch?v=next-20');
+  const host = page.locator('#ytg-watch');
+  await host.locator('[data-action="description"]').waitFor();
+  await page.keyboard.press('F1');
+  await page.locator('#yt-gamepad-menu').waitFor({ state: 'visible' });
+  await page.keyboard.press('Escape');
+  await page.locator('#yt-gamepad-menu').waitFor({ state: 'hidden' });
+  assert.match(page.url(), /watch\?v=next-20$/);
+  await host.locator('[data-action="description"]').click();
+  await host.locator('.description-panel:not([hidden])').waitFor();
+  assert.match(page.url(), /watch\?v=next-20$/);
+  await page.keyboard.press('Escape');
+  await host.locator('.description-panel').waitFor({ state: 'hidden' });
+  assert.equal(await host.evaluate(node => node.shadowRoot.activeElement?.dataset.focusId), 'description');
+  await page.keyboard.press('Escape');
+  assert.equal(await host.evaluate(node => node.shadowRoot.activeElement?.dataset.focusId), 'player');
+  const beforeReturn = requests;
+  await page.keyboard.press('Escape');
+  await page.waitForURL('https://www.youtube.com/');
+  await card.waitFor();
+  await page.waitForFunction(() => window.__pageDOM.activeElement?.dataset.browseId === 'video:next-20');
+  assert.equal(await page.evaluate(() => history.state.originalEntry), true);
+  assert.equal(await grid.getByRole('button', { name: 'Music', exact: true }).getAttribute('aria-pressed'), 'true');
+  assert.equal(await grid.locator('[data-browse-id]').count(), 80);
+  assert.equal(await grid.locator('[data-ytg-browse-grid]').evaluate(node => node.scrollTop), top);
+  assert.equal(requests, beforeReturn);
+});
+
 function nextOrPage(route, options) {
   return route.request().url().includes('/youtubei/v1/next') ? route.fulfill({json:nextFixture}) : route.fulfill(options);
 }
@@ -108,6 +179,17 @@ test('both gamepad layouts reach the real content bridge and disabling restores 
   await page.waitForFunction(() => document.documentElement.dataset.ytgPlaybackLayout === 'fullscreen');
   await page.locator('#ytg-browse-top').waitFor({ state: 'hidden' });
   await setPad({ connected: true });
+  const sceneHint = page.locator('#yt-gamepad-overlay #scene-hint');
+  await sceneHint.waitFor();
+  assert.match(await sceneHint.getAttribute('data-ytg-hint'), /X Play \/ pause.*LT \/ RT Volume/);
+  await page.evaluate(() => {
+    const dialog = document.createElement('div');
+    dialog.id = 'hint-test-dialog'; dialog.setAttribute('role', 'dialog');
+    dialog.innerHTML = '<button>Close</button>'; document.body.append(dialog);
+  });
+  await page.waitForFunction(() => document.querySelector('#yt-gamepad-overlay')?.shadowRoot?.querySelector('#scene-hint')?.getAttribute('data-ytg-hint') === 'D-pad: Select · A Confirm · B Back');
+  await page.locator('#hint-test-dialog').evaluate(node => node.remove());
+  await page.waitForFunction(() => document.querySelector('#yt-gamepad-overlay')?.shadowRoot?.querySelector('#scene-hint')?.getAttribute('data-ytg-hint')?.includes('Volume'));
   await options.locator('#playbackLayout').selectOption('windowed');
   await page.waitForFunction(() => document.documentElement.dataset.ytgPlaybackLayout === 'windowed');
   await page.locator('#ytg-browse-top').waitFor();
@@ -116,6 +198,7 @@ test('both gamepad layouts reach the real content bridge and disabling restores 
   await page.waitForFunction(() => !document.documentElement.classList.contains('ytg-watch-layout'));
   await page.locator('#ytg-watch').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('#ytg-watch').isVisible(), false);
+  await sceneHint.waitFor({ state: 'hidden' });
 });
 
 test('held media previews and commits on release through real extension input', { timeout: 60000 }, async t => {

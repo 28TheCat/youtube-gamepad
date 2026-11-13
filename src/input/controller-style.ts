@@ -19,9 +19,14 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
   profiles.switch.Select = '−'; profiles.generic.Select = 'Select';
   const roots: Set<ShadowRoot | Document> = new Set();
   let family: ControllerStyle['family'] = 'generic';
-  let bindings = YTGamepadBindings.normalize();
+  let bindings: Record<string, number | undefined> = YTGamepadBindings.normalize();
   const actionForKey = Object.fromEntries(Object.entries(YTGamepadBindings.defaults).map(([action, button]) => [YTGamepadBindings.keys[button], action]));
-  const boundKey = (key: string) => actionForKey[key] ? YTGamepadBindings.keys[bindings[actionForKey[key]]] : key;
+  const boundKey = (key: string) => {
+    const action = actionForKey[key];
+    if (!action) return key;
+    const button = bindings[action];
+    return button === undefined ? '—' : YTGamepadBindings.keys[button];
+  };
   const keyboardKeys: Record<string, string> = { A: 'Enter', B: 'Esc', X: 'Space', Y: '/', LB: 'PageUp', RB: 'PageDown', LT: '−', RT: '=', Start: 'F1' };
   const keyboardMode = () => document.documentElement.dataset.ytgInputMode === 'keyboard';
   function identify(id = '') {
@@ -82,8 +87,15 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
   }
   YTGamepadControllerStyle = {
     identify, format, bind,
-    configureBindings(raw) {
-      const next = YTGamepadBindings.normalize(raw);
+    configureBindings(raw, mapping) {
+      const next: Record<string, number | undefined> = YTGamepadBindings.normalize(raw);
+      if (mapping) {
+        for (const [action, preferred] of Object.entries(next)) {
+          if (preferred !== undefined && mapping[preferred] === action) continue;
+          const alternate = Object.keys(mapping).find(button => mapping[Number(button)] === action);
+          next[action] = alternate === undefined ? undefined : Number(alternate);
+        }
+      }
       if (Object.keys(next).every(action => next[action] === bindings[action])) return;
       bindings = next; repaint();
     },

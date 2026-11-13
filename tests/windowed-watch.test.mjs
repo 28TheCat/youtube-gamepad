@@ -60,7 +60,7 @@ export function setup(rich = false, native = false, loading = false, filters = f
   watch.connect(port); watch.sync(); watch.show();
   return { watch, commands, page, waitForPlayer() { port.state.surfaceReady = false; port.state.transitioning = true; mode = 'browse'; watch.sync(); }, readyPlayer() { port.state.surfaceReady = true; port.state.transitioning = false; mode = 'controls'; watch.sync(); }, leave() { mode = 'browse'; page.isWatch = false; watch.sync(); }, resume() { mode = 'playback'; page.isWatch = true; watch.sync(); }, press: action => watch.handleInput(action),
     half() { document.documentElement.dataset.ytgPlaybackLayout = 'windowed'; watch.sync(); },
-    get state() { return watch.state; }, destroy: () => runtime.destroy() };
+    comments, get state() { return watch.state; }, destroy: () => runtime.destroy() };
 }`;
 const fixtureId = fileURLToPath(new URL('./helpers/windowed-watch-fixture.ts', import.meta.url)).replaceAll('\\', '/');
 const result = await build({ configFile: false, publicDir: false, logLevel: 'silent',
@@ -280,6 +280,24 @@ for (const width of [767, 1280]) test(`windowed title, author and interactions s
   await page.evaluate(() => window.fixture.destroy());
 });
 
+test('Back closes visible comments after focus returns to the player', async t => {
+  const page = await browserPage(t);
+  await page.setContent('<html class="ytg-gamepad-input" data-ytg-playback-layout="windowed"><body></body></html>');
+  await page.addScriptTag({ content: code + ';window.fixture = WindowedWatchFixture.setup(true);' });
+  const host = page.locator('#ytg-watch');
+  const comments = host.locator('[data-action="comments"]');
+  await comments.focus();
+  await comments.dispatchEvent('click');
+  await host.locator('.comments-open').waitFor();
+  await page.evaluate(() => window.fixture.press('left'));
+  assert.equal(await page.evaluate(() => window.fixture.state.panel), '');
+  assert.equal(await host.locator('.comments-open').count(), 1);
+  await page.evaluate(() => window.fixture.press('back'));
+  assert.equal(await host.locator('.comments-open').count(), 0);
+  assert.equal(await page.evaluate(() => window.fixture.state.mode), 'controls');
+  assert.equal(await host.evaluate(node => node.shadowRoot.activeElement?.dataset.focusId), 'comments');
+});
+
 test('media shortcuts keep their meaning and focus across detail regions and panels', async t => {
   const page = await browserPage(t);
   await page.setContent('<html data-ytg-playback-layout="windowed"><body></body></html>');
@@ -434,19 +452,30 @@ test('return restores recommendation identity and scroll after the list order ch
   await page.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<html data-ytg-playback-layout="windowed"><body></body></html>' }));
   await page.goto('https://www.youtube.com/watch?v=one');
   await page.addScriptTag({ content: code });
-  await page.evaluate(() => {
+  const burstWrites = await page.evaluate(() => {
+    const replaceState = history.replaceState.bind(history);
+    window.watchHistoryWrites = 0;
+    history.replaceState = (...args) => { window.watchHistoryWrites++; replaceState(...args); };
     window.fixture = WindowedWatchFixture.setup(true);
     window.fixture.watch.show('recommendations');
     for (let i = 0; i < 6; i++) window.fixture.press('down');
     const root = document.querySelector('#ytg-watch').shadowRoot;
-    root.querySelector('.recommendations').scrollTop = 420;
-    root.querySelector('.recommendations').dispatchEvent(new Event('scroll'));
+    const list = root.querySelector('.recommendations');
+    for (let i = 1; i <= 120; i++) {
+      list.scrollTop = i * 3;
+      list.dispatchEvent(new Event('scroll'));
+    }
+    return window.watchHistoryWrites;
   });
+  assert.equal(burstWrites, 0);
+  await page.waitForFunction(() => history.state?.ytGamepadWatchReturn);
   const saved = await page.evaluate(() => history.state.ytGamepadWatchReturn);
+  assert.equal(await page.evaluate(() => window.watchHistoryWrites), 1);
   assert.equal(saved.target.region, 'recommendations');
   assert.ok(saved.scrollTop > 0);
   await page.evaluate(() => {
     document.dispatchEvent(new Event('yt-navigate-start'));
+    if (window.watchHistoryWrites !== 1) throw new Error('Unchanged watch state was written again');
     history.pushState({}, '', '/channel/UCauthor');
     window.fixture.leave();
     window.fixture.page.recommendations.reverse();
@@ -562,4 +591,28 @@ test('native recommendation filters preserve the collection and support controll
   assert.equal(await host.locator('.recommendation-filters').count(), 0);
   await host.locator('.watch-tab:not(.collection-tab)').first().click();
   assert.equal(await host.locator('[data-filter-key="filter:2"]').getAttribute('aria-pressed'), 'true');
+});
+
+for (const layout of ['windowed', 'fullscreen']) test(`B unwinds replies then comments and restores the opener (${layout})`, async t => {
+  const page = await browserPage(t);
+  await page.setContent(`<html class="ytg-gamepad-input" data-ytg-playback-layout="${layout}"><body></body></html>`);
+  await page.addScriptTag({ content: code + ';window.fixture = WindowedWatchFixture.setup(true);' });
+  await page.evaluate(() => { const item = window.fixture.comments[10]; item.hasReplies = true; item.replyCount = 1;
+    item.replies = [{ key: 'reply', author: 'Reply author', text: 'Nested reply' }]; });
+  const host = page.locator('#ytg-watch');
+  const opener = host.locator('[data-action="comments"]');
+  await opener.focus(); await opener.dispatchEvent('click');
+  const thread = host.locator('[data-focus-id="replies:comment10"]');
+  await thread.focus();
+  const before = await host.locator('.sheet').evaluate(node => node.scrollTop);
+  await page.evaluate(() => window.fixture.press('confirm'));
+  await host.locator('.comment-reply').waitFor();
+  await page.evaluate(() => window.fixture.press('back'));
+  assert.equal(await host.locator('.comment-reply').count(), 0);
+  assert.equal(await host.locator('.dialog.comments').isVisible(), true);
+  assert.equal(await host.evaluate(node => node.shadowRoot.activeElement?.dataset.focusId), 'replies:comment10');
+  assert.equal(await host.locator('.sheet').evaluate(node => node.scrollTop), before);
+  await page.evaluate(() => window.fixture.press('back'));
+  assert.equal(await host.locator('.dialog.comments').isVisible(), false);
+  assert.equal(await host.evaluate(node => node.shadowRoot.activeElement?.dataset.focusId), 'comments');
 });

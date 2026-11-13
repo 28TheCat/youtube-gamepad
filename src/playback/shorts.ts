@@ -37,7 +37,7 @@ export let YTGamepadShortsModule = {
     let stage: HTMLElement;
     let avatar: HTMLImageElement, avatarFallback: HTMLElement, subscribe: HTMLButtonElement;
     let progress: HTMLProgressElement, play: HTMLButtonElement, previous: HTMLButtonElement, next: HTMLButtonElement, retry: HTMLButtonElement;
-    let rail: HTMLElement, drawer: HTMLElement, drawerTitle: HTMLElement, body: HTMLElement, hint: HTMLElement;
+    let rail: HTMLElement, drawer: HTMLElement, drawerTitle: HTMLElement, body: HTMLElement, hint: HTMLElement, mediaHint: HTMLElement;
     const actionSlots = new Map<'like' | 'comments' | 'save' | 'mute', HTMLElement>();
     const panelActionSlots = new Map<'like' | 'comments' | 'save' | 'mute', HTMLElement>();
     const extraActions = new Map<string, HTMLButtonElement>();
@@ -164,7 +164,10 @@ export let YTGamepadShortsModule = {
       if (image) el.append(createInterfaceIcon(image));
       el.append(node('span', '', t(label))); el.onclick = callback; return el;
     }
-    function notify(value: string) { message = value; messageUntil = performance.now() + 3500; text(status, t(value)); }
+    function setStatus(value: string) {
+      if (status.getAttribute('data-ytg-text') !== value) controllerStyle.bind(status, value);
+    }
+    function notify(value: string) { message = value; messageUntil = performance.now() + 3500; setStatus(value); }
     function overrideLayout(owner: HTMLElement, property: LayoutProperty) {
       const applied = layoutOverrides[property], saved = nativeLayouts.get(owner) || {};
       if (!saved[property] || owner.style.getPropertyValue(property) !== applied || owner.style.getPropertyPriority(property) !== 'important') {
@@ -242,6 +245,13 @@ export let YTGamepadShortsModule = {
       if (!hint) return;
       const value = panel ? 'Up / down Select · A Confirm · B Close' : inRail() ? 'Up / down Select · A Confirm · Left / B Back to video' : retry && !retry.hidden ? 'A Retry · Up / down Switch · B Back' : 'Up / down Switch · Right Actions · A Play / pause · B Back';
       if (hint.getAttribute('data-ytg-hint') !== value) controllerStyle.hint(hint, value);
+      mediaHint.hidden = !!panel || !media || !retry.hidden || switching();
+      if (!mediaHint.hidden) {
+        const shortcuts = Number.isFinite(media?.duration)
+          ? 'X Play / pause · LB / RB Rewind / forward · LT / RT Volume'
+          : 'X Play / pause · LT / RT Volume';
+        if (mediaHint.getAttribute('data-ytg-hint') !== shortcuts) controllerStyle.hint(mediaHint, shortcuts);
+      }
     }
     function focusRail(index = 0) {
       const buttons = railButtons(); buttons[Math.max(0, Math.min(index, buttons.length - 1))]?.focus({ preventScroll: true }); updateHint();
@@ -252,7 +262,7 @@ export let YTGamepadShortsModule = {
       const failed = () => {
         if (media !== attempted || route !== attemptedRoute) return;
         playbackFailure = 'Playback was blocked. Press Play or retry.';
-        text(status, t(playbackFailure)); retry.hidden = false; updateHint();
+        setStatus(playbackFailure); retry.hidden = false; updateHint();
       };
       try { void media.play().catch(failed); } catch { failed(); }
     }
@@ -301,8 +311,8 @@ export let YTGamepadShortsModule = {
       previous.querySelector('span')!.hidden = true; next.querySelector('span')!.hidden = true; navigation.append(count, previous, next);
       const feedback = node('div', 'feedback'); status = node('p', 'status'); status.setAttribute('role', 'status');
       retry = button('Retry playback', retryPlayback); retry.className = 'retry'; retry.hidden = true; feedback.append(status, retry);
-      const hints = node('div', 'hints'); hint = node('p');
-      hints.append(hint, controllerStyle.hint(node('p'), 'LB / RB Seek · LT / RT Volume · Start More'));
+      const hints = node('div', 'hints'); hint = node('p'); mediaHint = node('p');
+      hints.append(hint, mediaHint);
       drawer = node('aside', 'drawer'); drawer.hidden = true; drawer.setAttribute('role', 'region');
       const header = node('header'); drawerTitle = node('h2'); drawerTitle.id = 'shorts-panel-title'; drawer.setAttribute('aria-labelledby', drawerTitle.id);
       const close = button('Close', () => { if (!backCommentComposer(body)) panelDrawer.back(); }, 'close'); close.className = 'close'; close.querySelector('span')!.hidden = true;
@@ -499,7 +509,7 @@ export let YTGamepadShortsModule = {
         if (cover.src !== url) {
           resetPreviewMotion(); cover.dataset.videoId = desiredId || id(); cover.src = url;
         }
-        slidePreview(); text(status, t('Loading video…'));
+        slidePreview(); setStatus('Loading video…');
       }
     }
     function update() {
@@ -539,17 +549,17 @@ export let YTGamepadShortsModule = {
       if (extraActions.size) paintExtraActions();
       if (panel === 'quality' || panel === 'subscription') paintOptions();
       if (panel === 'comments') readComments();
-      if (media?.error) { text(status, t('Video could not play. Retry playback.')); retry.hidden = false; updateHint(); return; }
+      if (media?.error) { setStatus('Video could not play. Retry playback.'); retry.hidden = false; updateHint(); return; }
       if (waiting || !media || !media.readyState && !playbackFailure) {
         const timedOut = performance.now() - started > (media ? 15000 : 10000);
-        text(status, t(timedOut ? 'Shorts could not load. Retry playback.' : 'Loading video…')); retry.hidden = !timedOut; updateHint(); return;
+        setStatus(timedOut ? 'Shorts could not load. Retry playback.' : 'Loading video…'); retry.hidden = !timedOut; updateHint(); return;
       }
       retry.hidden = !playbackFailure; updateHint();
       progress.value = Number.isFinite(media.duration) && media.duration > 0 ? Math.min(1, media.currentTime / media.duration) : 0;
       text(clock, `${time(media.currentTime)} / ${time(media.duration)}`); play.setAttribute('aria-pressed', String(!media.paused));
       const symbol = media.paused ? 'play' : 'pause';
       if (play.dataset.icon !== symbol) { play.querySelector('svg')?.replaceWith(createInterfaceIcon(symbol)); play.dataset.icon = symbol; }
-      text(status, t(playbackFailure || (performance.now() < messageUntil ? message : media.readyState < 3 ? 'Buffering…' : '')));
+      setStatus(playbackFailure || (performance.now() < messageUntil ? message : media.readyState < 3 ? 'Buffering…' : ''));
     }
     function sync() {
       if (!active()) {
@@ -599,7 +609,10 @@ export let YTGamepadShortsModule = {
         // Reuse the current player through its API; the native reel never scrolls.
         navigationTimer = lifecycle.timeout(failed, 8000);
         if (!pageAccess?.playShorts?.(target)) failed();
-        else finished();
+        else {
+          document.dispatchEvent(new Event('ytg-shorts-queue-move'));
+          finished();
+        }
       }
     }
     function finished() {

@@ -110,6 +110,22 @@ test('remapped prompts update text, physical artwork keys and controller labels'
   assert.equal(hint.textContent, '○ 确认 · × 返回');
 });
 
+test('prompts show only buttons that still execute the action after shortcut overrides', () => {
+  const { style, document } = setup();
+  const badge = style.badge(node(), 'A');
+  const hint = style.hint(node(), 'A Confirm · B Back');
+  style.register({ querySelectorAll: () => [badge, hint] });
+  style.configureBindings(undefined, { 0: 'mute', 1: 'back', 8: 'confirm' });
+  assert.equal(badge.textContent, 'Select');
+  assert.equal(badge.getAttribute('data-ytg-first-key'), 'Select');
+  assert.equal(hint.textContent, 'Select Confirm · B Back');
+  style.configureBindings(undefined, { 0: 'mute', 1: 'back' });
+  assert.equal(badge.textContent, '—');
+  assert.equal(badge.getAttribute('data-ytg-icon'), 'false');
+  document.documentElement.dataset.ytgInputMode = 'keyboard';
+  assert.equal(style.format('A Confirm · B Back'), 'Enter Confirm · Esc Back');
+});
+
 
 test('right-hand navigation hints update visible text and accessible labels', () => {
   const { style, document } = setup();

@@ -10,6 +10,117 @@ const built = await build({ configFile: false, publicDir: false, logLevel: 'sile
 });
 const code = (Array.isArray(built) ? built[0] : built).output.find(item => item.type === 'chunk').code;
 
+for (const reducedMotion of ['no-preference', 'reduce']) {
+  test(`row navigation reveals the whole row only when needed (${reducedMotion})`, async t => {
+    const page = await browserPage(t);
+    await page.emulateMedia({ reducedMotion });
+    await page.setContent(`<style>
+      #grid{height:300px;width:400px;overflow:auto;scroll-padding:20px}
+      .virtual-row{display:flex;height:100px;gap:10px}
+      button{width:160px;height:60px;flex:none}
+      .virtual-row:nth-child(4){height:180px}
+      .virtual-row:nth-child(4) button:last-child{height:180px}
+    </style><div id="grid" data-ytg-browse-grid data-ytg-indexed-feed>
+      ${Array.from({ length: 8 }, (_, row) => `<div class="virtual-row">${[0, 1].map(col =>
+        `<button data-browse-id="${row}:${col}">${row}:${col}</button>`).join('')}</div>`).join('')}
+    </div>`);
+    await page.addScriptTag({ content: code });
+    await page.evaluate(() => {
+      const core = ScrollFixture.YTGamepadCoreModule.create({ runtime: ScrollFixture.YTGamepadRuntime,
+        navigation: ScrollFixture.YTGamepadNavigation,
+        controllerStyle: { css: '', hint() {}, register: () => () => {} } });
+      const grid = document.querySelector('#grid');
+      core.registerSite({ selectors: '#grid button', getKey: el => el.dataset.browseId, getSection: () => 'content',
+        sections: { content: { layout: 'grid' } } });
+      grid.addEventListener('ytg-browse-direction', event => {
+        const [row, col] = event.target.dataset.browseId.split(':').map(Number);
+        const next = event.detail.direction === 'down' ? `${row + 1}:${col}` : `${row}:${1 - col}`;
+        event.preventDefault();
+        event.detail.focus(grid.querySelector(`[data-browse-id="${next}"]`));
+      });
+      window.scrollCore = core;
+      window.rowScrolls = [];
+      const scroll = grid.scrollTo.bind(grid);
+      grid.scrollTo = options => { window.rowScrolls.push(options); scroll(options); };
+      core.focus(grid.querySelector('button'));
+      core.navigate('down');
+    });
+    assert.deepEqual(await page.evaluate(() => window.rowScrolls), [], 'a fully visible next row stays still');
+    await page.evaluate(() => { window.scrollCore.navigate('down'); window.scrollCore.navigate('down'); });
+    assert.equal(await page.evaluate(() => window.rowScrolls.at(-1).behavior), reducedMotion === 'reduce' ? 'instant' : 'smooth');
+    await page.waitForFunction(() => {
+      const grid = document.querySelector('#grid'), row = grid.querySelectorAll('.virtual-row')[3];
+      const bounds = grid.getBoundingClientRect(), target = row.getBoundingClientRect();
+      return target.top >= bounds.top + 19 && target.bottom <= bounds.bottom - 19;
+    });
+    // The row can be fully visible one pixel before the smooth scroll finishes.
+    await page.waitForFunction(() => Math.abs(document.querySelector('#grid').scrollTop - window.rowScrolls.at(-1).top) < .5);
+    const before = await page.evaluate(() => ({ top: document.querySelector('#grid').scrollTop, calls: window.rowScrolls.length }));
+    await page.evaluate(() => window.scrollCore.navigate('right'));
+    assert.deepEqual(await page.evaluate(() => ({ top: document.querySelector('#grid').scrollTop, calls: window.rowScrolls.length })), before,
+      'horizontal movement preserves the row position, including a taller neighbour');
+    await page.evaluate(() => { window.scrollCore.destroy(); ScrollFixture.YTGamepadRuntime.destroy(); });
+  });
+}
+
+test('browse confirm feedback never delays clicks, stacks animations, or ignores reduced motion', async t => {
+  const page = await browserPage(t);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.setContent('<div id="ytg-browse-grid"><button id="confirm">Confirm</button></div>');
+  await page.addScriptTag({ content: code });
+  const pressed = await page.evaluate(() => {
+    window.core = ScrollFixture.YTGamepadCoreModule.create({ runtime: ScrollFixture.YTGamepadRuntime,
+      navigation: ScrollFixture.YTGamepadNavigation,
+      interaction: { dispatch: () => ({ effects: [{ value: 'region' }] }) },
+      controllerStyle: { css: '', hint() {}, register: () => () => {} } });
+    const button = document.querySelector('#confirm');
+    window.clicks = 0; button.onclick = () => window.clicks++;
+    core.registerSite({ selectors: '#confirm' }); core.focus(button);
+    core.act('confirm'); core.act('confirm');
+    return { clicks, animations: button.getAnimations().filter(a => a.id === 'ytg-press').length };
+  });
+  assert.deepEqual(pressed, { clicks: 2, animations: 1 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.deepEqual(await page.evaluate(() => {
+    const button = document.querySelector('#confirm'); button.getAnimations().forEach(a => a.cancel());
+    core.act('confirm');
+    const result = { clicks, animations: button.getAnimations().length };
+    core.destroy(); ScrollFixture.YTGamepadRuntime.destroy(); return result;
+  }), { clicks: 3, animations: 0 });
+});
+
+test('boundary feedback keeps focus, does not stack, and respects reduced motion', async t => {
+  const page = await browserPage(t);
+  await page.goto('about:blank');
+  await page.setContent('<button id="only">Only item</button>');
+  await page.addScriptTag({ content: code });
+  await page.evaluate(() => {
+    window.core = ScrollFixture.YTGamepadCoreModule.create({ runtime: ScrollFixture.YTGamepadRuntime,
+      navigation: ScrollFixture.YTGamepadNavigation,
+      controllerStyle: { css: '', hint() {}, register: () => () => {} } });
+    core.registerSite({ selectors: '#only' });
+    core.focus(document.querySelector('#only'));
+  });
+  const feedback = await page.evaluate(() => {
+    core.navigate('right'); core.navigate('right');
+    const ring = document.querySelector('#yt-gamepad-overlay').shadowRoot.querySelector('#ring');
+    const animations = ring.getAnimations().filter(a => a.effect.getKeyframes().some(frame => frame.translate));
+    return { count: animations.length, duration: animations[0]?.effect.getTiming().duration,
+      selected: core.current.id, direction: animations[0]?.effect.getKeyframes()[1].translate };
+  });
+  assert.deepEqual(feedback, { count: 1, duration: 200, selected: 'only', direction: '4px' });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const reduced = await page.evaluate(() => {
+    const ring = document.querySelector('#yt-gamepad-overlay').shadowRoot.querySelector('#ring');
+    ring.getAnimations().forEach(a => a.cancel());
+    core.navigate('left');
+    const count = ring.getAnimations().length;
+    core.destroy(); ScrollFixture.YTGamepadRuntime.destroy();
+    return count;
+  });
+  assert.equal(reduced, 0);
+});
+
 test('native menu navigation reuses indexed targets and rejects same-turn disabled, removed and hidden controls', async t => {
   const page = await browserPage(t);
   await page.setContent('<style>#settings{width:200px}#settings button{display:block;width:180px;height:28px}</style><div id="movie_player"><section id="settings" role="dialog"></section></div><button id="outside">Outside</button>');

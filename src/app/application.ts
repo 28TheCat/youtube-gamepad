@@ -45,7 +45,8 @@ startCoordinator({ interaction, pageAccess, localChannel, remoteHistory: true, c
 });
 let settingsApplied!: () => void;
 const initialSettings = new Promise<void>(resolve => { settingsApplied = resolve; });
-const disposeContent = startContent(localChannel, () => YTGamepadRuntime.destroy(), settingsApplied);
+const disposeContent = startContent(localChannel, () => YTGamepadRuntime.destroy(), settingsApplied,
+  { snapshot: interaction.snapshotTrace, clear: interaction.clearTrace });
 if (startup.signal.aborted) return;
 const extensionServices = YTGamepadRuntime.scope('extension-services');
 extensionServices.cleanup(disposeContent);

@@ -11,6 +11,10 @@ export let YTGamepadBindings!: BindingsSchema;
     PageUp: 'seekBack', PageDown: 'seekForward', '-': 'volumeDown', '=': 'volumeUp',
     k: 'playPause', j: 'seekBack', l: 'seekForward', m: 'mute', c: 'captions'
   };
+  const directPlaybackActions = new Set(['playPause', 'seekBack', 'seekForward', 'volumeDown', 'volumeUp']);
+  function canOverrideWithShortcut(layout: string, action?: string) {
+    return layout !== 'watch' || !action || !directPlaybackActions.has(action);
+  }
   function normalizeShortcuts(raw: unknown): Record<string, Record<string, string>> {
     const result: Record<string, Record<string, string>> = { watch: {}, browse: {} };
     for (const layout of ['watch', 'browse']) {
@@ -53,6 +57,21 @@ export let YTGamepadBindings!: BindingsSchema;
   }
   // A separate preset leaves both saved custom layouts intact.
   const rightHand = Object.freeze({ ...defaults, help: 5, seekForward: 9 });
-  YTGamepadBindings = { defaults, rightHand, keys, labels, normalize, layouts, normalizeLayouts, contextLabel, keyboardActions, normalizeShortcuts,
+  function buttonActions(bindings: Record<string, number>, layout: string, shortcuts: Record<string, string> = {}, searchOpen = false) {
+    const mapping: Record<number, string> = {};
+    for (const [action, button] of Object.entries(bindings)) {
+      if (searchOpen || !action.startsWith('keyboard')) mapping[button] = action;
+    }
+    if (!searchOpen) {
+      for (const [button, key] of Object.entries(keys)) {
+        const shortcut = shortcuts[key], index = Number(button);
+        if (Object.hasOwn(keyboardActions, shortcut) && canOverrideWithShortcut(layout, mapping[index]))
+          mapping[index] = keyboardActions[shortcut];
+      }
+    }
+    return mapping;
+  }
+  YTGamepadBindings = { defaults, rightHand, keys, labels, normalize, layouts, normalizeLayouts, contextLabel, keyboardActions, normalizeShortcuts, canOverrideWithShortcut,
+    buttonActions, layoutForPath: path => path === '/watch' || path.startsWith('/shorts/') ? 'watch' : 'browse',
     shortcutLabel: key => key === ' ' ? 'Space' : key === 'Escape' ? 'Esc' : key };
 })();

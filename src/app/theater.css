@@ -1,6 +1,13 @@
 /* Native page layout, input effects and playback overrides. */
 #ytg-temporary-speed{position:fixed!important;top:64px!important;left:50%!important;transform:translateX(-50%)!important;z-index:2147483647!important;padding:10px 20px!important;border-radius:24px!important;background:var(--ytg-overlay-surface)!important;color:var(--ytg-overlay-text)!important;font:600 18px/1.4 var(--ytg-font-family)!important;pointer-events:none!important}
 #ytg-temporary-speed[hidden]{display:none!important}
+#ytg-connection-guide{
+  position:fixed;right:20px;bottom:20px;z-index:2147483647;
+  display:grid;gap:4px;box-sizing:border-box;max-width:calc(100vw - 40px);
+  padding:10px 16px;border-radius:12px;
+  background:var(--ytg-overlay-surface,#252832);color:var(--ytg-overlay-text,#fff);
+  box-shadow:0 4px 20px #0004;font:14px/1.5 var(--ytg-font-family,system-ui);
+}
 html.ytg-gamepad-input,html.ytg-gamepad-input *{cursor:none!important}
 html.ytg-gamepad-input :is(ytd-rich-item-renderer,ytd-rich-grid-media,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model){background-color:transparent!important;box-shadow:none!important}
 html.ytg-gamepad-input :is(ytd-video-preview,ytd-moving-thumbnail-renderer,yt-video-preview-view-model,#inline-preview-player){display:none!important}

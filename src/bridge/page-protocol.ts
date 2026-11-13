@@ -69,6 +69,7 @@ export function watchInfoSnapshot(raw: unknown): WatchInfoSnapshot | undefined {
     ...((value.channelBadge === 'verified' || value.channelBadge === 'artist') ? { channelBadge: value.channelBadge } : {}),
     ...(['ALL', 'PERSONALIZED', 'NONE'].includes(value.notificationPreference || '') ? { notificationPreference: value.notificationPreference } : {}),
     subscribed: value.subscribed === true, liked: value.liked === true, disliked: value.disliked === true,
+    ...(typeof value.likeCount === 'number' && Number.isSafeInteger(value.likeCount) && value.likeCount >= 0 ? { likeCount: value.likeCount } : {}),
     canLike: value.canLike === true, canSubscribe: value.canSubscribe === true, canSave: value.canSave === true,
     loading: value.loading === true, failed: value.failed === true, working: value.working === true };
 }
@@ -107,7 +108,9 @@ export function commentsSnapshot(raw: unknown): CommentsSnapshot | undefined {
     const replies = item.replies.slice(0, Math.min(replyBudget, 100)).flatMap(reply =>
       reply && typeof reply.key === 'string' && reply.key.length <= 200 && typeof reply.author === 'string' &&
       typeof reply.text === 'string'
-        ? [{ key: reply.key, author: reply.author.slice(0, 200), text: reply.text.slice(0, 2000), ...avatar(reply.avatar), ...translationEntry(reply), ...translation(reply.translation) }] : []);
+        ? [{ key: reply.key, author: reply.author.slice(0, 200), text: reply.text.slice(0, 2000),
+          ...(typeof reply.replyTo === 'string' ? { replyTo: reply.replyTo.slice(0, 200) } : {}),
+          ...avatar(reply.avatar), ...translationEntry(reply), ...translation(reply.translation) }] : []);
     replyBudget -= replies.length;
     return [{ key: item.key, author: item.author.slice(0, 200), text: item.text.slice(0, 4000), ...avatar(item.avatar), ...translationEntry(item), ...translation(item.translation),
       ...(Number.isSafeInteger(item.replyCount) && item.replyCount! >= 0 ? { replyCount: item.replyCount } : {}),

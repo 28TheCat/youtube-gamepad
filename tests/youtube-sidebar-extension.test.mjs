@@ -74,7 +74,9 @@ test('manifest sidebar uses guide API data under CSP and ignores native guide li
   const sidebar = page.locator('#ytg-browse-sidebar');
   await sidebar.locator('[data-sidebar-id="videos"][href="https://studio.youtube.com/channel/UCcreator/videos"]').waitFor();
   assert.equal(await sidebar.locator('[data-sidebar-id="subscriptions"]').getAttribute('aria-label'), 'Subscribed channels');
-  assert.deepEqual(await sidebar.locator('[data-sidebar-section="section:1"] a > span').allTextContents(), ['You', 'History', 'Your videos', 'Account playlist']);
+  assert.deepEqual(await sidebar.locator('[data-sidebar-section="section:1"] a > span').allTextContents(), ['History', 'Your videos', 'Account playlist']);
+  assert.equal(await sidebar.getByRole('button', { name: 'You', exact: true, includeHidden: true }).count(), 0);
+  assert.equal(await sidebar.getByRole('link', { name: 'History', exact: true }).isVisible(), true);
   assert.equal(await sidebar.locator('[href="/playlist?list=WL"]').count(), 0, 'absent account links are not invented');
   const more = sidebar.getByRole('button', { name: 'More playlists', exact: true });
   const playlist = sidebar.getByRole('link', { name: 'Account playlist', exact: true, includeHidden: true });

@@ -9,7 +9,8 @@
 .ytg-search-field input{width:100%;min-width:0;margin:0;padding:0;border:0;outline:0;background:transparent;color:inherit;font:400 16px/24px var(--ytg-font-family,Roboto,Arial,sans-serif);box-shadow:none}
 .ytg-search-field input::placeholder{color:var(--ytg-muted,#606060);opacity:1}
 .ytg-search-bar button{display:flex;align-items:center;justify-content:center;flex:none;margin:0;padding:0;color:inherit;background:var(--ytg-surface,#f8f8f8);cursor:pointer}
-.ytg-search-submit,.ytg-search-clear{width:80px;border:1px solid var(--ytg-border,#ccc);border-radius:24px;font:600 16px/1.4 var(--ytg-font-family,Roboto,Arial,sans-serif);white-space:nowrap}
+.ytg-search-submit,.ytg-search-clear{border:1px solid var(--ytg-border,#ccc);border-radius:24px;font:600 16px/1.4 var(--ytg-font-family,Roboto,Arial,sans-serif);white-space:nowrap}
+.ytg-search-submit{width:80px}
 .ytg-search-clear{width:64px}
 .ytg-search-submit .ytg-search-submit-icon{display:none}
 .ytg-search-voice{width:48px;height:48px;border:0;border-radius:50%}

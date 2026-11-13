@@ -112,6 +112,8 @@ test('guide preserves personal playlists, regional sections and collapsed links 
     ] } }
   ] } : { items: [{ guideSectionRenderer: { items: [makeEntry('Home', '/')] } }] });
   const first = await f.service.read();
+  assert.equal(links(first).find(item => item.label === 'Shorts').icon, 'shorts');
+  assert.equal(links(first).find(item => item.label === 'Downloads').icon, 'downloads');
   assert.deepEqual(Array.from(first.sections, section => section.label || ''), ['', 'My library', 'More from YouTube']);
   assert.deepEqual(links(first).filter(item => !item.children).map(item => item.label),
     ['Shorts', 'Travel', 'Private favorites', 'Downloads', 'Music', 'Premium', 'Help']);
@@ -121,6 +123,7 @@ test('guide preserves personal playlists, regional sections and collapsed links 
   f.settings.SESSION_INDEX = 3;
   const second = await f.service.read();
   assert.deepEqual(links(second).map(item => item.label), ['Home']);
+  assert.equal(links(second)[0].icon, 'home');
   assert.equal(JSON.stringify(second).includes('Private favorites'), false);
   f.settings.LOGGED_IN = false;
   await f.service.read();

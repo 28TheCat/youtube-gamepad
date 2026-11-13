@@ -22,15 +22,24 @@ async function reload() {
     if (!disposed && request === revision) { layouts.value = schema.normalizeLayouts(stored.bindingLayouts, stored.bindings); ready.value = true; }
   } catch { settings.feedback('Could not load bindings. Please reopen this page.'); }
 }
-async function save(next: typeof values.value, message: string) {
+async function save(next: typeof values.value, message: string, resetShortcuts = false) {
   if (disabled.value) return;
   const selected = layout.value;
   saving.value = true;
   try {
     // Read again so editing one layout preserves changes made by another page.
-    const stored = await chrome.storage.local.get({ bindings: {}, bindingLayouts: null });
+    const stored = await chrome.storage.local.get({ bindings: {}, bindingLayouts: null, shortcutLayouts: null });
     const nextLayouts = { ...schema.normalizeLayouts(stored.bindingLayouts, stored.bindings), [selected]: next };
-    await chrome.storage.local.set({ bindingLayouts: nextLayouts, bindings: nextLayouts.watch });
+    const update: { bindingLayouts: typeof nextLayouts; bindings: typeof nextLayouts.watch;
+      shortcutLayouts?: ReturnType<typeof schema.normalizeShortcuts> } = {
+      bindingLayouts: nextLayouts, bindings: nextLayouts.watch
+    };
+    if (resetShortcuts) {
+      const shortcutLayouts = schema.normalizeShortcuts(stored.shortcutLayouts);
+      shortcutLayouts[selected] = {};
+      update.shortcutLayouts = shortcutLayouts;
+    }
+    await chrome.storage.local.set(update);
     if (!disposed) { layouts.value = nextLayouts; settings.feedback(message, true); }
   } catch { settings.feedback('Could not save bindings. Please try again.'); }
   finally { saving.value = false; await reload(); }
@@ -57,16 +66,16 @@ onMounted(() => { chrome.storage.onChanged.addListener(changed); void reload(); 
 onUnmounted(() => { disposed = true; chrome.storage?.onChanged?.removeListener?.(changed); });
 </script>
 <template>
-  <div class="section-heading shortcut-heading"><div><h2 id="shortcutsTitle">{{ t("Gamepad & buttons") }}</h2><p>{{ t("Assign buttons to actions. Changes apply to YouTube tabs that are already open.") }}</p></div><button id="resetBindings" type="button" class="secondary-button" :disabled="disabled" @click="save({ ...schema.defaults }, 'Default bindings restored')">{{ t("Restore default bindings") }}</button></div>
+  <div class="section-heading shortcut-heading"><div><h2 id="shortcutsTitle">{{ t("Gamepad & buttons") }}</h2><p>{{ t("Assign buttons to actions. Changes apply to YouTube tabs that are already open.") }}</p></div><button id="resetBindings" type="button" class="secondary-button" :disabled="disabled" @click="save({ ...schema.defaults }, 'Default bindings restored', true)">{{ t("Restore default bindings") }}</button></div>
   <button type="button" id="rightHandMode" class="secondary-button" :disabled="!settings.ready || settings.saving || saving" :aria-pressed="settings.values.rightHandMode" @click="settings.saveValues({ rightHandMode: !settings.values.rightHandMode })">{{ t('Right-hand preset') }} · {{ t(settings.values.rightHandMode ? 'On' : 'Off') }}</button>
   <p>{{ t('Right stick navigates. A confirms, B goes back, X plays or pauses, Y searches, RB opens the menu. Turn off to restore your custom bindings.') }}</p>
   <div class="binding-layout-tabs" role="group" :aria-label="t('Binding layouts')"><button v-for="id in (['watch', 'browse'] as const)" :key="id" type="button" :data-binding-layout="id" :aria-pressed="layout === id" :disabled="disabled" @click="layout = id">{{ t(schema.layouts[id]) }}<span>{{ t(id === 'watch' ? 'Playback, seeking and volume' : 'Browsing, selection and search') }}</span></button></div>
   <p class="binding-layout-hint" id="bindingLayoutHint">{{ t("两套布局独立保存，进入对应页面时自动切换。点击手柄上的按键，修改对应功能。") }}</p>
   <div class="controller-layout">
     <div id="bindingLeft" class="controller-side"><BindingRow v-for="action in left" :key="action" :action="action" :layout="layout" :value="values[action]" :disabled="disabled" @change="change" @focus="active = $event" @blur="active = undefined" /></div>
-    <div class="controller-figure"><div id="controllerHotspots" class="controller-hotspots"><div class="controller-outline" role="img" :aria-label="t('Gamepad button positions')" :style="{ backgroundImage: `url(${layoutImage})` }" /><button v-for="([x, y], key) in positionsOnPad" :key="key" type="button" class="controller-hotspot" :class="{ 'is-active': active && schema.keys[values[active]] === key }" :data-key="key" :style="{ left: `${x}%`, top: `${y}%` }" :disabled="disabled || !actionFor(key)" :aria-label="hotspotLabel(key)" :title="hotspotLabel(key)" @click="focusButton(key)"><span class="controller-physical-icon" aria-hidden="true" data-ytg-family="generic" :data-ytg-first-key="key" data-ytg-icon="true">{{ key }}</span></button></div><p class="controller-caption" id="controllerCaption">{{ t(schema.layouts[layout]) }}{{ t("布局") }}</p></div>
+    <div class="controller-figure"><div id="controllerHotspots" class="controller-hotspots"><div class="controller-outline" role="img" :aria-label="t('Gamepad button positions')" :style="{ backgroundImage: `url(${layoutImage})` }" /><button v-for="([x, y], key) in positionsOnPad" :key="key" type="button" class="controller-hotspot" :class="{ 'is-active': active && schema.keys[values[active]] === key }" :data-key="key" :style="{ left: `${x}%`, top: `${y}%` }" :disabled="disabled || !actionFor(key)" :aria-label="hotspotLabel(key)" :title="hotspotLabel(key)" @click="focusButton(key)"><span class="controller-physical-icon" aria-hidden="true" data-ytg-family="generic" :data-ytg-first-key="key" data-ytg-icon="true">{{ key }}</span></button></div><p class="controller-caption" id="controllerCaption">{{ t('{layout} layout', { layout: t(schema.layouts[layout]) }) }}</p></div>
     <div id="bindingRight" class="controller-side"><BindingRow v-for="action in right" :key="action" :action="action" :layout="layout" :value="values[action]" :disabled="disabled" @change="change" @focus="active = $event" @blur="active = undefined" /></div>
-    <div class="controller-navigation"><h3>{{ t(settings.values.rightHandMode ? 'Right stick · D-pad' : '左摇杆 · 十字键') }}</h3><p>{{ t("上下左右移动选择") }}</p><span>{{ t("导航方向固定") }}</span></div>
+    <div class="controller-navigation"><h3>{{ t(settings.values.rightHandMode ? 'Right stick · D-pad' : 'Left stick · D-pad') }}</h3><p>{{ t("上下左右移动选择") }}</p><span>{{ t("导航方向固定") }}</span></div>
     <div id="bindingBottom" class="controller-bottom"><BindingRow action="help" :layout="layout" :value="values.help" :disabled="disabled" @change="change" @focus="active = $event" @blur="active = undefined" /></div>
   </div>
   <details class="binding-search"><summary>{{ t("搜索键盘快捷键") }}</summary><div id="bindingFields" class="binding-grid"><BindingRow v-for="action in keyboard" :key="action" :action="action" :layout="layout" :value="values[action]" :disabled="disabled" @change="change" @focus="active = $event" @blur="active = undefined" /></div><p>{{ t("搜索时，播放 / 暂停用于删除，后退 / 快进移动光标，音量键切换大小写 / 提交搜索。") }}</p></details>

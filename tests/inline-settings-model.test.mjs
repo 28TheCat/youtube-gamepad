@@ -159,6 +159,11 @@ test('recorded shortcuts are scoped by layout, reject unsupported keys and clear
   key('r', true); await flush();
   assert.equal(s.saved.shortcutLayouts.browse.X, 'm');
   assert.match(s.model.state.shortcutError, /supported/);
+  s.model.selectLayout('watch');
+  assert.equal(s.model.canRecordShortcut('X'), false);
+  key('c'); await flush();
+  assert.equal(s.saved.shortcutLayouts.watch.X, undefined);
+  s.model.selectLayout('browse');
   s.model.assignAction('playPause'); await flush();
   assert.equal(s.saved.shortcutLayouts.browse.X, undefined);
   s.model.dispose();

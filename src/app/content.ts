@@ -6,9 +6,11 @@ import { ui } from '../ui/ui-api';
 import type { Dispose, Settings } from '../../types/ports';
 import type { DisposerHost } from '../../types/core';
 import { YTGamepadBindings } from '../input/bindings.ts';
+import { findPrimaryController } from '../input/primary-controller.ts';
 import { YTGamepadInlineSettings } from '../settings/inline-settings.ts';
 import { applyLanguage, languageDefault } from '../shared/i18n';
-export function startContent(localChannel?: import("../../types/ports").ApplicationChannel, onInvalidated?: Dispose, onSettingsApplied?: Dispose) {
+export function startContent(localChannel?: import("../../types/ports").ApplicationChannel, onInvalidated?: Dispose, onSettingsApplied?: Dispose,
+  interactionTrace?: import('../diagnostics/interaction-trace.ts').InteractionTrace) {
   const publish = (message: import("../../types/ports").ApplicationMessage) => {
     if (localChannel) localChannel.publish(message);
     else window.postMessage(message, location.origin);
@@ -113,11 +115,17 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
     if (/^(?:A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received\.?|The message port closed before a response was received\.?|Could not establish connection\. Receiving end does not exist\.?)$/i.test(message)) return;
     console.warn('YouTube Gamepad fullscreen:', message);
   }
+  let controllerIndex: number | null = null;
+  const primaryController = () => {
+    const pad = findPrimaryController(controllerIndex);
+    controllerIndex = pad?.index ?? null;
+    return pad;
+  };
   const reportConnection = (force = false) => {
     if (!contextAvailable()) return;
     if (document.hidden) return;
     if (connectionPending) { connectionRefresh ||= force; return; }
-    const connected = Array.from(navigator.getGamepads?.() || []).some(p => p?.connected && p.mapping === 'standard');
+    const connected = Boolean(primaryController());
     if (connected) seenConnection = true;
     // An empty initial snapshot after navigation is not a disconnection.
     if (!seenConnection && !connected) return;
@@ -237,8 +245,7 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
       reply({ ok: true }); return;
     }
     if (message?.type !== 'ytg-connection-status') return;
-    const pads = Array.from(navigator.getGamepads?.() || []).filter(p => p?.connected && p.mapping === 'standard').filter((p): p is Gamepad => p !== null);
-    const pad = pads.find(p => p.buttons?.some(button => button.pressed) || p.axes?.some(axis => Math.abs(axis) > .35)) || pads[0];
+    const pad = primaryController();
     reply({ connected: Boolean(pad), ...(typeof pad?.id === 'string' ? { controllerId: pad.id.slice(0, 256) } : {}) });
   };
   chrome.runtime.onMessage.addListener(onExtensionMessage);
@@ -278,7 +285,7 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
       if (container && YTGamepadInlineSettings) {
         if (container === settingsContainer && disposeSettings) return;
         disposeSettings?.(); settingsContainer = container;
-        disposeSettings = YTGamepadInlineSettings.mount(root, container); return;
+        disposeSettings = YTGamepadInlineSettings.mount(root, container, interactionTrace); return;
       }
       if (Date.now() - lastSettingsOpen < 1000) return;
       lastSettingsOpen = Date.now();

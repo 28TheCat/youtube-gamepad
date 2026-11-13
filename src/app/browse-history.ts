@@ -37,7 +37,14 @@ export interface WatchReturnState {
 }
 const watchKey = 'ytGamepadWatchReturn';
 export function saveWatchReturn(history: Pick<History, 'state' | 'replaceState'>, state: WatchReturnState) {
-  try { history.replaceState({ ...history.state, [watchKey]: JSON.parse(JSON.stringify(state)) }, ''); } catch { /* Navigation remains available when history storage is full. */ }
+  try {
+    const entry = history.state;
+    const previous = entry?.[watchKey];
+    if (previous?.route === state.route && previous.target?.region === state.target.region &&
+        previous.target.itemKey === state.target.itemKey && previous.target.index === state.target.index &&
+        previous.panel === state.panel && previous.tab === state.tab && previous.scrollTop === state.scrollTop) return;
+    history.replaceState({ ...entry, [watchKey]: state }, '');
+  } catch { /* Navigation remains available when history storage is full. */ }
 }
 export function readWatchReturn(history: Pick<History, 'state'>, route: string): WatchReturnState | undefined {
   const value = history.state?.[watchKey];

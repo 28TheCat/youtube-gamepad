@@ -81,7 +81,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       itemKey: node.dataset.action || String(index), index, available: available(node) }));
     return [...targets, ...native.filter(item => item.id !== 'progress').map((item, index) => ({ id: nativeControlTargetId(item.id), region: 'controls', itemKey: nativeControlTargetId(item.id), index: targets.length + index, available: true }))];
   };
-  const panelNodes = () => callbacks.state().panel && callbacks.state().panel !== 'description' ? [close, ...panels.buttons] : [close];
+  const panelNodes = () => panels.items;
   const panelTargets = () => panelNodes().map((node, index) => ({ id: node.dataset.focusId || 'panel:close',
     region: 'panel', itemKey: node.dataset.focusId || String(index), index, available: available(node) }));
   const recommendationTargetMap = new Map<string, WatchTarget>();
@@ -207,7 +207,8 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       if (!node || !available(node)) return;
       if (panel) node.classList.add('selected');
       node.focus({ preventScroll: true });
-      if (target.region === 'tabs' || target.region === 'filters') node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      const behavior = window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches ? 'smooth' : 'instant';
+      if (target.region === 'tabs' || target.region === 'filters') node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior });
       if (target.region === 'controls') {
         const toolbar = node.closest<HTMLElement>('.toolbar');
         if (toolbar && toolbar.scrollWidth > toolbar.clientWidth) {
@@ -215,10 +216,10 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
           const inset = 10;
           const delta = item.left < bounds.left + inset ? item.left - bounds.left - inset
             : item.right > bounds.right - inset ? item.right - bounds.right + inset : 0;
-          if (delta) toolbar.scrollBy({ left: delta, behavior: 'instant' });
+          if (delta) toolbar.scrollBy({ left: delta, behavior });
         }
       }
-      if (target.region === 'recommendations' || (panel && state.panel !== 'description')) node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      if (target.region === 'recommendations' || (panel && state.panel !== 'description')) node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior });
     },
     items(region: string): FocusTarget[] {
       const data = region === 'filters' ? snapshot().filters || [] : region === 'tabs' ? snapshot().tabs || [] : region === 'player' || region === 'metadata' ? [snapshot()[region]].filter((target): target is WatchTarget => !!target) : region === 'recommendations' ? recommendationTargets() : region === 'progress' ? [{ id: 'progress', region, itemKey: 'progress', index: 0, available: canSeek }] : region === 'panel' ? panelTargets() : controlTargets();

@@ -1,4 +1,4 @@
-import type { Dispose, InteractionEvent, MenuDependencies, MenuModule, MenuPort, ModuleFactory } from '../../types/ports';
+import type { Direction, Dispose, InteractionEvent, MenuDependencies, MenuModule, MenuPort, ModuleFactory } from '../../types/ports';
 
 import { YTGamepadActions } from '../shared/actions.ts';
 import { ui } from './ui-api';
@@ -18,9 +18,27 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
   let selected = 0;
   let settingsOpened = false;
   let disposeQuickMenu: Dispose|undefined;
-  function stopQuickMenu() { disposeQuickMenu?.(); disposeQuickMenu = undefined; }
+  let finishQuickMenuExit: Dispose | undefined;
+  function stopQuickMenu() {
+    finishQuickMenuExit?.();
+    disposeQuickMenu?.(); disposeQuickMenu = undefined;
+  }
+  function fadeQuickMenu() {
+    const dispose = disposeQuickMenu;
+    disposeQuickMenu = undefined;
+    if (!dispose) return;
+    const animations = host.getAnimations?.() || [];
+    if (!animations.length) { dispose(); return; }
+    const finish = () => {
+      if (finishQuickMenuExit !== finish) return;
+      finishQuickMenuExit = undefined;
+      dispose();
+    };
+    finishQuickMenuExit = finish;
+    void Promise.allSettled(animations.map(animation => animation.finished)).then(finish);
+  }
   const menuState = () => interaction.state.menu;
-  const send = (event: InteractionEvent) => interaction.dispatch(event);
+  const send = <Event extends InteractionEvent>(event: Event) => interaction.dispatch(event);
   const host = document.createElement('div');
   host.id = 'yt-gamepad-menu';
   host.setAttribute('lang', 'en');
@@ -45,7 +63,12 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
   lifecycle.listen(window, 'scroll', positionSearch, true);
   lifecycle.listen(host, 'click', event => { if (event.composedPath()[0] === host) close(); });
   function buttons() { return Array.from(root.querySelectorAll<HTMLButtonElement>('button')).filter(button => !button.hidden && !button.disabled && !button.closest?.<HTMLElement>('[hidden]') && (!button.getClientRects || button.getClientRects().length > 0)); }
-  function focus() { const list = buttons(); selected = Math.max(0, Math.min(selected, list.length - 1)); list[selected]?.focus({ preventScroll: true }); list[selected]?.scrollIntoView({ block: 'nearest' }); }
+  function focus() {
+    const list = buttons(); selected = Math.max(0, Math.min(selected, list.length - 1));
+    list[selected]?.focus({ preventScroll: true });
+    list[selected]?.scrollIntoView({ block: 'nearest', inline: 'nearest',
+      behavior: window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches ? 'smooth' : 'instant' });
+  }
   const search = createSearch({ root, host, menuState, send, buttons, focus, feedback, close,
     get controller() { return controller; }, get selected() { return selected; }, set selected(value) { selected = value; }
   });
@@ -53,7 +76,14 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
     if (!settingsOpened) return;
     settingsOpened = false; host.toggleAttribute?.('data-settings', false); publish({ source: 'yt-gamepad-close-settings' });
   }
-  function finishClose() { stickScroller.stop(); search.unmount?.(); stopQuickMenu(); stopSettings(); host.setAttribute('data-closing', ''); host.style.display = 'none'; search.setTarget(null); focusManager?.close(host); controller?.interactionChanged?.(); }
+  function finishClose() {
+    stickScroller.stop(); search.unmount?.(); stopSettings();
+    host.toggleAttribute?.('data-open', false); host.setAttribute('data-closing', ''); host.style.display = 'none';
+    // Keep the rendered menu through its opacity/display exit transition.
+    // Input ownership and focus return immediately while the surface fades.
+    fadeQuickMenu();
+    search.setTarget(null); focusManager?.close(host); controller?.interactionChanged?.();
+  }
   function close() { if (!menuState().opened) return; send({ type: 'MENU_CLOSE' }); finishClose(); }
   function returnToMain() { render(); selected = menuState().menuSelection; focus(); }
   function openSettings() {
@@ -102,6 +132,7 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
     search.unmount?.();
     stopQuickMenu();
     host.toggleAttribute?.('data-closing', false);
+    host.setAttribute('data-open', '');
     selected = 0;
     const title = settingsOpened ? 'Settings' : menuState().view === 'search' ? 'Search videos' : 'Quick menu';
     const main: [string,string][] = ['search', 'playPause', 'captions', 'volumeDown', 'volumeUp'].map(id => {
@@ -187,11 +218,11 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
       e.preventDefault(); targets[(index + (e.shiftKey ? -1 : 1) + targets.length) % targets.length]?.focus();
     }
   });
-  function navigateKeys(action?: string|number|boolean|undefined) {
-    if (menuState().view === 'search') return search.navigate(action as import('../../types/ports').Action);
+  function navigateKeys(action: Direction) {
+    if (menuState().view === 'search') return search.navigate(action);
     const list = buttons(), active = list.indexOf(root.activeElement as HTMLButtonElement);
     if (active >= 0) selected = active;
-    selected += ['up', 'left'].includes(action as string) ? -1 : 1;
+    selected += ['up', 'left'].includes(action) ? -1 : 1;
     focus(); return 'handled';
   }
   YTGamepadMenu = { destroy: lifecycle.destroy,
@@ -244,6 +275,7 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
             if (target) (target as HTMLElement).click(); else disposition = 'blocked'; break;
           }
           case 'navigate': disposition = navigateKeys(effect.value); break;
+          default: effect satisfies never;
         }
       }
       return disposition;

@@ -28,7 +28,7 @@ test('playlist picker uses panel navigation and closes without triggering commen
   const store = createStore(createState('/watch?v=first'));
   store.dispatch({ type: 'WATCH_PANEL', panel: 'playlists' });
   const input = action => store.dispatch({ type: 'WATCH_INPUT', action, commentCount: 2, scrollDelta: 0 });
-  assert.equal(effects(input('down')), 'focus');
+  assert.deepEqual(Array.from(input('down').effects, effect => ({ ...effect })), [{ type: 'focus' }]);
   assert.equal(store.state.watch.panelIndex, 1);
   assert.equal(effects(input('confirm')), 'panelClick');
   assert.equal(effects(input('back')), 'closePanel');
@@ -141,18 +141,20 @@ test('panel scroll observations keep the selected comment until its body is visi
 
 test('verified history chains return once; traversal and duplicate finishes cannot increase depth', () => {
   const store = createStore(createState('/results?search_query=music'));
-  for (const [route, target] of [['/results?search_query=music', '/watch?v=first'], ['/watch?v=first', '/watch?v=second']]) {
-    store.dispatch({ type: 'PREPARE_VIDEO', route, target });
-    store.dispatch({ type: 'HISTORY', method: 'pushState', route: target, changed: true });
-    store.dispatch({ type: 'NAV_FINISH', route: target });
+  for (const [id, route, target] of [[1, '/results?search_query=music', '/watch?v=first'], [2, '/watch?v=first', '/watch?v=second']]) {
+    store.dispatch({ type: 'PREPARE_VIDEO', id, route, target });
+    store.dispatch({ type: 'REQUEST_WAIT', id });
+    store.dispatch({ type: 'REQUEST_FINISH', id, route: target, evidence: 'pushState' });
+    store.dispatch({ type: 'REQUEST_FINISH', id, route: target, evidence: 'pushState' });
     store.dispatch({ type: 'NAV_FINISH', route: target });
   }
   assert.equal(store.state.app.watchDepth, 2);
-  const result = store.dispatch({ type: 'PAGE_BACK', route: '/watch?v=second', temporaryLayer: false });
+  const result = store.dispatch({ type: 'PAGE_BACK', id: 3, route: '/watch?v=second', temporaryLayer: false });
   assert.equal(effects(result), 'pause,closeMenu,historyGo');
-  assert.equal(result.effects[2].value, -2);
-  assert.equal(store.dispatch({ type: 'PAGE_BACK', route: '/watch?v=second' }).disposition, 'blocked');
-  store.dispatch({ type: 'POPSTATE', route: '/results?search_query=music' });
+  assert.deepEqual(plain(result.effects[2]), { type: 'historyGo', value: -2 });
+  assert.equal(store.dispatch({ type: 'PAGE_BACK', id: 4, route: '/watch?v=second' }).disposition, 'blocked');
+  store.dispatch({ type: 'REQUEST_WAIT', id: 3 });
+  store.dispatch({ type: 'REQUEST_FINISH', id: 3, route: '/results?search_query=music', evidence: 'popstate' });
   assert.equal(store.state.app.returning, true);
   assert.equal(store.dispatch({ type: 'BASE_INPUT', action: 'confirm', route: '/watch?v=second' }).disposition, 'blocked');
   store.dispatch({ type: 'NAV_FINISH', route: '/results?search_query=music' });
@@ -161,11 +163,33 @@ test('verified history chains return once; traversal and duplicate finishes cann
 
 test('uncertain or canceled history uses the source URL without guessing a jump', () => {
   const store = createStore(createState('/results'));
-  store.dispatch({ type: 'PREPARE_VIDEO', route: '/results', target: '/watch?v=first' });
+  store.dispatch({ type: 'PREPARE_VIDEO', id: 1, route: '/results', target: '/watch?v=first' });
   store.dispatch({ type: 'HISTORY', method: 'pushState', route: '/watch?v=first', changed: true });
-  store.dispatch({ type: 'NAV_CANCEL', route: '/watch?v=first' });
-  const result = store.dispatch({ type: 'PAGE_BACK', route: '/watch?v=first' });
+  store.dispatch({ type: 'REQUEST_CANCEL', id: 1, route: '/watch?v=first' });
+  const result = store.dispatch({ type: 'PAGE_BACK', id: 2, route: '/watch?v=first' });
   assert.equal(effects(result), 'pause,closeMenu,assign'); assert.equal(result.effects[2].value, '/results');
+});
+
+test('a canceled request cannot finish or cancel a retry of the same URL', () => {
+  const route = '/results', target = '/watch?v=first', store = createStore(createState(route));
+  store.dispatch({ type: 'PREPARE_VIDEO', id: 1, route, target });
+  assert.equal(store.state.app.navigation.phase, 'requested');
+  store.dispatch({ type: 'REQUEST_WAIT', id: 1 });
+  store.dispatch({ type: 'REQUEST_CANCEL', id: 1, route });
+  assert.equal(store.state.app.lastNavigation.phase, 'cancelled');
+  store.dispatch({ type: 'PREPARE_VIDEO', id: 2, route, target });
+  store.dispatch({ type: 'REQUEST_WAIT', id: 2 });
+  const waiting = store.state;
+  store.dispatch({ type: 'REQUEST_FINISH', id: 1, route: target, evidence: 'pushState' });
+  store.dispatch({ type: 'REQUEST_CANCEL', id: 1, route: target });
+  store.dispatch({ type: 'NAV_FINISH', route: target });
+  store.dispatch({ type: 'NAV_CANCEL', route: target });
+  assert.equal(store.state, waiting);
+  store.dispatch({ type: 'REQUEST_FINISH', id: 2, route: target, evidence: 'pushState' });
+  assert.equal(store.state.app.navigation, null);
+  assert.equal(store.state.app.lastNavigation.id, 2);
+  assert.equal(store.state.app.lastNavigation.phase, 'completed');
+  assert.equal(store.state.app.watchDepth, 1);
 });
 
 test('navigation blocks every interactive slice, including menus, until completion', () => {

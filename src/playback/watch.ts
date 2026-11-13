@@ -33,7 +33,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     send({ type: 'WATCH_FOCUS', region: index < 0 ? 'player' : leftReturn.region, index: Math.max(0, index) });
     focus();
   }
-  const send = (event: InteractionEvent) => interaction.dispatch(event);
+  const send = <Event extends InteractionEvent>(event: Event) => interaction.dispatch(event);
   let route = '', lastRecommendations: readonly import('../../types/ports').RecommendationSnapshot[] = [], lastActivity = Date.now();
   const view = dependencies.createSurface({
     activate, state: watchState, controller: () => controller, send, focus,
@@ -57,7 +57,18 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   let playbackEnded = false;
   let wasActive = false, restoringReturn = false, returnRevision = 0;
   let pendingReturn: WatchReturnState | undefined;
+  let returnTimer: number | undefined;
   function rememberPage() {
+    if (returnTimer !== undefined || !view.visible || !route || restoringReturn || pendingReturn || controller?.navigating) return;
+    // Focus and smooth scrolling can both report activity every frame.
+    returnTimer = lifecycle.timeout(savePage, 1000);
+  }
+  function clearReturnTimer() {
+    lifecycle.clearTimeout(returnTimer);
+    returnTimer = undefined;
+  }
+  function savePage() {
+    clearReturnTimer();
     if (typeof history === 'undefined' || !view.visible || !route || restoringReturn || pendingReturn || controller?.navigating ||
         location.pathname + location.search !== route) return;
     const state = watchState();
@@ -66,8 +77,8 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
       ...(panelFocused() && state.panel ? { panel: state.panel } : {}),
       tab: view.activeTab(), scrollTop: view.readSideScroll() });
   }
-  lifecycle.listen(document, 'yt-navigate-start', rememberPage);
-  lifecycle.listen(window, 'pagehide', rememberPage);
+  lifecycle.listen(document, 'yt-navigate-start', savePage, true);
+  lifecycle.listen(window, 'pagehide', savePage);
   lifecycle.listen(document, 'scroll', rememberPage, true);
   function clearFeedback() { lifecycle.clearTimeout(timer); view.feedback(null); }
   function seekPreview(value: import('../ui/playback-presentation').SeekPreview | null) {
@@ -116,7 +127,12 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
       send({ type: 'WATCH_FOCUS', region: 'filters', index: view.activeFilter() }); focus(); return;
     }
     if (action?.startsWith('recommendation:')) { openVideo(action.slice('recommendation:'.length)); return; }
-    if (mode() === 'playback') show();
+    if (mode() === 'playback') {
+      // Pointer focus already identifies the invoking control. Keep it while
+      // revealing controls so the drawer captures the correct return target.
+      controller.request('mode', 'controls');
+      focus();
+    }
     const data = snapshot(), target = data.controls.find(target => target.id === action);
     if ((target && !target.available) || (action === 'adjustProgress' && !data.canSeek)) return;
     if (target) view.press(target.id);
@@ -148,7 +164,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     } else if (action === 'channel') {
       const channel = snapshot().controls.find(item => item.id === 'channel');
       if (channel) send({ type: 'WATCH_FOCUS', region: 'controls', index: channel.index });
-      rememberPage();
+      savePage();
       if (!controller.request('channel')) feedback('Channel information is still loading');
     } else if (action === 'fullscreen') {
       Promise.resolve(controller.request('fullscreen')).then(ok => {
@@ -218,6 +234,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
   }
   function openVideo(key?: string) {
     view.closeFullCollection?.();
+    savePage();
     const result = controller.request('recommendation', key || '');
     if (result === 'failed') { feedback('Unable to load this video. Please try again.'); return; }
     if (result === 'missing') { feedback('Recommendations have changed. Please select again.'); readPage(); }
@@ -246,7 +263,10 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     if (!active && enabled() && controller.state.transitioning && view.visible) { view.hold(true); return; }
     view.hold(false);
     const entering = active && (!wasActive || controller.readRoute().key !== route);
-    if (entering || !active && wasActive) ++returnRevision;
+    if (entering || !active && wasActive) {
+      ++returnRevision;
+      clearReturnTimer();
+    }
     wasActive = active;
     if (entering && typeof history !== 'undefined') pendingReturn = readWatchReturn(history, controller.readRoute().key);
     view.sync(active, loadingShell ? 'playback' : mode());
@@ -319,6 +339,15 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
       }
       if (action === 'left' || action === 'right') return true;
     }
+    if (action === 'back') {
+      if (controller.request('backSettings')) return true;
+      // Windowed comments stay open when focus moves back to the player.
+      // Unwind the visible drawer before handling Back in the focused region.
+      if (watchState().panel) {
+        if (!view.panel.back()) closePanel();
+        return true;
+      }
+    }
     const filters = snapshot().filters || [];
     if (!panelFocused() && filters.length) {
       const state = watchState();
@@ -363,15 +392,14 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
         rememberLeft(); send({ type: 'WATCH_FOCUS', region: 'panel' }); focus(); return true;
       }
     }
-    if (action === 'back' && controller.request('backSettings')) return true;
-    if (action === 'back' && watchState().panel === 'comments' && view.panel.back()) return true;
-    // Geometry remains in the view; the reducer receives only a scroll observation.
-    const scrollDelta = watchState().panel === 'comments' && watchState().panelIndex > 0 && ['up', 'down'].includes(action)
-      ? view.panel.scrollDelta(watchState().panelIndex, action) : 0;
     // Directional focus uses the current presentation; progress has its own
     // media/seek/poll updates and must not repaint on every held direction.
     if (!['up', 'down', 'left', 'right', 'back'].includes(action)) updateProgress();
     const data = snapshot(), previousRow = watchState().row;
+    // Geometry remains in the view; the reducer receives only a scroll observation.
+    const { panel, panelIndex } = watchState();
+    const panelTarget = panel === 'comments' && ['up', 'down'].includes(action) ? data.panel[panelIndex] : undefined;
+    const scrollDelta = panelTarget && panelTarget.id !== 'panel:close' ? view.panel.scrollDelta(panelIndex, action) : 0;
     if (windowed() && !panelFocused() && previousRow !== 'recommendations') rememberLeft();
     const result = send({ type: 'WATCH_INPUT', action, windowed: windowed(), canSeek: data.canSeek,
       playerControls: nativeControlIndices(data.controls),
@@ -384,15 +412,16 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
       switch (effect.type) {
         case 'closePanel': closePanel(); break;
         case 'panelClick': view.panel.activate(watchState().panelIndex); break;
-        case 'panelScroll': view.panel.scroll(effect.value as number); break;
+        case 'panelScroll': view.panel.scroll(effect.value); break;
         case 'loadComments': view.panel.load(); break;
         case 'loadRecommendations':
           if (controller.request('moreRecommendations', view.collectionOpen ? 'queue' : 'recommendations') === false) feedback('No more recommendations');
           break;
         case 'focus': focus(); break;
-        case 'mode': controller.request('mode', effect.value as Mode); break;
-        case 'recommendation': openVideo(effect.value as string); break;
-        case 'activate': activate(effect.value as string); break;
+        case 'mode': controller.request('mode', effect.value); break;
+        case 'recommendation': openVideo(effect.value); break;
+        case 'activate': activate(effect.value); break;
+        default: effect satisfies never;
       }
     }
     if (enteredSide) view.restoreSideScroll();

@@ -12,8 +12,12 @@ export interface CommentsSnapshot extends CommentsStatus {
   route: string; items: CommentSnapshot[];
 }
 type ReplyItem = YTNodes.CommentThread | YTNodes.CommentView | YTNodes.ContinuationItem;
-type ReplyCursor = { endpoint?: YTNodes.NavigationEndpoint };
-type ThreadState = { thread: YTNodes.CommentThread; cursor?: ReplyCursor; replies: Map<string, CommentReplySnapshot> };
+type ThreadState = {
+  thread: YTNodes.CommentThread;
+  cursors: Map<string, YTNodes.NavigationEndpoint>;
+  seenBranches: Set<string>;
+  replies: Map<string, CommentReplySnapshot>;
+};
 Parser.setParserErrorHandler(() => {});
 
 // All library instances, credentials and continuation endpoints remain in MAIN.
@@ -91,7 +95,7 @@ export function createCommentsService() {
   }
   function hasReplies(entry: ThreadState) {
     if (entry.replies.size >= 100 || [...threads.values()].reduce((total, item) => total + item.replies.size, 0) >= 200) return false;
-    return !!entry.cursor?.endpoint;
+    return entry.cursors.size > 0;
   }
   function canReply(entry: ThreadState) {
     const dialog = entry.thread.comment?.reply_command?.dialog as YTNodes.CommentReplyDialog | undefined;
@@ -116,26 +120,38 @@ export function createCommentsService() {
         replies };
     });
   }
-  function collectReplies(entry: ThreadState, replies: Iterable<ReplyItem>) {
-    let budget = 200 - entry.replies.size - [...threads.values()].reduce((total, item) => total + (item === entry ? 0 : item.replies.size), 0);
-    for (const reply of replies) {
-      const comment = reply.is(YTNodes.CommentThread) ? reply.comment : reply.is(YTNodes.CommentView) ? reply : undefined;
-      if (budget <= 0 || entry.replies.size >= 100) break;
-      if (comment?.comment_id && comment.content && !entry.replies.has(comment.comment_id)) {
-        entry.replies.set(comment.comment_id, { key: comment.comment_id,
-          ...(comment.author?.best_thumbnail?.url ? { avatar: comment.author.best_thumbnail.url.slice(0, 4096) } : {}),
-          author: String(comment.author?.name || '').slice(0, 200), text: String(comment.content).slice(0, 2000) });
-        budget--;
+  function replyPage(entry: ThreadState, owner: string, items: Iterable<ReplyItem>) {
+    let budget = Math.min(100 - entry.replies.size, 200 - entry.replies.size -
+      [...threads.values()].reduce((total, item) => total + (item === entry ? 0 : item.replies.size), 0));
+    const collect = (parent: string, items: Iterable<ReplyItem>) => {
+      const replyTo = entry.replies.get(parent)?.author;
+      for (const item of items) {
+        if (budget <= 0) break;
+        if (item.is(YTNodes.ContinuationItem)) {
+          const endpoint = item.button?.endpoint || item.endpoint;
+          if (endpoint && !entry.cursors.has(parent)) entry.cursors.set(parent, endpoint);
+          continue;
+        }
+        const thread = item.is(YTNodes.CommentThread) ? item : undefined;
+        const comment = thread?.comment || (item.is(YTNodes.CommentView) ? item : undefined);
+        const key = comment?.comment_id;
+        if (!key || !comment?.content || key === entry.thread.comment?.comment_id) continue;
+        if (!entry.replies.has(key)) {
+          entry.replies.set(key, { key, ...(replyTo ? { replyTo } : {}),
+            ...(comment.author?.best_thumbnail?.url ? { avatar: comment.author.best_thumbnail.url.slice(0, 4096) } : {}),
+            author: String(comment.author?.name || '').slice(0, 200), text: String(comment.content).slice(0, 2000) });
+          budget--;
+        }
+        const data = thread?.comment_replies_data;
+        if (data && !entry.seenBranches.has(key)) {
+          entry.seenBranches.add(key);
+          collect(key, [...data.contents, ...data.sub_threads]);
+        }
       }
-    }
-  }
-  function replyPage(entry: ThreadState, items: Iterable<ReplyItem>) {
-    // WEB responses use both flat CommentViews and CommentThreads. Follow the
-    // returned endpoint directly; continuation items need not have a button.
-    const list = [...items];
-    const continuation = list.find(item => item.is(YTNodes.ContinuationItem)) as YTNodes.ContinuationItem | undefined;
-    entry.cursor = { endpoint: continuation?.button?.endpoint || continuation?.endpoint };
-    collectReplies(entry, list);
+    };
+    // Keep a flat display list while paging each branch with its own endpoint.
+    entry.cursors.delete(owner);
+    collect(owner, items);
   }
   async function request(key?: string) {
     const captured = state, controller = new AbortController();
@@ -147,12 +163,13 @@ export function createCommentsService() {
       if (key) {
         const entry = threads.get(key);
         if (!entry || !hasReplies(entry)) return;
-        const next = await entry.cursor!.endpoint!.call(client().session.actions, { parse: true });
+        const [owner, endpoint] = entry.cursors.entries().next().value!;
+        const next = await endpoint.call(client().session.actions, { parse: true });
         if (captured !== state || captured.route !== route() || controller.signal.aborted || destroyed) return;
         const action = next.on_response_received_endpoints?.find(item => 'contents' in item);
         if (!action || !('contents' in action) || !action.contents)
           throw new Error('Replies continuation unavailable');
-        replyPage(entry, action.contents.filterType(YTNodes.CommentThread, YTNodes.CommentView, YTNodes.ContinuationItem));
+        replyPage(entry, owner, action.contents.filterType(YTNodes.CommentThread, YTNodes.CommentView, YTNodes.ContinuationItem));
       } else {
         const target = parseWatchLink(captured.route) || parseShortLink(captured.route);
         if (!target) return;
@@ -162,9 +179,9 @@ export function createCommentsService() {
         for (const thread of next.contents) {
           const comment = thread.comment;
           if (!comment?.comment_id || !comment.content || threads.has(comment.comment_id) || threads.size >= 100) continue;
-          const entry: ThreadState = { thread, replies: new Map() };
+          const entry: ThreadState = { thread, cursors: new Map(), seenBranches: new Set(), replies: new Map() };
           const data = thread.comment_replies_data;
-          if (data) replyPage(entry, [...data.contents, ...data.sub_threads]);
+          if (data) replyPage(entry, comment.comment_id, [...data.contents, ...data.sub_threads]);
           threads.set(comment.comment_id, entry);
         }
         page = next; initialized = true;

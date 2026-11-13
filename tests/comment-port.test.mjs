@@ -9,7 +9,8 @@ function site(pageAccess) {
   const source = ts.transpileModule(readFileSync(new URL('../src/sites/youtube.ts', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
   }).outputText;
-  vm.runInNewContext(source, { exports, require: () => ({}), window: {},
+  const imports = { './native-player-controls': { createNativePlayerControls: () => ({}) } };
+  vm.runInNewContext(source, { exports, require: name => imports[name] || {}, window: {},
     document: { body: null, querySelector() { throw Error('Unexpected native DOM access'); },
       querySelectorAll() { throw Error('Unexpected native DOM access'); } } });
   return exports.YTGamepadSiteModule.create({ pageAccess,

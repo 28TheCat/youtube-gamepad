@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import type { SidebarEntry } from '../shared/sidebar-data';
 import { resolveExplorePage } from '../shared/explore-pages';
 import { useI18n } from '../shared/use-i18n';
 import ChannelAvatar from './ChannelAvatar.vue';
 import InterfaceIcon from './InterfaceIcon.vue';
-defineProps<{ entries: SidebarEntry[]; route: string }>();
+const props = defineProps<{ entries: SidebarEntry[]; route: string }>();
 const emit = defineEmits<{ open: [entry: SidebarEntry, event: MouseEvent]; changed: [] }>();
+const visibleEntries = computed(() => props.entries.flatMap(entry =>
+  /^\/feed\/you\/?(?:\?|$)/.test(entry.href) ? entry.children ?? [] : [entry]
+));
 const { t } = useI18n();
 const expanded = ref<Record<string, boolean>>({});
 const isOpen = (entry: SidebarEntry) => expanded.value[entry.id] ?? entry.expanded ?? false;
@@ -22,7 +25,7 @@ async function toggle(entry: SidebarEntry) {
 }
 </script>
 <template>
-  <template v-for="entry in entries" :key="entry.id">
+  <template v-for="entry in visibleEntries" :key="entry.id">
     <div v-if="entry.children" class="sidebar-branch">
       <div class="sidebar-branch-heading">
         <a v-if="entry.href" :href="entry.href" :data-sidebar-id="entry.id" :title="label(entry)"
