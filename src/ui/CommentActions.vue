@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, nextTick, watch } from 'vue';
 import type { CommentSnapshot, CommentsStatus } from '../../types/ports';
+import ChannelAvatar from './ChannelAvatar.vue';
+import InterfaceIcon from './InterfaceIcon.vue';
 import { useI18n } from '../shared/use-i18n';
 const { t } = useI18n();
 const props = defineProps<{
-  records: readonly CommentSnapshot[]; status?: CommentsStatus; route: string;
+  records: readonly CommentSnapshot[]; status?: CommentsStatus; route: string; thread?: boolean; commentCount?: string;
   post?: (text: string, key?: string) => Promise<boolean>;
   changeSort?: (sort: 'TOP_COMMENTS' | 'NEWEST_FIRST') => boolean;
 }>();
@@ -56,14 +58,21 @@ onBeforeUnmount(() => { disposed = true; ++generation; });
 defineExpose({ reply: (key: string) => begin(key) });
 </script>
 <template>
-  <div v-if="state" ref="root" class="comment-actions" @keydown="keydown">
-    <div class="comment-toolbar" role="group" :aria-label="t('Comment order')">
-      <button class="control" data-focus-id="comments:top" :aria-pressed="state.sort === 'TOP_COMMENTS'" :disabled="!state.sortAvailable || status?.loading || sending || editing" @click="sort('TOP_COMMENTS')">{{ t('Top comments') }}</button>
-      <button class="control" data-focus-id="comments:newest" :aria-pressed="state.sort === 'NEWEST_FIRST'" :disabled="!state.sortAvailable || status?.loading || sending || editing" @click="sort('NEWEST_FIRST')">{{ t('Newest first') }}</button>
-      <button v-if="!editing" class="control" data-comment-write data-focus-id="comments:write" :disabled="!state.canPost || state.posting" @click="begin()">{{ t('Write a comment') }}</button>
-    </div>
-    <p v-if="!state.signedIn" class="comment-compose-note">{{ t('Sign in to comment or reply.') }}</p>
-    <p v-else-if="!state.canPost && !status?.loading && !editing" class="comment-compose-note">{{ t('Commenting is unavailable for this video.') }}</p>
+  <div ref="root" class="comment-actions" @keydown="keydown">
+    <header v-if="!thread" class="comment-heading-row">
+      <h2 class="comment-heading">{{ t('Comments') }} <span v-if="commentCount" class="comment-total">{{ commentCount }}</span></h2>
+      <div class="comment-toolbar" role="group" :aria-label="t('Comment order')">
+        <button class="control" data-focus-id="comments:top" :aria-pressed="state?.sort !== 'NEWEST_FIRST'" :disabled="!state?.sortAvailable || status?.loading || sending || editing" @click="sort('TOP_COMMENTS')">{{ t('Hottest') }}</button>
+        <span class="comment-sort-divider" aria-hidden="true">|</span>
+        <button class="control" data-focus-id="comments:newest" :aria-pressed="state?.sort === 'NEWEST_FIRST'" :disabled="!state?.sortAvailable || status?.loading || sending || editing" @click="sort('NEWEST_FIRST')">{{ t('Latest') }}</button>
+      </div>
+    </header>
+    <button v-if="!thread && !editing" class="control comment-compose-entry" data-comment-write data-focus-id="comments:write" :aria-label="t('Write a comment')" :disabled="!state?.canPost || state?.posting" @click="begin()">
+      <ChannelAvatar class="comment-compose-avatar" :src="state?.avatar" :name="''" />
+      <span>{{ state?.placeholder || t('Add a comment…') }}</span><InterfaceIcon name="comments" />
+    </button>
+    <p v-if="state && !state.signedIn" class="comment-compose-note">{{ t('Sign in to comment or reply.') }}</p>
+    <p v-else-if="state && !state.canPost && !status?.loading && !editing" class="comment-compose-note">{{ t('Commenting is unavailable for this video.') }}</p>
     <form v-if="editing" class="comment-composer" @submit.prevent="submit">
       <label :for="replyKey ? 'ytg-reply-text' : 'ytg-comment-text'">{{ t(replyKey ? 'Write a reply' : 'Write a comment') }}</label>
       <textarea :id="replyKey ? 'ytg-reply-text' : 'ytg-comment-text'" ref="input" v-model="text" data-focus-id="comments:draft" maxlength="4000" rows="3" :disabled="sending" />

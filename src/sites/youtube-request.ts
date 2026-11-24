@@ -1,5 +1,6 @@
 import { Innertube } from 'youtubei.js/web';
 import { createYouTubeSession } from './youtube-session';
+import type { YouTubePlayer } from '../../types/core';
 
 export type YouTubeFailure = 'cancelled' | 'timeout' | 'network' | 'http' | 'response';
 export class YouTubeRequestError extends Error {
@@ -34,7 +35,7 @@ const readEndpoints = ['guide', 'browse', 'search', 'next', 'player', 'playlist/
   'navigation/resolve_url', 'account/accounts_list', 'comment/perform_comment_action',
   'notification/get_unseen_count', 'notification/get_notification_menu'];
 const writeEndpoints = ['like/like', 'like/dislike', 'like/removelike', 'subscription/subscribe',
-  'subscription/unsubscribe', 'notification/modify_channel_preference', 'browse/edit_playlist', 'comment/create_comment', 'comment/create_comment_reply'];
+  'subscription/unsubscribe', 'notification/modify_channel_preference', 'browse/edit_playlist', 'comment/perform_comment_action', 'comment/create_comment', 'comment/create_comment_reply'];
 
 // YouTube.js owns endpoint execution, context and payload normalization. The
 // injected fetch only binds it to the page identity and our cancellation policy.
@@ -58,8 +59,50 @@ async function executeYouTube(path: string, init: RequestInit, signal: AbortSign
 }
 
 // Only read-only adapter endpoints may use bounded automatic retries.
-export async function requestYouTube(path: string, init: RequestInit, timeoutMs = 20000): Promise<Record<string, any>> {
+export async function requestYouTube(path: string, init: RequestInit, timeoutMs = 20000, waitForMedia = true): Promise<Record<string, any>> {
+  // These adapter reads populate metadata, recommendations and comments. Let
+  // the native player obtain its first media data before competing with it.
+  const mediaReady = waitForMedia && (path === 'next' || path === 'player') ? waitForWatchMedia(init.signal) : undefined;
+  if (mediaReady) await mediaReady;
   return request(path, init, timeoutMs, false);
+}
+
+function waitForWatchMedia(signal?: AbortSignal | null): Promise<void> | undefined {
+  if (signal?.aborted) return Promise.reject(new YouTubeRequestError('cancelled'));
+  if (typeof document === 'undefined' || typeof document.addEventListener !== 'function' ||
+      typeof location === 'undefined' || location.pathname !== '/watch') return;
+  const video = document.querySelector<HTMLVideoElement>('#movie_player video.html5-main-video');
+  const hasMedia = (media: HTMLVideoElement | null) => {
+    if (!media || media.readyState < 2) return false;
+    try {
+      const id = document.querySelector<YouTubePlayer>('#movie_player')?.getVideoData?.()?.video_id;
+      return !id || id === new URLSearchParams(location.search).get('v');
+    } catch { return false; }
+  };
+  if (hasMedia(video)) return;
+  return new Promise((resolve, reject) => {
+    const route = location.pathname + location.search;
+    const events = ['loadeddata', 'canplay', 'playing'];
+    const cleanup = () => {
+      clearTimeout(timer);
+      for (const event of events) document.removeEventListener(event, ready, true);
+      document.removeEventListener('yt-navigate-start', cancel);
+      signal?.removeEventListener('abort', cancel);
+    };
+    const cancel = () => { cleanup(); reject(new YouTubeRequestError('cancelled')); };
+    const release = () => { cleanup(); resolve(); };
+    const ready = (event: Event) => {
+      if (route !== location.pathname + location.search) { cancel(); return; }
+      const current = document.querySelector<HTMLVideoElement>('#movie_player video.html5-main-video');
+      if (event.target === current && hasMedia(current)) release();
+    };
+    // Keep metadata available when playback is unavailable or intentionally paused.
+    const timer = setTimeout(release, 1500);
+    for (const event of events) document.addEventListener(event, ready, true);
+    document.addEventListener('yt-navigate-start', cancel, { once: true });
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
+  });
 }
 
 // Let YouTube.js encode the Shorts sequence parameters and retain its opaque

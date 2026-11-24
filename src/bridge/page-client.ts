@@ -79,6 +79,7 @@ export function createPageClient(): PageAccess {
     moreComments: start => request('moreComments', { start: start === true }) === true,
     commentReplies: key => request('commentReplies', { key }) === true,
     commentTranslate: (key, language) => request('commentTranslate', { key, language }) === true,
+    commentLike: async key => await asyncRequest('commentLike', { key, route: location.pathname + location.search }) === true,
     commentPost: async (text, key) => await asyncRequest('commentPost', { text, key }) === true,
     commentSort: sort => request('commentSort', { sort }) === true,
     openWatchVideo: href => request('openWatchVideo', { href }) === true,

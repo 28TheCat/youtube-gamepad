@@ -1,7 +1,7 @@
 import type { PlaybackSnapshot, WatchPageSnapshot, WatchFeatures, WatchSnapshot, RecommendationSnapshot } from '../../types/ports';
 import type { PlaybackViewState } from '../playback/playback-model';
 
-export type PlaybackMetadata = Pick<WatchPageSnapshot, 'title' | 'channel' | 'channelBadge' | 'viewCount' | 'likeCount' | 'avatar' | 'notificationPreference' | 'subscribed' | 'liked' | 'disliked' | 'metadataFailed'>;
+export type PlaybackMetadata = Pick<WatchPageSnapshot, 'title' | 'channel' | 'channelBadge' | 'viewCount' | 'commentCount' | 'likeCount' | 'avatar' | 'notificationPreference' | 'subscribed' | 'liked' | 'disliked' | 'metadataFailed' | 'metadataStatus' | 'waiting'>;
 export type PlaybackControlState = Pick<PlaybackViewState, 'paused' | 'muted' | 'captionsEnabled' | 'isLive' | 'canSeek' | 'atLiveEdge'> & { seekStep?: number };
 
 const recommendationFields = ['key', 'label', 'channel', 'channelBadge', 'thumbnail', 'thumbnailFallback', 'metadata', 'viewCount', 'duration', 'watchedPercent', 'href', 'queue', 'selected', 'isPlaylist'] as const;

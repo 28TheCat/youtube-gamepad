@@ -10,14 +10,15 @@ import BrowsePage from './BrowsePage.vue';
 import { createBrowseFeedController } from '../app/browse-feed-controller';
 import { readBrowseReturn, saveBrowseReturn } from '../app/browse-history';
 import css from './browse-grid.css?inline';
+import headerCss from './browse-header.css?inline';
+import notificationsCss from './notifications.css?inline';
 import { createFeedClient } from '../bridge/feed-client';
 import { mountSearchBar } from '../search/mount-search-bar';
 import { browseHostId, pageActiveElement } from '../shared/page-dom';
 import themeCss from './theme.css?inline';
 import { mountBrowseMode } from './browse-mode';
 import { shortsQueueKey } from '../shared/shorts-route';
-import { isInnerTubeBrowseRoute, isNativeFlowRoute } from '../shared/explore-pages';
-import modeCss from './browse-mode.css?inline';
+import { isInnerTubeBrowseRoute, pageRouteMode } from '../shared/explore-pages';
 import accountCss from './account-page.css?inline';
 import playlistCss from './playlist-card.css?inline';
 import shortsCss from './shorts-card.css?inline';
@@ -87,10 +88,10 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
   const shadow = shell.attachShadow({ mode: 'open' });
   const style = document.createElement('style');
   // Page-level mode/theme selectors must cross the boundary explicitly.
-  const insideShadow = (text: string) => text.replaceAll(':root', ':host').replace(/html((?:\.[\w-]+|\[[^\]]+\]|:not\([^)]*\))*)/g, ':host-context(html$1)');
-  style.textContent = `:host{all:initial;display:block;position:fixed;inset:0;width:100%;height:100dvh;min-width:0;z-index:2100;background:var(--ytg-client-background);font:var(--ytg-font-body)/var(--ytg-line-body) var(--ytg-font-family);color:var(--ytg-text)}:host([hidden]){display:none!important}*,*::before,*::after{box-sizing:border-box}button,input{font:inherit} ${insideShadow(themeCss)} ${insideShadow(css)} ${modeCss}`;
+  const insideShadow = (text: string) => text.replaceAll(':root', ':host').replace(/(?<!host-context\()html((?:\.[\w-]+|\[[^\]]+\]|:not\([^)]*\))*)/g, ':host-context(html$1)');
+  style.textContent = `:host{all:initial;display:block;position:fixed;inset:0;width:100%;height:100dvh;min-width:0;z-index:2100;background:var(--ytg-client-background);font:var(--ytg-font-body)/var(--ytg-line-body) var(--ytg-font-family);color:var(--ytg-text)}:host([hidden]){display:none!important}*,*::before,*::after{box-sizing:border-box}button,input{font:inherit} ${insideShadow(themeCss)} ${insideShadow(css)}`;
   const mount = document.createElement('div'); mount.style.height = '100%';
-  style.textContent += accountCss + insideShadow(playlistCss) + insideShadow(shortsCss);
+  style.textContent += insideShadow(headerCss) + insideShadow(notificationsCss) + insideShadow(accountCss) + insideShadow(playlistCss) + insideShadow(shortsCss);
   if (YTGamepadControllerStyle) {
     style.textContent += YTGamepadControllerStyle.css;
     lifecycle.cleanup(YTGamepadControllerStyle.register(shadow));
@@ -133,13 +134,19 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
     }
     void feedController.refreshHome();
   };
+  lifecycle.cleanup(ui.registerBrowse({
+    read: () => ({ ...browseMode.state, home: location.pathname === '/',
+      canRefreshHome: location.pathname === '/' && browseMode.state.mode === 'gamepad' && !pendingRoute && !store.loading && browseVisible }),
+    refresh: () => { refreshHome(); },
+    change: async mode => { await browseMode.change(mode); return browseMode.state.mode === mode && !browseMode.state.error; }
+  }));
   const shellState = reactive({ unsupported: '', unavailable: false });
   const retryFeed = () => {
     shellState.unavailable = false; store.error = '';
     if (feedController.active) void feedController.changeCategory(store.category);
     else { awaitingRoute = ''; initializeFeed(); publishFeed(true); }
   };
-  const app = createApp(BrowsePage, { shellState, retryFeed, openOriginal: () => { void browseMode.change('youtube'); }, refreshHome, browseMode, gridSettings, ownsFocus, more, openSettings, focusAccount: (node: HTMLElement) => core.focus(node), refreshNavigation: () => core.refresh(), changeCategory: (id: string) => { if (!pendingRoute) void feedController.changeCategory(id); }, open: (id: string) => {
+  const app = createApp(BrowsePage, { shellState, retryFeed, openOriginal: () => { void browseMode.change('youtube'); }, refreshHome, gridSettings, ownsFocus, more, openSettings, focusAccount: (node: HTMLElement) => core.focus(node), refreshNavigation: () => core.refresh(), changeCategory: (id: string) => { if (!pendingRoute) void feedController.changeCategory(id); }, open: (id: string) => {
     if (!pendingRoute && !isMenuOpen() && !core.hasTemporaryLayer) {
       if (feedController.active) {
         const item = store.snapshot.items.find(item => item.id === id);
@@ -180,7 +187,7 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
     const root = document.documentElement;
     const windowedWatch = root.dataset.ytgPlaybackLayout === 'windowed' &&
       (root.classList.contains('ytg-watch-layout') || root.classList.contains('ytg-player-primed'));
-    const headerEnabled = (windowedWatch || root.classList.contains('ytg-theater') && (!root.hasAttribute('data-ytg-native') || root.dataset.ytgAdaptation === 'fallback') &&
+    const headerEnabled = pageRouteMode(location.pathname + location.search) !== 'native' && (windowedWatch || root.classList.contains('ytg-theater') && (!root.hasAttribute('data-ytg-native') || root.dataset.ytgAdaptation === 'fallback') &&
       root.getAttribute('data-ytg-browse-mode') !== 'loading' && !root.classList.contains('ytg-watch-layout')) &&
       !root.classList.contains('ytg-shorts-player') &&
       !document.fullscreenElement && !location.pathname.startsWith('/shorts/');
@@ -360,25 +367,19 @@ export function mountBrowseSurface(pinia: Pinia, { runtime, core, isMenuOpen, pr
     if (url.origin !== location.origin || !['http:', 'https:'].includes(url.protocol) ||
         url.pathname === location.pathname && url.search === location.search && url.hash) return;
     const href = url.pathname + url.search;
-    if (isNativeFlowRoute(href)) return;
+    const routeMode = pageRouteMode(href);
+    if (routeMode === 'native') return;
     event.preventDefault(); event.stopPropagation();
     if (href === '/' && location.pathname === '/') { refreshHome(); return; }
     if (href === location.pathname + location.search) return;
-    if (url.pathname === '/watch' || url.pathname.startsWith('/shorts/')) {
+    if (routeMode === 'watch' || routeMode === 'shorts') {
       if (url.pathname === '/watch' && prepareVideo && !prepareVideo(href)) return;
       if (!feed.openVideo(href)) location.assign(href);
       return;
     }
     if (isInnerTubeBrowseRoute(href) && pageAccess.openBrowseRoute?.(href)) return;
-    // Keep unsupported destinations and router failures inside the mounted shell.
-    document.documentElement.dataset.ytgVirtualRoute = 'true';
-    if (location.pathname === '/watch' || location.pathname.startsWith('/shorts/')) {
-      // Browsing must not leave an invisible native video playing in the old document.
-      document.querySelectorAll<HTMLVideoElement>('video').forEach(video => video.pause());
-    }
-    document.dispatchEvent(new Event('yt-navigate-start'));
-    history.pushState(null, '', href);
-    document.dispatchEvent(new Event('yt-navigate-finish'));
+    // A failed router handoff must load real page data, never only change the URL.
+    location.assign(href);
   }) as EventListener, true);
   lifecycle.listen(window, 'resize', scheduleLayout);
   lifecycle.listen(document, 'fullscreenchange', syncVisibility);

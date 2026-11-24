@@ -10,13 +10,14 @@ async function fixture(t,signedIn=true){
  const page=await browserPage(t);await page.route('https://www.youtube.com/**',r=>r.fulfill({contentType:'text/html',body:'<div id="panel"></div>'}));await page.goto('https://www.youtube.com/watch?v=fixture');await page.evaluate(code);
  await page.evaluate(signedIn=>{
   window.calls=[];window.requests=[];window.failSend=true;
-  const record={key:'parent',author:'Author',text:'A real comment',replies:[],hasReplies:false,canReply:signedIn};
-  const snapshot={route:location.pathname+location.search,items:[record],loading:false,failed:false,hasMore:false,interaction:{signedIn,canPost:signedIn,posting:false,sort:'TOP_COMMENTS',sortAvailable:true}};
+  const record={key:'parent',author:'Author',text:'A real comment',canLike:true,liked:false,likeCount:'21',replies:[],hasReplies:false,canReply:signedIn};
+  const snapshot={commentCount:'112',route:location.pathname+location.search,items:[record],loading:false,failed:false,hasMore:false,interaction:{signedIn,canPost:signedIn,posting:false,sort:'TOP_COMMENTS',sortAvailable:true}};
   window.commentSnapshot=snapshot;
   document.addEventListener('ytg-page-request-v1',event=>window.requests.push(JSON.parse(event.detail).operation));
   const style={badge(){},hint(){},bind(){}};
   window.panel=CommentUI.mountWatchPanel(document.querySelector('#panel'),style,{
    openThread(){},replies(){},load(){},
+   async likeComment(key){window.calls.push({operation:'commentLike',key});if(window.failLike)return false;record.liked=!record.liked;window.renderComments();return true;},
    async postComment(text,key){window.calls.push({operation:'commentPost',text,key});return window.delaySend?await new Promise(resolve=>window.finishSend=resolve):!window.failSend;},
    sortComments(sort){window.calls.push({operation:'commentSort',sort});snapshot.interaction.sort=sort;window.renderComments();return true;}
   });
@@ -29,8 +30,10 @@ async function fixture(t,signedIn=true){
 
 test('shared comment controls select server sorting and retain failed drafts until explicit retry',async t=>{
  const page=await fixture(t);
- await page.getByRole('button',{name:'Newest first',exact:true}).click();
- assert.equal(await page.getByRole('button',{name:'Newest first',exact:true}).getAttribute('aria-pressed'),'true');
+ assert.match(await page.locator('.comment-heading').textContent(), /Comments.*112/);
+ assert.equal(await page.locator('.comment-compose-entry').count(),1);
+ await page.getByRole('button',{name:'Latest',exact:true}).click();
+ assert.equal(await page.getByRole('button',{name:'Latest',exact:true}).getAttribute('aria-pressed'),'true');
  await page.getByRole('button',{name:'Write a comment',exact:true}).click();
  await page.locator('textarea').fill('第一行\nSecond line');await page.locator('textarea').press('Enter');await page.locator('textarea').press('Space');
  assert.ok((await page.locator('textarea').inputValue()).includes('\n'));
@@ -78,6 +81,21 @@ test('reply targets its parent and Back cancels editing before closing the comme
 test('signed-out comments retain sorting and explain why publishing is unavailable',async t=>{
  const page=await fixture(t,false);assert.equal(await page.getByRole('button',{name:'Write a comment',exact:true}).isDisabled(),true);
  await page.getByText('Sign in to comment or reply.',{exact:true}).waitFor();assert.equal(await page.locator('[data-focus-id="reply:parent"]').count(),0);
- await page.getByRole('button',{name:'Newest first',exact:true}).click();assert.equal(await page.evaluate(()=>window.calls.length),1);
+ await page.getByRole('button',{name:'Latest',exact:true}).click();assert.equal(await page.evaluate(()=>window.calls.length),1);
  await page.evaluate(()=>window.panel.dispose());assert.equal(await page.locator('#panel').textContent(),'');
+});
+
+
+test('comment like buttons delegate clicks, toggle state and report failed updates', async t => {
+ const page=await fixture(t);
+ const like=page.locator('[data-focus-id="comment-like:parent"]');
+ await like.click();
+ assert.equal(await like.getAttribute('aria-pressed'),'true');
+ assert.equal(await page.evaluate(()=>window.calls.at(-1).operation),'commentLike');
+ await like.click();
+ assert.equal(await like.getAttribute('aria-pressed'),'false');
+ await page.evaluate(()=>window.failLike=true);
+ await like.click();
+ await page.getByRole('status').filter({hasText:'Could not update like'}).waitFor();
+ assert.equal(await like.getAttribute('aria-pressed'),'false');
 });

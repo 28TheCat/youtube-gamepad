@@ -18,6 +18,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     let commentKey = '', commentButtons: HTMLElement[] = [];
     let commentRoute = '';
     let renderedPanel = '';
+    let initialCommentFocus = false;
     let savedComments: { route: string; top: number; index: number; id: string; thread: string; limit: number } | undefined;
     const comments = createCommentOperations({
       records: () => port.controller.readComments(), status: () => port.controller.readCommentsStatus?.(),
@@ -64,25 +65,26 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
           active: () => !destroyed && watchState().panel === 'comments',
           changed() { commentKey = ''; readComments(); }, openThread,
           load: loadComments,
+          like: async key => await port.controller.request('commentLike', key) === true,
           post: async (text, key) => await port.controller.request('commentPost', { text, key }),
           sort: value => port.controller.request('commentSort', value),
           translate: key => { port.controller.request('translateComment', key); }
         }),
         changed() { commentButtons = renderer?.buttons() || []; send({ type: 'WATCH_PANEL_COUNT', count: lastPanelIndex() }); },
         subscriptionAction: updateSubscription, savePlaylist: togglePlaylist, retryPlaylists: loadPlaylists
-      });
-      renderer.update({ panel, text: port.descriptionText, records, unavailable,
+      }, false);
+      renderer.update({ panel, text: port.descriptionText, descriptionRuns: port.descriptionRuns, records, unavailable,
         thread: comments.state.thread ? records.find(item => item.key === comments.state.thread) : undefined, replyLimit: comments.state.limit,
         notificationPreference: panel === 'subscription' ? port.controller.readWatchPage().notificationPreference : undefined,
         subscriptionLoading: subscription.state.loading, subscriptionFailed: subscription.state.failed,
         playlists: playlist.state.items, playlistLoading: playlist.state.loading, playlistFailed: playlist.state.failed,
-        commentsStatus: port.controller.readCommentsStatus?.(), commentRoute: port.controller.readRoute().key });
+        commentsStatus: (() => { const status = port.controller.readCommentsStatus?.(); return status ? { ...status, commentCount: status.commentCount || port.controller.readWatchPage?.().commentCount } : undefined; })(), commentRoute: port.controller.readRoute().key });
       dialog.classList.toggle('thread-detail', panel === 'comments' && !!comments.state.thread);
-      commentButtons = panel !== 'description' ? renderer.buttons() : [];
+      commentButtons = renderer.buttons();
     }
     function positionSubscription() {
       if (watchState().panel !== 'subscription') return;
-      const anchor = surface.querySelector<HTMLElement>('[data-action="subscribe"]');
+      const anchor = surface.querySelector<HTMLElement>('[data-action="subscribe"]') || surface.querySelector<HTMLElement>('[data-action="moreActions"]');
       if (!anchor) return;
       const rect = anchor.getBoundingClientRect(), bounds = dialog.getBoundingClientRect();
       const width = Math.min(260, bounds.width - 16), height = Math.min(sheet.scrollHeight, bounds.height - 16);
@@ -117,6 +119,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
       index: watchState().panelIndex, id: panelItems()[watchState().panelIndex]?.dataset.focusId || '',
       thread: comments.state.thread, limit: comments.state.limit };
     renderedPanel = '';
+    initialCommentFocus = false;
     comments.reset();
     subscription.reset();
     playlist.reset();
@@ -138,6 +141,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
       commentKey = ''; readComments();
     });
     comments.open(key);
+    initialCommentFocus = true;
     controllerStyle.bind(close, 'Back to comments');
     controllerStyle.bind(panelTitle, 'Replies'); controllerStyle.bind(dialog, 'Replies', 'aria-label');
     send({ type: 'WATCH_FOCUS', region: 'panel', index: 0 });
@@ -161,11 +165,16 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     if (destroyed) return;
     if (watchState().panel === 'subscription') { paintSubscription(); return; }
     if (watchState().panel === 'playlists') { paintPlaylists(); return; }
-    if (watchState().panel === 'description') { paint('description'); return; }
+    if (watchState().panel === 'description') { paint('description'); send({ type: 'WATCH_PANEL_COUNT', count: lastPanelIndex() }); return; }
     if (watchState().panel !== 'comments') return;
     const route = port.controller.readRoute().key;
     if (route !== commentRoute) { commentRoute = route; comments.reset(); drawer.clearDetails(); commentKey = ''; }
     const records = port.controller.readComments();
+    if (!comments.state.thread) {
+      const count = port.controller.readCommentsStatus?.()?.commentCount || port.controller.readWatchPage?.().commentCount;
+      controllerStyle.bind(panelTitle, 'Comments');
+      if (count) panelTitle.textContent += ' ' + count;
+    }
     const unavailable = port.controller.readWatchFeatures?.().comments === 'failed';
     if (comments.state.thread && !records.some(item => item.key === comments.state.thread)) {
       back(); return;
@@ -175,6 +184,10 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     let activeId = ((dialog.getRootNode?.() as ShadowRoot | undefined)?.activeElement as HTMLElement | null)?.dataset.focusId;
     commentKey = key;
     paint('comments', records, unavailable);
+    if (initialCommentFocus) {
+      const first = panelItems().find(button => button.dataset.focusId?.startsWith('comment:'));
+      if (first) { activeId = first.dataset.focusId; initialCommentFocus = false; }
+    }
     const nextReply = comments.state.nextIndex === undefined ? undefined : records.find(item => item.key === comments.state.thread)?.replies[comments.state.nextIndex];
     if (nextReply) { activeId = 'comment:reply:' + JSON.stringify([comments.state.thread, nextReply.key]); comments.state.nextIndex = undefined; }
     const index = activeId ? panelItems().findIndex(button => button.dataset.focusId === activeId) : -1;
@@ -192,6 +205,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     if (renderedPanel && renderedPanel !== action) drawer.close(false);
     comments.reset();
     const saved = action === 'comments' && savedComments?.route === port.controller.readRoute().key ? savedComments : undefined;
+    initialCommentFocus = action === 'comments' && !saved;
     if (saved) { commentRoute = saved.route; comments.state.thread = saved.thread; comments.state.limit = saved.limit; }
     renderedPanel = action;
     // Choose the incoming geometry before state updates can reveal or measure it.
@@ -212,7 +226,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     controllerStyle.bind(panelTitle, title); controllerStyle.bind(dialog, title, 'aria-label');
     dialog.setAttribute('aria-modal', String(action !== 'comments'));
     if (action === 'description') {
-      paint('description'); focus();
+      paint('description'); send({ type: 'WATCH_PANEL_COUNT', count: lastPanelIndex() }); focus();
     } else if (action === 'subscription') {
       subscription.reset();
       paintSubscription();

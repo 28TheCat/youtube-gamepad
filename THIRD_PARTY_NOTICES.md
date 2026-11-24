@@ -70,3 +70,7 @@ Author: nicefrog. Source: https://opengameart.org/content/generic-gamepad-templa
 ## YouTube brand icon
 
 `assets/brand/youtube-icon.svg` contains the original icon group extracted from Google's official SVG at https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg . Original paths, proportions and red/white colors are preserved; the wordmark is omitted and the viewBox fits the icon. It is bundled locally for the YouTube home button. YouTube trademarks remain the property of Google LLC. Brand guidance: https://developers.google.com/youtube/terms/branding-guidelines .
+
+## BewlyCat comment tree geometry
+
+Source: https://github.com/keleus/BewlyCat/blob/main/src/utils/commentReplyTree.ts . The SVG branch geometry is reused in `src/ui/bewly-comment-tree-geometry.ts`; Vue measurement and rendering are adapted for this browser extension. Copyright (c) 2025 Keleus and (c) 2021 Hakadao. The complete custom license, including its restriction on non-browser-extension distributions, is included in `licenses/bewlycat-LICENSE.txt`.

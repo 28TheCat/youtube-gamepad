@@ -5,6 +5,7 @@
   --channel-font:13px;
   --channel-padding:12px;
   --channel-gap:6px;
+  --channel-avatar-size:44px;
   --channel-background:var(--ytg-surface);
   --channel-text:var(--ytg-text);
   --channel-border:var(--ytg-border);
@@ -20,11 +21,11 @@
   font-size:var(--channel-font);white-space:nowrap;cursor:pointer;
 }
 .channel-control.avatar{
-  flex:0 1 auto;min-width:0;max-width:100%;height:var(--channel-height);
+  flex:0 1 auto;min-width:0;max-width:100%;height:48px;
   padding:2px;border:0;border-radius:8px;background:transparent;text-align:left;
 }
-.channel-portrait{width:36px;height:36px;background:var(--channel-background);font-size:var(--ytg-font-heading)}
-.channel-name{display:flex;align-items:center;min-width:0;max-width:clamp(72px,12vw,160px);font-size:14px;font-weight:600;line-height:1.4}
+.channel-portrait{width:var(--channel-avatar-size);height:var(--channel-avatar-size);background:var(--channel-background);font-size:var(--ytg-font-heading)}
+.channel-name{display:flex;align-items:center;min-width:0;max-width:clamp(72px,12vw,160px);font-size:var(--ytg-font-small);font-weight:600;line-height:1.4}
 .channel-label{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .channel-control[data-action="subscribe"]{border-radius:20px;padding-inline:16px;background:var(--channel-filled-background);color:var(--channel-filled-text)}
 .channel-control .subscription-bell{width:20px;height:20px;flex:none}
@@ -42,12 +43,4 @@
   --channel-height:48px;--channel-font:16px;--channel-padding:14px;--channel-gap:10px;flex:none;
 }
 :host-context(html.ytg-gamepad-input:not([data-ytg-playback-layout="fullscreen"])) .channel-control.avatar{max-width:240px}
-:host-context(html[data-ytg-playback-layout="fullscreen"]) .channel-group{
-  --channel-height:56px;--channel-font:clamp(16px,1.2vw,20px);--channel-padding:var(--ytg-space-wide);--channel-gap:var(--ytg-space-3);
-  --channel-filled-background:var(--ytg-overlay-text);--channel-filled-text:var(--ytg-overlay-selected-text);
-  --channel-background:var(--ytg-overlay-button);--channel-text:var(--ytg-overlay-text);--channel-border:var(--ytg-overlay-subtle);flex:none;
-}
-:host-context(html[data-ytg-playback-layout="fullscreen"]) .channel-control{border-radius:var(--ytg-pill-radius)}
-:host-context(html[data-ytg-playback-layout="fullscreen"]) .channel-control.avatar{width:48px;height:48px;padding:5px}
-:host-context(html[data-ytg-playback-layout="fullscreen"]) .channel-name{display:none}
 

@@ -41,6 +41,7 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
     const selection = rightHand ? text.replace(/left stick/gi, 'right stick').replace(/左摇杆/g, '右摇杆') : text;
     return selection.replace(/scroll stick/gi, rightHand ? 'Left stick' : 'Right stick').replace(/滚动摇杆/g, rightHand ? '左摇杆' : '右摇杆');
   };
+  const available = (key: string) => keyboardMode() || boundKey(key) !== '—';
   const format = (text: string) => navigationText(text).replace(keysPattern, (key: string) => keyboardMode() ? keyboardKeys[key] || key : profiles[family][boundKey(key)] || boundKey(key));
   function repaint() {
     for (const root of roots) for (const node of root.querySelectorAll<HTMLElement>('[data-ytg-key],[data-ytg-text],[data-ytg-title],[data-ytg-aria],[data-ytg-hint]')) paint(node);
@@ -49,6 +50,8 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
     const key = node.getAttribute('data-ytg-key');
     if (key !== null) {
       node.textContent = format(key);
+      const entry = node.closest?.<HTMLElement>('.hint-item,.shortcut-item');
+      if (entry) entry.hidden = ![...key.matchAll(keysPattern)].every(match => available(match[0]));
       node.setAttribute('data-ytg-family', family);
       node.setAttribute('data-ytg-bound-key', key.split(' / ').map(boundKey).join(' / '));
       const parts = key.split(' / ').map(boundKey);
@@ -58,7 +61,7 @@ export let YTGamepadControllerStyle: ControllerStyle | undefined;
       node.setAttribute('aria-label', format(key));
     }
     const sourceHint = node.getAttribute('data-ytg-hint');
-    const hint = sourceHint === null ? null : navigationText(t(sourceHint));
+    const hint = sourceHint === null ? null : navigationText(t(sourceHint)).split(' · ').filter(part => [...part.matchAll(keysPattern)].every(match => available(match[0]))).join(' · ');
     if (hint !== null) {
       const pieces = [], matches = hint.matchAll(keysPattern);
       let offset = 0;

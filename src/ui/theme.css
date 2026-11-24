@@ -4,6 +4,9 @@
 /* Shared visual tokens. Page and Shadow DOM UI inherit these from html.
    Keep YouTube theme selectors here; playback uses explicit overlay tokens. */
 :root {
+  --ytg-control-size: 56px;
+  --ytg-watch-action-size: 48px;
+  --ytg-play-size: 72px;
   --ytg-font-family: Roboto, Arial, sans-serif;
   /* Shared type roles; large titles and keyboard letters remain responsive. */
   --ytg-font-caption: 12px;
@@ -45,7 +48,6 @@
   --ytg-surface: #f3f4f6;
   --ytg-border: #d1d5db;
   --ytg-current-background: var(--ytg-surface);
-  --ytg-current-text: var(--ytg-text);
   --ytg-selected-background: var(--ytg-text);
   --ytg-selected-text: var(--ytg-background);
   --ytg-overlay-backdrop: #0009;
@@ -62,6 +64,11 @@
   --ytg-panel-shadow: 0 24px 80px #0008;
   --ytg-text-shadow: 0 2px 8px #0008;
   --ytg-brand-color: #ff0033;
+  --ytg-link-color: #065fd4;
+  --ytg-search-focus-color: #1c62b9;
+  --ytg-progress-track: #ffffff60;
+  --ytg-duration-background: #000c;
+  --ytg-badge-background: #000b;
   --ytg-space-half: 2px;
   /* Semantic spacing aliases use the same four-pixel scale as the UI. */
   --ytg-space-small: var(--ytg-space-2);
@@ -75,6 +82,26 @@
   --ytg-space-6: 24px;
   --ytg-space-7: 28px;
   --ytg-space-8: 32px;
+}
+/* Density inherits into all extension Shadow DOM roots. */
+html[data-ytg-density="tv"] {
+  --ytg-font-caption: 14px;
+  --ytg-font-small: 16px;
+  --ytg-font-body: 20px;
+  --ytg-font-action: 22px;
+  --ytg-font-heading: 24px;
+  --ytg-font-title: 32px;
+  --ytg-space-1: 5px;
+  --ytg-space-2: 10px;
+  --ytg-space-3: 15px;
+  --ytg-space-4: 20px;
+  --ytg-space-5: 25px;
+  --ytg-space-6: 30px;
+  --ytg-space-7: 35px;
+  --ytg-space-8: 40px;
+  --ytg-control-size: 64px;
+  --ytg-watch-action-size: 56px;
+  --ytg-play-size: 80px;
 }
 html[dark] {
   color-scheme: dark;
@@ -114,3 +141,27 @@ html:not([dark]) { color-scheme: light; }
   --ytg-shadow-focus: 0 8px 28px #00000055, 0 0 0 2px #ffffff24;
   }
 }
+
+/* Match YouTube's browse surfaces while retaining controller focus outlines. */
+#ytg-browse-grid{
+  --ytg-font-body:14px;--ytg-font-action:16px;--ytg-weight-body:500;
+  --ytg-client-background:#fff;--ytg-client-surface:#fff;--ytg-client-active:#f2f2f2;
+  --ytg-background:#fff;--ytg-text:#0f0f0f;--ytg-muted:#606060;
+  --ytg-surface:#f2f2f2;--ytg-border:#ddd;--ytg-card-hover-background:#f8e7e7;
+  --ytg-current-background:#e5e5e5;
+  --ytg-selected-background:#0f0f0f;--ytg-selected-text:#fff;
+  --ytg-button-radius:8px;--ytg-card-radius:12px;
+  --ytg-shadow-control:none;--ytg-shadow-focus:none;
+}
+html[dark] #ytg-browse-grid{
+  --ytg-client-background:#0f0f0f;--ytg-client-surface:#0f0f0f;--ytg-client-active:#272727;
+  --ytg-background:#0f0f0f;--ytg-text:#f1f1f1;--ytg-muted:#aaa;
+  --ytg-surface:#272727;--ytg-border:#3f3f3f;--ytg-card-hover-background:#352628;
+  --ytg-current-background:#3f3f3f;
+  --ytg-selected-background:#f1f1f1;--ytg-selected-text:#0f0f0f;
+  --ytg-shadow-control:none;--ytg-shadow-focus:none;
+}
+
+/* Shorts uses the native video-page palette. */
+html.ytg-shorts-player{--ytg-shorts-background:#fff;--ytg-shorts-text:#0f0f0f;--ytg-shorts-muted:#606060;--ytg-shorts-button:#f2f2f2;--ytg-shorts-hover:#e5e5e5}
+html[dark].ytg-shorts-player{--ytg-shorts-background:#0f0f0f;--ytg-shorts-text:#f1f1f1;--ytg-shorts-muted:#aaa;--ytg-shorts-button:#272727;--ytg-shorts-hover:#3f3f3f}

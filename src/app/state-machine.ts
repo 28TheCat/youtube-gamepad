@@ -108,7 +108,7 @@ export let YTGamepadStateMachine!: StateMachineModule;
           ...(event.region === 'controls' && event.index !== undefined ? { controlIndex: event.index } : {}),
           ...(event.region === 'recommendations' && event.index !== undefined ? { recommendationIndex: event.index } : {}) };
         break;
-      case 'WATCH_PANEL': watch = { ...watch, panel: event.panel, commentsParked: false, panelIndex: 0 }; break;
+      case 'WATCH_PANEL': watch = { ...watch, panel: event.panel, adjusting: false, commentsParked: false, panelIndex: 0 }; break;
       case 'WATCH_PANEL_COUNT': watch = { ...watch, panelIndex: Math.min(watch.panelIndex, event.count) }; break;
       case 'WATCH_EMPTY':
         if (watch.row === 'recommendations') watch = { ...watch, row: 'controls', index: watch.playIndex }; break;
@@ -117,6 +117,10 @@ export let YTGamepadStateMachine!: StateMachineModule;
         if (watch.panel && !watch.commentsParked) {
           if (action === 'back') { watch = { ...watch, panel: '' }; emit(event.type, { type: 'closePanel' }); }
           else if (action === 'confirm') emit(event.type, { type: 'panelClick' });
+          else if (watch.panel === 'description' && (action === 'left' || action === 'right')) {
+            watch = { ...watch, panelIndex: Math.max(0, Math.min(event.commentCount, watch.panelIndex + (action === 'left' ? -1 : 1))) };
+            emit(event.type, { type: 'focus' });
+          }
           else if (action === 'up' || action === 'down') {
             if (watch.panel === 'description' || event.scrollDelta) emit(event.type, { type: 'panelScroll', value: event.scrollDelta || (action === 'up' ? -180 : 180) });
             else {

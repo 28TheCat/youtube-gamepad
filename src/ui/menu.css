@@ -11,7 +11,7 @@
   
       :host([data-search]){background:var(--ytg-background);display:block;pointer-events:auto;font-family:var(--ytg-font-family);color:var(--ytg-text);overflow:auto}
       :host([data-search]) section.search-panel{box-sizing:border-box;width:min(1180px,100%);max-height:none;margin:0 auto;padding:clamp(var(--ytg-space-6),5vh,60px) clamp(var(--ytg-space-5),5vw,64px);background:transparent;border:0;border-radius:0;box-shadow:none;overflow:visible}
-      .search-panel input{display:block;height:40px;background:var(--ytg-surface);color:inherit;border:1px solid var(--ytg-border);border-radius:20px;font-size:20px;line-height:normal;font-weight:var(--ytg-weight-body);padding:0 var(--ytg-space-4);margin-bottom:var(--ytg-space-7)}
+      .search-panel input{display:block;height:40px;background:var(--ytg-surface);color:inherit;border:1px solid var(--ytg-border);border-radius:20px;font-size:var(--ytg-font-heading);line-height:normal;font-weight:var(--ytg-weight-body);padding:0 var(--ytg-space-4);margin-bottom:var(--ytg-space-7)}
       .search-panel input::placeholder{color:var(--ytg-muted);opacity:1}
       .search-panel input:focus{border-color:var(--ytg-focus-color);outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset)}
       .search-panel .search-layout{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.2fr);gap:clamp(var(--ytg-space-6),5vw,72px);margin-top:0;align-items:start}
@@ -21,7 +21,7 @@
       :host-context(html:not([data-ytg-input-mode="mouse"])) .search-panel .key-row button:focus{color:var(--ytg-background);background:var(--ytg-text)}
       .search-panel .key-row svg path[stroke]{stroke-width:var(--ytg-icon-stroke);stroke-linecap:round;stroke-linejoin:round}
       .search-panel .key-row svg{width:24px;height:24px;vertical-align:middle}
-      .search-panel .key-row.languages{grid-template-columns:repeat(3,minmax(0,1fr));padding:0}.search-panel .key-row.languages button{font-size:var(--ytg-font-heading);background:var(--ytg-surface);color:var(--ytg-text);min-height:56px;padding:var(--ytg-space-between) var(--ytg-space-3);border:1px solid var(--ytg-border)}:host-context(html:not([data-ytg-input-mode="mouse"])) .search-panel .key-row.languages button:focus{background:var(--ytg-text);color:var(--ytg-background);outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset)}
+      .search-panel .key-row.languages{grid-template-columns:repeat(3,minmax(0,1fr));padding:0}.search-panel .key-row.languages button{font-size:var(--ytg-font-heading);background:var(--ytg-surface);color:var(--ytg-text);min-height:56px;padding:var(--ytg-space-between) var(--ytg-space-3);border:1px solid var(--ytg-border)}:host-context(html:not([data-ytg-input-mode="mouse"])) .search-panel .key-row.languages button:focus{background:var(--ytg-text);color:var(--ytg-background)}
       .search-panel .key-row:last-child:not(.languages){grid-template-columns:repeat(3,minmax(0,1fr));margin-top:var(--ytg-space-2);padding-right:12.5%}
       .search-panel .key-row:last-child:not(.languages) button{background:var(--ytg-surface);color:var(--ytg-text);font-size:var(--ytg-font-action);padding:var(--ytg-space-2)}
       :host-context(html:not([data-ytg-input-mode="mouse"])) .search-panel .key-row:last-child:not(.languages) button:focus{background:var(--ytg-text);color:var(--ytg-background)}
@@ -97,7 +97,7 @@ section{scroll-padding-block:var(--ytg-space-3)}
 #inline-settings .binding-overview-group [data-inline-key]::before{mask-size:24px 24px}
 #inline-settings .binding-overview-group p{color:inherit;font:inherit;margin:0}
 #inline-settings .binding-overview-group small{color:var(--ytg-muted)}
-#inline-settings .binding-overview-footer{grid-area:footer;margin:0 -16px;padding:10px 16px;border-top:1px solid var(--ytg-border);color:var(--ytg-muted);font-size:12px}
+#inline-settings .binding-overview-footer{grid-area:footer;margin:0 -16px;padding:10px 16px;border-top:1px solid var(--ytg-border);color:var(--ytg-muted);font-size:var(--ytg-font-caption)}
 #inline-settings .inline-action-list>summary{cursor:pointer;padding:10px 0;color:var(--ytg-muted)}
 #inline-settings .inline-action-list>summary>button{background:transparent;color:inherit;box-shadow:none;font:inherit;padding:4px}
 #inline-settings .inline-action-list .inline-binding-button{width:100%;margin:6px 0}
@@ -121,6 +121,8 @@ section{scroll-padding-block:var(--ytg-space-3)}
   section{translate:0 0;transition:translate var(--ytg-motion-panel) var(--ytg-motion-easing)}
   :host([data-closing]) section{translate:0 0;transition:none}
   button{transition:background var(--ytg-focus-duration) var(--ytg-focus-easing),color var(--ytg-focus-duration) var(--ytg-focus-easing),scale var(--ytg-focus-duration) var(--ytg-motion-spring),box-shadow var(--ytg-focus-duration) ease}
+  .search-panel .key-row button{transition:none}
+  .search-panel .key-row button:active:not(:disabled){scale:none}
   :host-context(html:not([data-ytg-input-mode="mouse"])) #items button:focus{scale:1.025}
   button:active:not(:disabled){scale:.96}
   @starting-style{
@@ -140,7 +142,7 @@ section.settings-panel{position:relative;box-sizing:border-box;width:min(1120px,
 .settings-close svg{width:24px;height:24px}
 #inline-settings .settings-layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:28px;align-items:start;min-width:0}
 #inline-settings .settings-sidebar{display:grid;gap:8px;position:sticky;top:0;min-width:0}
-#inline-settings .settings-brand{font-size:14px;color:var(--ytg-muted);padding:8px 12px 16px}
+#inline-settings .settings-brand{font-size:var(--ytg-font-small);color:var(--ytg-muted);padding:8px 12px 16px}
 #inline-settings .settings-sidebar button{display:flex;align-items:center;gap:12px;min-height:52px;background:transparent;box-shadow:none;font-size:16px;line-height:1.4}
 #inline-settings .settings-sidebar button[aria-current=page]{background:var(--ytg-selected-background);color:var(--ytg-selected-text);font-weight:600}
 #inline-settings .settings-category-icon{display:block;width:22px;height:22px;flex-shrink:0}
@@ -149,17 +151,19 @@ section.settings-panel{position:relative;box-sizing:border-box;width:min(1120px,
 #inline-settings .settings-content>button:is([data-setting=enabled],[data-setting=theater],[data-setting=autoFullscreen]){display:flex;align-items:center;justify-content:space-between;gap:20px;background:var(--ytg-surface);color:var(--ytg-text);border-color:transparent}
 #inline-settings .settings-content>button:is([data-setting=enabled],[data-setting=theater],[data-setting=autoFullscreen])::after{content:'';flex:0 0 44px;height:24px;border-radius:20px;background:radial-gradient(circle at 12px 12px,#fff 0 9px,transparent 10px),#aaa}
 #inline-settings .settings-content>button:is([data-setting=enabled],[data-setting=theater],[data-setting=autoFullscreen])[aria-pressed=true]::after{background:radial-gradient(circle at 32px 12px,var(--ytg-selected-text) 0 9px,transparent 10px),var(--ytg-selected-background)}
-#inline-settings .settings-content p{font-size:14px;font-weight:400}
+#inline-settings .settings-content p{font-size:var(--ytg-font-small);font-weight:400}
 .settings-panel #message{margin-left:248px;min-height:0}
-.settings-panel #shortcuts{font-size:14px;font-weight:400}
-.settings-panel #items>button{justify-self:end;font-size:14px;box-shadow:none}
+.settings-panel #shortcuts{font-size:var(--ytg-font-small);font-weight:400}
+.settings-panel #items>button{justify-self:end;font-size:var(--ytg-font-small);box-shadow:none}
 @media(max-width:700px){
   section.settings-panel{width:calc(100vw - 20px);height:calc(100dvh - 20px);max-height:calc(100dvh - 20px);padding:18px;border-radius:20px}
   .settings-close{right:14px;top:14px}
   #inline-settings .settings-layout{grid-template-columns:minmax(0,1fr);gap:16px}
   #inline-settings .settings-sidebar{position:static;grid-template-columns:repeat(2,minmax(0,1fr))}
   #inline-settings .settings-brand{grid-column:1/-1;padding:0 4px 4px}
-  #inline-settings .settings-sidebar button{padding:10px;font-size:14px;gap:8px}
+  #inline-settings .settings-sidebar button{padding:10px;font-size:var(--ytg-font-small);gap:8px}
   #inline-settings .settings-content{padding:16px}
   .settings-panel #message{margin-left:0}
 }
+
+.shortcut-item[hidden]{display:none}

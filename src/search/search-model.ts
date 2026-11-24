@@ -23,7 +23,8 @@ export function createSearchModel(port: SearchPort, mount: MountSearch): SearchI
   function snapshot(): SearchView {
     const state = menuState();
     const start = state.candidatePage * 5;
-    return { query: text.state.query, composing: state.composing,
+    const focused = root.activeElement as HTMLElement | null;
+    return { focusKind: focused?.dataset.row === '-1' ? 'candidate' : focused?.dataset.column === '-1' ? 'history' : 'key', query: text.state.query, composing: state.composing,
       chinese: state.language === 'zh-CN', choosingLanguage: state.choosingLanguage,
       rows: state.choosingLanguage ? [[{ label: 'English', action: 'ENGLISH' }, { label: 'Chinese (Pinyin)', action: 'CHINESE' }, { label: 'Physical keyboard', action: 'PHYSICAL_INPUT' }]] : keyboard.rows(state.frame, state.uppercase),
       recent: [...recent], candidates: candidates.slice(start, start + 5),
@@ -137,7 +138,7 @@ export function createSearchModel(port: SearchPort, mount: MountSearch): SearchI
     recent = readSearchHistory();
     renderer = mount(section, snapshot(), {
       input() { rememberCursor(); syncSearch(); updateView(); },
-      focus(button) { port.selected = buttons().indexOf(button); },
+      focus(button) { port.selected = buttons().indexOf(button); updateView(); },
       key: keyboardAction, candidate: commitCandidate,
       page(delta) { pageCandidates(delta); focusCandidate(); },
       raw() { const value = menuState().composing; send({ type: 'MENU_COMPOSE', value: '' }); edit(value); refreshCandidates(); focusFirstKey(); },
@@ -185,7 +186,7 @@ export function createSearchModel(port: SearchPort, mount: MountSearch): SearchI
   return { render, navigate, keydown, renderKeys: updateView, refreshCandidates, focusFirstKey,
     keyboardAction, space, backspace, pageCandidates, toggleCandidates, moveCursor, submit,
     setTarget(value: SearchTarget) { searchTarget = value; }, get target() { return searchTarget; },
-    initializeQuery() { text.setQuery(port.controller.readSearch(searchTarget)); paintQuery(); },
+    initializeQuery() { text.setQuery(port.controller.readSearch(searchTarget)); paintQuery(); updateView(); },
     unmount,
     destroy() { unmount(); searchTarget = null; candidates = []; text.setQuery(''); }
 

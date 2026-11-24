@@ -1,6 +1,15 @@
 // Each pair is [English, Simplified Chinese]. UI source strings are stable keys;
 // page content (titles, comments and search queries) is never translated.
 export const messages: readonly (readonly [string, string])[] = [
+  ['A Adjust', 'A 调整'],
+  ['A Toggle', 'A 切换'],
+  ['Back to player', '返回播放器'],
+  ['Timeline', '进度条'],
+  ['Select', '选择'],
+  ['Display density', '显示密度'],
+  ['Standard', '标准'],
+  ['TV', '电视'],
+  ['TV enlarges text, controls and spacing for viewing from a distance.', '电视预设会放大文字、控件和间距，方便远距离观看。'],
   ['Refresh recommendations', '刷新推荐'],
   ['Press Start to open the quick menu. During playback, the menu includes captions and volume controls.', '按 Start 打开快捷菜单。播放时，菜单提供字幕和音量控制。'],
   ['Connect a standard-layout gamepad, click YouTube, then press a gamepad button. Use the D-pad / left stick to move and A to confirm.', '连接标准布局手柄，点击 YouTube 页面，再按下手柄按键。用方向键 / 左摇杆移动，按 A 确认。'],
@@ -27,6 +36,8 @@ export const messages: readonly (readonly [string, string])[] = [
   ['Playback parameters', '播放参数'], ['Video seek step', '普通视频快进／快退步长'], ['Shorts seek step', '短视频快进／快退步长'], ['Volume step', '音量调整步长'],
   ['Choose the seek distance and volume change per press. Changes apply immediately.', '设置每次按键调整的进度秒数和音量百分比，修改后立即生效。'],
   ['Restore playback defaults', '恢复默认播放参数'], ['Rewind {seconds} seconds', '快退 {seconds} 秒'], ['Forward {seconds} seconds', '快进 {seconds} 秒'],
+  ['Could not update like. Try again.', '点赞未成功，请重试。'],
+  ['Hottest', '最热'], ['Latest', '最新'], ['Add a comment…', '添加评论…'],
   ['Comment order', '评论排序'], ['Top comments', '热门评论'], ['Newest first', '最新优先'],
   ['Write a comment', '发表评论'], ['Write a reply', '撰写回复'], ['Post comment', '发表评论'], ['Send reply', '发送回复'],
   ['Sending…', '正在发送…'], ['Cancel', '取消'], ['Comment sent.', '评论已发送。'],
@@ -164,7 +175,7 @@ export const messages: readonly (readonly [string, string])[] = [
   ['Playback action failed', '播放操作失败'],
   ['All', '全部'], ['Podcasts', '播客'], ['Mixes', '合辑'], ['Animation', '动画'], ['Recently uploaded', '最近上传'], ['Watched', '已观看'], ['New to you', '发现新视频'], ['Volume {percent}%', '音量 {percent}%'], ['{seconds} seconds', '{seconds} 秒'],
   ['D-pad / left stick', '方向键 / 左摇杆'], ['Paused', '已暂停'], ['Playing', '正在播放'], ['Channel information is still loading', '频道信息仍在加载'], ['Player settings are currently unavailable', '播放器设置暂不可用'], ['This action is unavailable. Wait for the video information to load.', '此操作暂不可用，请等待视频信息加载。'], ['No captions available for this video', '此视频没有可用字幕'], ['This action is currently unavailable', '此操作暂不可用'], ['Recommendations have changed. Please select again.', '推荐视频已变化，请重新选择。'], ['No more recommendations', '没有更多推荐视频'],
-  ['Voice search', '语音搜索'], ['Sidebar', '侧边目录'], ['Home', '首页'], ['Subscriptions', '订阅频道'], ['History', '历史记录'], ['Playlists', '播放列表'], ['Watch later', '稍后观看'], ['Liked videos', '赞过的视频'], ['Your videos', '我的视频'], ['Music', '音乐'], ['Gaming', '游戏'], ['News', '新闻'], ['Sports', '体育'],
+  ['Voice search', '语音搜索'], ['More actions', '更多操作'], ['Sidebar', '侧边目录'], ['Home', '首页'], ['Subscriptions', '订阅频道'], ['History', '历史记录'], ['Playlists', '播放列表'], ['Watch later', '稍后观看'], ['Liked videos', '赞过的视频'], ['Your videos', '我的视频'], ['Music', '音乐'], ['Gaming', '游戏'], ['News', '新闻'], ['Sports', '体育'],
   ['Binding layouts', '按键布局'], ['Playback, seeking and volume', '播放、进度与音量'], ['Browsing, selection and search', '浏览、选择与搜索'], ['Gamepad button positions', '手柄按键位置示意图'], ['Unassigned', '未分配'], ['Default bindings restored', '已恢复默认按键'], ['Could not load bindings. Please reopen this page.', '无法加载按键设置，请重新打开此页面。'], ['Could not save bindings. Please try again.', '无法保存按键设置，请重试。'],
   ['Left bumper', '左肩键'], ['Right bumper', '右肩键'], ['Left trigger', '左扳机'], ['Right trigger', '右扳机'], ['L3 · Left stick press', 'L3 · 按下左摇杆'], ['R3 · Right stick press', 'R3 · 按下右摇杆'],
   ['Volume controls', '音量控制'], ['Muted', '已静音'], ['Behind live by {time}', '落后直播 {time}'], ['Live · Replay window: {time}', '直播 · 回放范围：{time}'], ['Live · Seeking unavailable', '直播 · 无法跳转'], ['Live playback position', '直播播放进度'], ['Seeking is unavailable for this video', '此视频无法跳转进度'], ['Seeking is unavailable', '无法跳转进度'], ['Unable to seek', '跳转失败'], ['Playback position, adjusting. Left / right to seek, A to finish, B to go back', '正在调整播放进度。左 / 右跳转，A 完成，B 返回'], ['Playback position, A to start adjusting', '播放进度，按 A 开始调整'],

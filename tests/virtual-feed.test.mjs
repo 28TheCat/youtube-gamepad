@@ -94,10 +94,12 @@ test('indexed navigation preserves the preferred column across short rows and re
 
 test('windowed rows preserve mixed feed order and logical neighbours at unmounted boundaries', () => {
   const rows = feedRows(['a', 'b', 'short:s1', 'c', 'd', 'short:s2', 'e'].map(item), 2);
-  assert.deepEqual(rows.map(row => row.items.map(item => item.id)), [['a', 'b'], ['short:s1', 'short:s2'], ['c', 'd'], ['e']]);
-  assert.equal(adjacentFeedItem(rows, 'b', 'down'), 'short:s2');
-  assert.equal(adjacentFeedItem(rows, 'short:s2', 'down'), 'd');
-  assert.equal(adjacentFeedItem(rows, 'd', 'down'), 'e');
+  assert.deepEqual(rows.map(row => row.items.map(item => item.id)), [['a', 'b'], ['short:s1'], ['c', 'd'], ['short:s2'], ['e']]);
+  assert.equal(new Set(rows.map(row => row.id)).size, rows.length);
+  assert.equal(adjacentFeedItem(rows, 'b', 'down'), 'short:s1');
+  assert.equal(adjacentFeedItem(rows, 'short:s2', 'up'), 'c');
+  assert.equal(adjacentFeedItem(rows, 'short:s2', 'down'), 'e');
+  assert.equal(adjacentFeedItem(rows, 'd', 'down'), 'short:s2');
   assert.equal(adjacentFeedItem(rows, 'e', 'left'), undefined);
   assert.equal(adjacentFeedItem(rows, 'a', 'up'), undefined);
 });
@@ -123,11 +125,27 @@ test('Shorts cycle in both directions while ordinary rows keep their boundaries'
   assert.equal(adjacentFeedItem(feedRows([item('short:only')], 2), 'short:only', 'right'), 'short:only');
 });
 
-test('Shorts wait for a full video row across responsive layouts', () => {
+test('Shorts wait for a complete video row across responsive layouts', () => {
   const items = ['a', 'short:s1', 'short:s2', 'b', 'c', 'd', 'e'].map(item);
   const ids = columns => feedRows(items, columns).map(row => row.items.map(item => item.id));
   assert.deepEqual(ids(3), [['a', 'b', 'c'], ['short:s1', 'short:s2'], ['d', 'e']]);
   assert.deepEqual(ids(2), [['a', 'b'], ['short:s1', 'short:s2'], ['c', 'd'], ['e']]);
   assert.deepEqual(feedRows([item('a'), item('short:s1')], 3).map(row => row.items.map(item => item.id)), [['a'], ['short:s1']]);
   assert.equal(feedRows([item('short:s1'), item('a')], 3)[0].shorts, true);
+});
+
+test('filling a video row never merges different Shorts sections', () => {
+  const rows = feedRows(['a', 'short:s1', 'b', 'short:s2', 'c', 'd', 'e', 'short:s3', 'f'].map(item), 3);
+  assert.deepEqual(rows.map(row => row.items.map(item => item.id)),
+    [['a', 'b', 'c'], ['short:s1'], ['short:s2'], ['d', 'e', 'f'], ['short:s3']]);
+  assert.equal(new Set(rows.map(row => row.id)).size, rows.length);
+});
+
+test('appended Shorts stay after earlier video sections and keep existing shelf identities', () => {
+  const first = ['a', 'b', 'c', 'd', 'short:s1', 'short:s2', 'e', 'f'].map(item);
+  const before = feedRows(first, 2);
+  const after = feedRows([...first, item('short:s3'), item('short:s4'), item('g')], 2);
+  assert.deepEqual(after.slice(0, before.length), before);
+  assert.deepEqual(after.map(row => row.items.map(item => item.id)),
+    [['a', 'b'], ['c', 'd'], ['short:s1', 'short:s2'], ['e', 'f'], ['short:s3', 'short:s4'], ['g']]);
 });

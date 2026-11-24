@@ -309,3 +309,11 @@ test('filter endpoints cannot execute unrelated API actions', async () => {
     assert.equal(f.service.read().recommendations[0].label, 'original');
   } finally { f.service.destroy(); }
 });
+
+test('comment entry count retains the YouTube total rather than counting loaded rows', () => {
+  const raw = response();
+  raw.engagementPanels = [{ commentsEntryPointHeaderRenderer: { commentCount: { simpleText: '21' } } }];
+  assert.equal(load().parseWatchNext(raw, 'current').commentCount, '21');
+  delete raw.engagementPanels;
+  assert.equal(load().parseWatchNext(raw, 'current').commentCount, undefined);
+});

@@ -44,9 +44,6 @@ async function clear() {
           @keydown.enter="handleEnter" />
       </div>
       <button v-if="modelValue.length" type="button" class="ytg-search-clear" @click="clear">{{ t('Clear') }}</button>
-      <button type="submit" class="ytg-search-submit" :aria-label="t('Search')">
-        <InterfaceIcon name="search" class="ytg-search-submit-icon" /><span>{{ t('Search') }}</span>
-      </button>
     </form>
     <button v-if="voiceAvailable" type="button" class="ytg-search-voice" :aria-label="t('Voice search')" @click="emit('voice')">
       <InterfaceIcon name="mic" />

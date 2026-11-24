@@ -57,12 +57,12 @@ function load(file, context, modules = {}, cache = new Map()) {
   return exports;
 }
 
-function fixture() {
+function fixture(timers = { setTimeout, clearTimeout }) {
   const document = new EventTarget(), window = new EventTarget();
   let player;
   let details;
   document.querySelector = () => player;
-  const context = { document, window, CustomEvent, URL, URLSearchParams, setTimeout, clearTimeout, crypto: { randomUUID: () => 'test' },
+  const context = { document, window, CustomEvent, URL, URLSearchParams, ...timers, crypto: { randomUUID: () => 'test' },
     history: { pushState() {}, replaceState() {} }, location: { pathname: '/', search: '' } };
   const languages = load('shared/comment-language', context);
   const protocol = load('bridge/page-protocol', context, { '../shared/watch-link': load('shared/watch-link', context), '../shared/comment-language': languages });
@@ -155,6 +155,11 @@ test('MAIN handshake does not require a player and exposes only bounded metadata
   assert.equal(details.title.length, 2000);
   assert.equal(details.shortDescription.length, 20000);
   assert.equal(details.secret, undefined);
+  f.setDetails({ videoId: 'abc', shortDescription: '链接 #游戏', descriptionRuns: [
+    { text: '链接 ', href: 'javascript:alert(1)' }, { text: '#游戏', href: '/hashtag/%E6%B8%B8%E6%88%8F' }
+  ] });
+  const runs = f.client.readVideoDetails().descriptionRuns;
+  assert.deepEqual(JSON.parse(JSON.stringify(runs)), [{ text: '链接 ' }, { text: '#游戏', href: 'https://www.youtube.com/hashtag/%E6%B8%B8%E6%88%8F' }]);
   f.client.showControls();
   assert.equal(shown, 1);
   dispose();
@@ -539,4 +544,116 @@ test('recommendation filter snapshots retain bounded display fields without comm
   assert.equal(value.filters.length, 1); assert.equal(value.filters[0].label.length, 200);
   assert.equal(JSON.stringify(value).includes('private'), false);
   assert.deepEqual(Object.keys(value.filters[0]), ['key', 'label', 'selected']);
+});
+
+
+test('modern native navigation dispatches immediately without a delayed reload', () => {
+  const timers = [], commands = [];
+  const f = fixture({ setTimeout(fn, delay) { timers.push(delay); return 1; }, clearTimeout() {} });
+  f.setPlayer({ handleNavigate(request) { commands.push(request); }, navigate_() { throw Error('legacy router must not run'); } });
+  const dispose = f.server.startPageServer();
+  try {
+    const href = '/watch?v=second&list=PLtest&index=2';
+    assert.equal(f.client.openWatchVideo(href), true);
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].type, 0);
+    assert.equal(commands[0].form.reload, false);
+    assert.equal(commands[0].command.commandMetadata.webCommandMetadata.rootVe, 3832);
+    assert.equal(commands[0].command.watchEndpoint.videoId, 'second');
+    assert.equal(commands[0].command.watchEndpoint.playlistId, 'PLtest');
+    assert.equal(commands[0].command.watchEndpoint.index, 1);
+    assert.deepEqual(timers, [8000, 250], 'only bounded playback readiness checks are scheduled');
+  } finally { dispose(); }
+});
+
+test('watch playback waits for native identity without requiring navigation or media events', () => {
+  const pending = new Map(); let sequence = 0, plays = 0, current = 'old';
+  const f = fixture({ setTimeout(fn, delay) { const id = ++sequence; pending.set(id, { fn, delay }); return id; }, clearTimeout(id) { pending.delete(id); } });
+  const app = { handleNavigate() {} };
+  const player = { getVideoData: () => ({ video_id: current }), querySelector: () => null, playVideo() { plays++; } };
+  f.document.querySelector = selector => selector === 'ytd-app' ? app : selector === '#movie_player' ? player : null;
+  const tick = () => { const entry = [...pending].find(([, value]) => value.delay === 250); assert.ok(entry); pending.delete(entry[0]); entry[1].fn(); };
+  const dispose = f.server.startPageServer();
+  try {
+    assert.equal(f.client.openWatchVideo('/watch?v=next'), true);
+    f.context.location.pathname = '/watch'; f.context.location.search = '?v=next';
+    tick(); assert.equal(plays, 0, 'never starts the outgoing player');
+    current = 'next'; tick();
+    assert.equal(plays, 1, 'native playback can initialize before a video element or source exists');
+    assert.equal(pending.size, 0, 'success releases all timers');
+    assert.equal(f.client.openWatchVideo('/watch?v=later'), true);
+    f.document.dispatchEvent(new Event('keydown'));
+    assert.equal(pending.size, 0, 'user input cancels readiness checks');
+    assert.equal(plays, 1);
+  } finally { dispose(); }
+});
+
+test('player DOM readiness starts playback without waiting for the polling timer', () => {
+  let changed, plays = 0, disconnected = false, current = 'old';
+  const f = fixture({ setTimeout() { return 1; }, clearTimeout() {},
+    MutationObserver: class { constructor(callback) { changed = callback; } observe() {} disconnect() { disconnected = true; } } });
+  f.document.documentElement = {};
+  const app = { handleNavigate() {} };
+  const player = { getVideoData: () => ({ video_id: current }), querySelector: () => null, playVideo() { plays++; } };
+  f.document.querySelector = selector => selector === 'ytd-app' ? app : selector === '#movie_player' ? player : null;
+  const dispose = f.server.startPageServer();
+  try {
+    assert.equal(f.client.openWatchVideo('/watch?v=next'), true);
+    assert.equal(plays, 0);
+    f.context.location.pathname = '/watch'; f.context.location.search = '?v=next'; current = 'next';
+    changed();
+    assert.equal(plays, 1, 'readiness notification starts playback before any timer runs');
+    assert.equal(disconnected, true, 'observer stops after the attempt');
+    changed(); assert.equal(plays, 1);
+  } finally { dispose(); }
+});
+
+test('watch navigation starts only its destination and respects subsequent user interaction', () => {
+  const f = fixture({ setTimeout() { return 1; }, clearTimeout() {} });
+  const app = { handleNavigate() {} };
+  let current = 'old', plays = 0;
+  const video = { paused: true, ended: false, currentSrc: '' };
+  const player = { getVideoData: () => ({ video_id: current }), querySelector: () => video, playVideo() { plays++; } };
+  f.document.querySelector = selector => selector === 'ytd-app' ? app : selector === '#movie_player' ? player : null;
+  const dispose = f.server.startPageServer();
+  try {
+    assert.equal(f.client.openWatchVideo('/watch?v=next'), true);
+    f.context.location.pathname = '/watch'; f.context.location.search = '?v=next';
+    f.document.dispatchEvent(new Event('yt-navigate-finish'));
+    assert.equal(plays, 0, 'the old player must not be started');
+    current = 'next'; f.document.dispatchEvent(new Event('loadedmetadata'));
+    assert.equal(plays, 1, 'the matching player starts once');
+    f.document.dispatchEvent(new Event('loadedmetadata'));
+    assert.equal(plays, 1, 'later media events must not restart playback');
+    assert.equal(f.client.openWatchVideo('/watch?v=another'), true);
+    f.document.dispatchEvent(new Event('pointerdown'));
+    f.context.location.search = '?v=another'; current = 'another';
+    f.document.dispatchEvent(new Event('yt-navigate-finish'));
+    assert.equal(plays, 1, 'subsequent user input cancels the attempt');
+  } finally { dispose(); }
+});
+
+test('unstarted native player can start before YouTube provides its video ID', () => {
+  const f = fixture({ setTimeout() { return 1; }, clearTimeout() {} });
+  let plays = 0, watchId = 'old';
+  const video = { paused: true, ended: false, currentSrc: '' };
+  const player = { classList: { contains: value => value === 'unstarted-mode' },
+    getVideoData: () => ({ title: 'Available title without video_id' }),
+    querySelector: () => video, playVideo() { plays++; } };
+  const app = { handleNavigate() {} };
+  f.document.querySelector = selector => selector === 'ytd-app' ? app : selector === '#movie_player' ? player
+    : selector === 'ytd-watch-flexy' ? { getAttribute: () => watchId } : null;
+  const dispose = f.server.startPageServer();
+  try {
+    assert.equal(f.client.openWatchVideo('/watch?v=next'), true);
+    f.context.location.pathname = '/watch'; f.context.location.search = '?v=next';
+    f.document.dispatchEvent(new Event('yt-navigate-finish'));
+    assert.equal(plays, 0, 'old watch page identity is insufficient');
+    watchId = 'next'; video.currentSrc = 'outgoing-media';
+    f.document.dispatchEvent(new Event('loadedmetadata'));
+    assert.equal(plays, 0, 'outgoing media must not start');
+    video.currentSrc = '';
+    f.document.dispatchEvent(new Event('loadedmetadata'));
+    assert.equal(plays, 1, 'matching unstarted player initializes without a media source or video ID');
+  } finally { dispose(); }
 });

@@ -1,3 +1,4 @@
+import { toggleBrowseMode } from './helpers/header-menu.mjs';
 import { legacyModuleSource } from '../scripts/test-source.mjs';
 import { controllerAssets } from '../scripts/controller-assets.mjs';
 import { mainFixture } from './helpers/main-bundle.mjs';
@@ -100,7 +101,7 @@ async function setup(t, pathname = '/', connected = true, recommendationCount = 
 
 test('home return restores native category, rebuilt grid, scroll and original card focus', { skip: !chromium }, async t => {
   const page = await setup(t);
-  await page.locator('[data-ytg-page-mode]').click();
+  await toggleBrowseMode(page);
   await page.evaluate(() => {
     const manager = document.createElement('ytd-page-manager');
     manager.style.cssText = 'display:block;padding-top:850px;min-height:3000px';
@@ -734,7 +735,7 @@ test('settings shortcuts persist swaps, recover failed writes and fit mobile scr
 
 test('mouse takeover releases controller card focus without losing selection or keyboard focus', options, async t => {
   const page = await setup(t);
-  await page.locator('[data-ytg-page-mode]').click();
+  await toggleBrowseMode(page);
   await page.evaluate(() => {
     const card = document.querySelector('ytd-rich-item-renderer');
     const title = document.createElement('a');
@@ -776,7 +777,7 @@ test('mouse takeover releases controller card focus without losing selection or 
 
 test('shared header preserves native sidebar and feed geometry across widths and guide states', options, async t => {
   const page = await setup(t);
-  await page.locator('[data-ytg-page-mode]').click();
+  await toggleBrowseMode(page);
   await page.addStyleTag({ content: `
     body{padding:0} ytd-app,ytd-page-manager,ytd-rich-grid-renderer{display:block}
     ytd-app{--native-guide:72px}ytd-app[expanded]{--native-guide:240px}
@@ -842,7 +843,7 @@ test('shared header preserves native sidebar and feed geometry across widths and
   assert.equal(await page.locator('#ytg-browse-sidebar').isVisible(),false);
   assert.equal(await page.locator('#ytg-browse-top').isVisible(),true);
   assert.equal(await page.locator('ytd-masthead').isVisible(),false);
-  assert.equal(await page.locator('[data-ytg-page-mode]').getAttribute('aria-checked'),'false');
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.ytgBrowseMode),'youtube');
 });
 
 test('native video rows keep the current column through short rows and DOM replacement', options, async t => {
@@ -1311,7 +1312,7 @@ test('menu motion permits immediate reopen and repeated input, and respects redu
 
 test('current-page fill survives controller focus and enabled controls keep their checkmark', options, async t => {
   const page = await setup(t);
-  await page.locator('[data-ytg-page-mode]').click();
+  await toggleBrowseMode(page);
   const nav = await page.evaluate(() => {
     document.documentElement.classList.add('ytg-browse', 'ytg-gamepad-input');
     const guide=document.createElement('ytd-mini-guide-renderer'),entry=document.createElement('ytd-mini-guide-entry-renderer'),link=document.createElement('a');

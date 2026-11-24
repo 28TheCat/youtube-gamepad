@@ -71,6 +71,20 @@ const result = await build({ configFile: false, publicDir: false, logLevel: 'sil
 });
 const code = (Array.isArray(result) ? result[0] : result).output.find(item => item.type === 'chunk').code;
 
+test('empty side content keeps tabs reachable without wrapping', async t => {
+  const page = await browserPage(t);
+  await page.setContent('<html data-ytg-playback-layout="windowed"><body></body></html>');
+  await page.addScriptTag({ content: code + ';window.fixture = WindowedWatchFixture.setup(); window.fixture.page.recommendations = []; window.fixture.watch.sync();' });
+  const focused = () => page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement?.dataset.focusId);
+  const press = action => page.evaluate(action => window.fixture.press(action), action);
+  await press('right'); assert.equal(await focused(), 'tab:0');
+  await press('right'); assert.equal(await focused(), 'tab:1');
+  await press('right'); assert.equal(await focused(), 'tab:1');
+  await press('left'); assert.equal(await focused(), 'tab:0');
+  await press('left'); assert.equal(await focused(), 'player');
+  await page.evaluate(() => window.fixture.destroy());
+});
+
 test('windowed focus crosses page regions and fullscreen restores internal controls', async t => {
   const page = await browserPage(t);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -102,6 +116,45 @@ test('windowed focus crosses page regions and fullscreen restores internal contr
   await press('left'); assert.equal(await focused(), 'comments');
   assert.equal(await page.evaluate(() => window.fixture.state.panel), '');
   assert.equal(await page.locator('#ytg-watch .dialog.comments').isVisible(), true);
+  await page.evaluate(() => window.fixture.destroy());
+});
+
+for (const [width, height, filters] of [[1920, 666, false], [1280, 900, true], [800, 600, false]])
+test(`fullscreen recommendations peek then expand with controller focus (${width}x${height})`, async t => {
+  const page = await browserPage(t);
+  await page.setViewportSize({ width, height });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.route('https://i.ytimg.com/**', route => route.fulfill({ contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#487e92"/></svg>' }));
+  await page.setContent('<html class="ytg-gamepad-input" data-ytg-playback-layout="fullscreen"><body></body></html>');
+  await page.addStyleTag({ content: readFileSync(new URL('../src/ui/theme.css', import.meta.url), 'utf8') });
+  await page.addScriptTag({ content: code + `;window.fixture = WindowedWatchFixture.setup(true, false, false, ${filters});` });
+  const geometry = () => page.locator('#ytg-watch .recommendations').evaluate(list => {
+    const thumbnail = list.querySelector('.card-thumbnail').getBoundingClientRect();
+    const bounds = list.getBoundingClientRect();
+    const root = list.getRootNode();
+    return { visible: Math.min(bounds.bottom, thumbnail.bottom, innerHeight) - Math.max(bounds.top, thumbnail.top, 0),
+      thumbnail: thumbnail.height, progress: root.querySelector('.progress').getBoundingClientRect().top,
+      top: bounds.top, bottom: bounds.bottom, scroll: list.scrollTop,
+      surfaceScroll: root.querySelector('.surface').scrollTop };
+  });
+  const collapsed = await geometry();
+  assert.ok(Math.abs(collapsed.visible / collapsed.thumbnail - .5) < .02, 'only half the thumbnail is visible at rest');
+  await page.evaluate(() => window.fixture.watch.show('recommendations'));
+  const expanded = await geometry();
+  assert.ok(Math.abs(expanded.visible - expanded.thumbnail) < 1, 'entering recommendations reveals the whole thumbnail');
+  assert.ok(expanded.progress < collapsed.progress - 40, 'expanding moves the timeline up and collapsing leaves it lower');
+  if (width > 1200) assert.equal(expanded.surfaceScroll, 0, 'entering the list does not scroll the full overlay');
+  mkdirSync(new URL('../output/playwright/', import.meta.url), { recursive: true });
+  await page.screenshot({ path: fileURLToPath(new URL(`../output/playwright/recommendations-expanded-${width}.png`, import.meta.url)) });
+  for (let index = 0; index < 3; index++) await page.evaluate(() => window.fixture.press('down'));
+  assert.ok((await geometry()).scroll > 0, 'expanded recommendations can scroll through later rows');
+  await page.evaluate(() => window.fixture.watch.show('controls'));
+  const restored = await geometry();
+  assert.equal(restored.scroll, 0, 'collapsing restores the first recommendation');
+  assert.ok(Math.abs(restored.progress - collapsed.progress) < 1, 'the timeline returns to its lower resting position');
+  assert.ok(Math.abs(restored.visible / restored.thumbnail - .5) < .02);
+  await page.screenshot({ path: fileURLToPath(new URL(`../output/playwright/recommendations-peek-${width}.png`, import.meta.url)) });
   await page.evaluate(() => window.fixture.destroy());
 });
 
@@ -419,7 +472,14 @@ test('direction keys reach every side tab while shoulders remain media shortcuts
   await press('right'); assert.equal(await focused(), 'tab:2');
   await press('down'); assert.equal(await page.evaluate(() => window.fixture.state.panel), 'comments');
   await press('up'); assert.equal(await focused(), 'tab:2');
-  await press('right'); assert.equal(await focused(), 'tab:0');
+  await press('left'); assert.equal(await focused(), 'tab:1');
+  await press('left'); assert.equal(await focused(), 'tab:0');
+  await press('left'); assert.equal(await focused(), 'player');
+  await press('right'); assert.equal(await focused(), 'comment:comment0');
+  await press('up'); assert.equal(await focused(), 'tab:2');
+  await press('right'); assert.equal(await focused(), 'tab:2');
+  await press('left'); assert.equal(await focused(), 'tab:1');
+  await press('left'); assert.equal(await focused(), 'tab:0');
   await press('confirm'); assert.match(await focused(), /^recommendation:queue/);
   await press('left'); assert.equal(await focused(), 'player');
   assert.deepEqual(await page.evaluate(() => window.fixture.commands.filter(([type]) => type === 'media')), [['media', 'seekForward']]);
@@ -569,6 +629,11 @@ test('native recommendation filters preserve the collection and support controll
   await host.locator('.watch-tab:not(.collection-tab)').first().click();
   assert.equal(await host.locator('.recommendation-filters button').count(), 3);
   await press('up'); assert.equal(await focused(), 'filter:0');
+  await press('left'); assert.equal(await focused(), 'player');
+  await press('right'); await press('up'); assert.equal(await focused(), 'filter:0');
+  await press('right'); await press('right'); assert.equal(await focused(), 'filter:2');
+  await press('right'); assert.equal(await focused(), 'filter:2');
+  await press('left'); await press('left'); assert.equal(await focused(), 'filter:0');
   await press('right'); assert.equal(await focused(), 'filter:1');
   await press('confirm');
   assert.equal(await host.locator('[data-filter-key="filter:1"]').getAttribute('aria-pressed'), 'true');

@@ -1,0 +1,37 @@
+/* Shared browse banner, brand, account and notification entry controls. */
+#ytg-browse-top{position:fixed;inset:0 0 auto;height:var(--ytg-client-header);display:flex;align-items:center;padding-block:0;box-sizing:border-box;z-index:2101;background:var(--ytg-client-surface);backdrop-filter:none;border:0;gap:24px;padding-inline:24px}
+#ytg-browse-top .client-brand{display:flex;align-items:center;gap:12px;flex:none;min-height:48px;padding:8px 4px;background:transparent;border:0;color:var(--ytg-text);font:700 var(--ytg-font-heading)/1.1 var(--ytg-font-family);cursor:pointer;border-radius:var(--ytg-button-radius);letter-spacing:-1px}
+.client-brand .youtube-brand-icon{flex:none;object-fit:contain;width:32px;height:22px}
+.client-brand span{display:flex;align-items:baseline;gap:8px;letter-spacing:-.5px}
+.client-brand small{text-transform:uppercase;color:var(--ytg-muted);font-size:10px;letter-spacing:.4px;font-weight:400}
+#ytg-client-search{flex:1;margin:auto;min-width:0;max-width:640px}
+#ytg-browse-top .client-account{display:grid;place-items:center;flex:none;color:var(--ytg-text);cursor:pointer;border-radius:var(--ytg-pill-radius);background:var(--ytg-surface);border:0;box-shadow:none;backdrop-filter:none;width:40px;height:40px;padding:8px}
+#ytg-browse-top .notification-entry{position:relative;display:grid;place-items:center;flex:none;width:40px;height:40px;padding:8px;border:0;border-radius:var(--ytg-pill-radius);background:var(--ytg-surface);color:var(--ytg-text);cursor:pointer;overflow:visible}
+.notification-entry svg{width:24px;height:24px}
+#ytg-browse-top .client-menu{display:grid;place-items:center;flex:none;width:40px;height:40px;padding:8px;border:0;border-radius:var(--ytg-pill-radius);background:var(--ytg-surface);color:var(--ytg-text);cursor:pointer}
+.client-menu svg{width:24px;height:24px}
+.notification-count{position:absolute;right:-3px;top:-4px;padding:1px 4px;min-width:14px;border-radius:10px;background:#c00;color:white;font:600 11px/16px var(--ytg-font-family);text-align:center}
+.client-account svg{width:24px;height:24px;fill:none;stroke:none}
+.client-account img{display:block;width:100%;height:100%;object-fit:cover;border-radius:50%}
+#ytg-browse-top .client-account.has-avatar{padding:0;overflow:hidden}
+#ytg-client-search:empty{display:none}
+#ytg-browse-top button:focus-visible,html:not([data-ytg-input-mode=mouse]) #ytg-browse-top button.ytg-selected{outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:calc(0px - var(--ytg-focus-width))}
+html[data-ytg-input-mode=mouse] #ytg-browse-top button:focus{outline:none}
+@media(max-width:1000px){
+  .client-brand small{display:none}
+}
+@media(max-width:700px){
+  .client-brand span{display:none}
+}
+:where(#ytg-browse-top) :where(a,button){outline:var(--ytg-focus-width) solid transparent}
+@media(prefers-reduced-motion:no-preference){
+  #ytg-browse-top button{transition:outline-color var(--ytg-focus-duration) ease,box-shadow var(--ytg-focus-duration) ease}
+}
+html[dark] #ytg-browse-top{border-color:color-mix(in srgb,var(--ytg-border) 60%,transparent)}
+@media(hover:hover){
+  #ytg-browse-top .client-account:hover{background:var(--ytg-current-background);color:var(--ytg-text);box-shadow:none}
+}
+@media(max-width:700px){
+  #ytg-browse-top{gap:8px;padding-inline:16px}
+}
+:host([data-header-only]) #ytg-browse-top{pointer-events:auto}

@@ -11,5 +11,16 @@ const meta = computed(() => {
 });
 </script>
 <template>
-  <header class="heading" data-vue-playback><h1 class="title" role="button" tabindex="0" data-focus-id="metadata" :aria-label="t('Video description')" @click="activate?.('description')">{{ page.title || t(page.metadataFailed ? 'Video details unavailable' : 'Loading video…') }}</h1><span v-if="page.metadataFailed" class="metadata-error" role="status">{{ t('Video details unavailable') }}</span><p v-if="meta" class="meta"><ViewCountIcon />{{ meta }}</p></header>
+  <header class="heading" data-vue-playback :aria-busy="!page.metadataFailed && (!page.title || page.waiting)">
+    <h1 class="title" role="button" tabindex="0" data-focus-id="metadata" :aria-label="t('Video description')" @click="activate?.('description')">
+      <span v-if="!page.title && !page.metadataFailed" class="metadata-skeleton metadata-title-skeleton" aria-hidden="true"></span>
+      <template v-else>{{ page.title || t('Video details unavailable') }}</template>
+    </h1>
+    <span v-if="page.metadataFailed" class="metadata-error" role="status">{{ t('Video details unavailable') }}</span>
+    <p v-if="meta || (!page.metadataFailed && (page.waiting || !page.title))" class="meta">
+      <template v-if="meta"><ViewCountIcon />{{ meta }}</template>
+      <span v-else class="metadata-skeleton metadata-views-skeleton" aria-hidden="true"></span>
+    </p>
+    <span v-if="!page.title && !page.metadataFailed" class="metadata-loading-status" role="status">{{ t('Loading video…') }}</span>
+  </header>
 </template>

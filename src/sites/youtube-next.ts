@@ -9,6 +9,7 @@ import type { YTNodes } from 'youtubei.js/web';
 import type { RecommendationSnapshot } from '../../types/ports';
 
 export interface WatchNextSnapshot {
+  commentCount?: string;
   filters?: { key: string; label: string; selected: boolean }[];
   route: string;
   recommendations: RecommendationSnapshot[];
@@ -19,6 +20,18 @@ export interface WatchNextSnapshot {
   playlistTotal?: number;
 }
 type Node = Record<string, any>;
+// Read the count supplied by YouTube, never the number of loaded comment rows.
+function watchCommentCount(raw: Node): string | undefined {
+  const stack: unknown[] = [raw]; let budget = 12000;
+  while (stack.length && budget-- > 0) {
+    const node = stack.pop() as Node;
+    if (!node || typeof node !== 'object') continue;
+    const text = node.commentsEntryPointHeaderRenderer?.commentCount;
+    const count = text?.simpleText || text?.runs?.map((run: Node) => run.text || '').join('');
+    if (typeof count === 'string' && count.trim()) return count.trim().slice(0, 80);
+    stack.push(...Object.values(node));
+  }
+}
 // Scope the library's parsed response before converting presentation fields.
 export function parseWatchNext(raw: Node, currentVideo: string, continuationKind?: 'queue' | 'recommendations', playlistId?: string) {
   const page = parseYouTubePage(raw);
@@ -61,7 +74,7 @@ export function parseWatchNext(raw: Node, currentVideo: string, continuationKind
   // YouTube.js does not expose this scalar playlist metadata yet.
   const total = raw.contents?.twoColumnWatchNextResults?.playlist?.playlist?.totalVideos;
   const playlistTotal = !watch?.playlist?.is_infinite && Number.isSafeInteger(total) && total > 0 ? total as number : undefined;
-  return { chips, recommendations: records(recommendationRoots, false), queue: records(queueRoots, true), playlistTotal,
+  return { commentCount: watchCommentCount(raw), chips, recommendations: records(recommendationRoots, false), queue: records(queueRoots, true), playlistTotal,
     playlistTitle: label(watch?.playlist?.title),
     recommendationContinuation: continuationToken(recommendationRoots), queueContinuation: continuationToken(queueRoots) };
 }
@@ -129,6 +142,7 @@ export function createWatchNextService(sharedData?: WatchDataService) {
         captured.recommendations = parsed.recommendations;
         if (!filterKey) {
           captured.queue = parsed.queue;
+          captured.commentCount = parsed.commentCount;
           filterEndpoints.clear(); filterPages.clear();
           captured.filters = parsed.chips.map((chip, index) => {
             const key = `filter:${index}`; filterEndpoints.set(key, chip);

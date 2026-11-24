@@ -23,6 +23,7 @@ const collection = computed(() => {
   });
 });
 const current = computed(() => collection.value.find(entry => entry.item.selected));
+const showSkeleton = computed(() => props.loading && !props.failed && !entries.value.length && !props.collectionOpen);
 </script>
 <template>
   <div class="recommendations" :class="{ 'collection-panel': collectionOpen }" :role="fullscreenCollection ? 'dialog' : undefined" :aria-modal="fullscreenCollection ? true : undefined" :aria-label="t(collectionOpen ? 'Collection' : 'Recommendations')">
@@ -36,8 +37,15 @@ const current = computed(() => collection.value.find(entry => entry.item.selecte
       <div v-if="collectionLoading" class="collection-loading" role="status" :aria-label="t('Loading videos…')" aria-busy="true"><div v-for="index in 5" :key="index" class="collection-placeholder" aria-hidden="true"><span></span><span></span><span></span></div></div>
     </template>
     <PlaybackCard v-if="!collectionOpen" v-for="entry in entries" :key="entry.id" :item="entry.item" :focus-id="entry.id" @open="openVideo" />
+    <template v-if="showSkeleton">
+      <span class="recommendation-loading-status" role="status">{{ t('Loading videos…') }}</span>
+      <div v-for="index in 6" :key="`skeleton:${index}`" class="card recommendation-skeleton" aria-hidden="true">
+        <div class="card-thumbnail"></div>
+        <div class="card-title"><span></span><span></span></div>
+        <div class="card-meta"><span></span></div>
+      </div>
+    </template>
   </div>
   <LoadStatus class="empty" :class="{ 'filtered-empty': !collectionOpen && !!filters?.length }" :failed="failed && !entries.length && !collectionOpen"
-    :loading="loading && !entries.length && !collectionOpen" :loading-message="t('Loading videos…')"
     error-role="status" :error-message="t('Recommendations are unavailable. Playback continues normally.')" />
 </template>

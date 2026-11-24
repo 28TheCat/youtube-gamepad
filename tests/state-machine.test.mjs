@@ -126,6 +126,18 @@ test('page search closes directly and editing shortcuts cannot generate playback
   assert.equal(effects(store.dispatch({ type: 'MENU_INPUT', action: 'back' })), 'closeMenu');
 });
 
+test('description links use horizontal navigation while vertical input scrolls', () => {
+  const store = createStore();
+  store.dispatch({ type: 'WATCH_PANEL', panel: 'description' });
+  const input = action => store.dispatch({ type: 'WATCH_INPUT', action, commentCount: 2, scrollDelta: 0 });
+  assert.equal(effects(input('right')), 'focus');
+  assert.equal(store.state.watch.panelIndex, 1);
+  assert.equal(effects(input('confirm')), 'panelClick');
+  assert.equal(effects(input('down')), 'panelScroll');
+  assert.equal(store.state.watch.panelIndex, 1);
+  input('left'); assert.equal(store.state.watch.panelIndex, 0);
+});
+
 test('panel scroll observations keep the selected comment until its body is visible', () => {
   const store = createStore();
   store.dispatch({ type: 'WATCH_PANEL', panel: 'comments' });
@@ -277,4 +289,17 @@ test('windowed timeline adjustment and modal panels retain exclusive directional
   store.dispatch({ type: 'WATCH_PANEL', panel: 'playlists' });
   assert.equal(input('right').disposition, 'blocked');
   assert.equal(store.state.watch.panel, 'playlists');
+});
+
+test('opening a panel ends progress adjustment and closing it does not resume seeking', () => {
+  const store = createStore(createState('/watch?v=first'));
+  store.dispatch({ type: 'MODE', value: 'controls', route: '/watch?v=first' });
+  store.dispatch({ type: 'WATCH_FOCUS', region: 'progress', index: 0 });
+  store.dispatch({ type: 'WATCH_INPUT', action: 'confirm', controlCount: 12 });
+  assert.equal(store.state.watch.adjusting, true);
+  store.dispatch({ type: 'WATCH_PANEL', panel: 'description' });
+  assert.equal(store.state.watch.adjusting, false);
+  assert.equal(effects(store.dispatch({ type: 'WATCH_INPUT', action: 'back' })), 'closePanel');
+  assert.equal(store.state.watch.row, 'progress');
+  assert.equal(effects(store.dispatch({ type: 'WATCH_INPUT', action: 'right' })), '');
 });

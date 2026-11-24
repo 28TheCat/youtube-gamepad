@@ -6,7 +6,7 @@
   display:grid;gap:4px;box-sizing:border-box;max-width:calc(100vw - 40px);
   padding:10px 16px;border-radius:12px;
   background:var(--ytg-overlay-surface,#252832);color:var(--ytg-overlay-text,#fff);
-  box-shadow:0 4px 20px #0004;font:14px/1.5 var(--ytg-font-family,system-ui);
+  box-shadow:0 4px 20px #0004;font:var(--ytg-font-small)/1.5 var(--ytg-font-family,system-ui);
 }
 html.ytg-gamepad-input,html.ytg-gamepad-input *{cursor:none!important}
 html.ytg-gamepad-input :is(ytd-rich-item-renderer,ytd-rich-grid-media,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,yt-lockup-view-model){background-color:transparent!important;box-shadow:none!important}
@@ -46,7 +46,7 @@ html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-top{displ
 html[data-ytg-playback-layout="windowed"].ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-bottom{display:block!important;opacity:1!important;visibility:visible!important;pointer-events:auto!important}
 html[data-ytg-playback-layout="windowed"].ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-chrome-controls{opacity:1!important;visibility:visible!important}
 html[data-ytg-playback-layout="windowed"].ytg-watch-active #movie_player .ytp-button{transform:none!important}
-html[data-ytg-playback-layout="windowed"].ytg-watch-active #movie_player .ytg-native-control-selected{outline:3px solid #fff!important;outline-offset:-3px!important}
+html[data-ytg-playback-layout="windowed"].ytg-watch-active #movie_player .ytg-native-control-selected{outline:var(--ytg-focus-width) solid #fff!important;outline-offset:calc(0px - var(--ytg-focus-width))!important}
 /* Recommendations belong to the gamepad surface, including after playback ends. */
 html.ytg-watch-active:not([data-ytg-native]) #movie_player :is(.html5-endscreen,.ytp-endscreen-content,.ytp-autonav-endscreen,.ytp-upnext,.ytp-ce-element,.ytp-fullscreen-grid,.ytp-fullscreen-grid-stills-container,.ytp-modern-videowall-still){display:none!important}
 html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-settings-menu{z-index:2147483647!important;bottom:12px!important;right:12px!important;max-width:calc(100% - 24px)!important;max-height:calc(100% - 24px)!important;overflow:auto;font-size:20px!important}
@@ -71,11 +71,6 @@ html[data-ytg-native] #ytg-watch{display:none!important}
 html.ytg-watch-layout body{background:var(--ytg-background)!important}
 html.ytg-watch-layout #movie_player .caption-window.ytp-caption-window-bottom{bottom:10%!important}
 
-
-/* Cover native page rearrangement without hiding the playing media below it. */
-#ytg-watch-transition{position:fixed!important;left:0!important;top:var(--ytg-watch-top,0px)!important;width:var(--ytg-watch-width,100vw)!important;height:var(--ytg-watch-height,100vh)!important;z-index:2147483646!important;background:var(--ytg-background,#101010)!important;pointer-events:none!important}
-#ytg-watch-transition :is(img,canvas){position:absolute!important;left:0!important;top:0!important;width:100%!important;height:100%!important;object-fit:contain!important;background:#101010!important}
-#ytg-watch-transition [hidden]{display:none!important}
 
 /* Adaptation errors keep the client surface until the user explicitly exits. */
 html.ytg-theater:not([data-ytg-browse-mode="youtube"])[data-ytg-adaptation="fallback"] ytd-page-manager{visibility:hidden!important}

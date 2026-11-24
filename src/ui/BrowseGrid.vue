@@ -27,7 +27,7 @@ const feedStatus = computed(() => ({
   loadingMessage: t('Loading videos…'), errorMessage: t(store.error), emptyMessage: t('此分类暂无视频'),
   retryable: true, retryLabel: t('重试')
 }));
-// Share row ordering with the virtual feed so Shorts never interrupt a partial row.
+// Both render paths keep separate Shorts sections between complete video rows.
 const feedEntries = computed(() => {
   const entries: ({ id: string; item: BrowseItem } | { id: string; shorts: readonly BrowseItem[] })[] = [];
   for (const row of rows.value) {
@@ -330,7 +330,7 @@ onBeforeUnmount(() => {
     <p v-if="store.snapshot.filteredCount" role="status" class="feed-filter-status">{{ t('{count} videos hidden by home filters.', { count: store.snapshot.filteredCount }) }}</p>
     <p v-if="store.snapshot.autoLoadBlocked" role="status" class="feed-filter-status">{{ t('Automatic loading paused. Load more videos or adjust home filters.') }}</p>
     <LoadStatus v-if="!store.snapshot.items.length" :class="{ 'feed-loading-status': feedStatus.loading }" v-bind="feedStatus" @retry="retry" />
-    <div ref="cards" class="cards" :data-horizontal="layout.horizontal" :style="{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`, rowGap: virtual ? '0px' : undefined, '--ytg-cover-width': `${layout.cover}%`, '--ytg-cover-flex': layout.cover, '--ytg-info-flex': 100 - layout.cover }">
+    <div ref="cards" class="cards" :data-horizontal="layout.horizontal" :style="{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`, rowGap: virtual ? '0px' : undefined, '--ytg-cover-flex': layout.cover, '--ytg-info-flex': 100 - layout.cover }">
       <template v-if="virtual">
         <template v-for="piece in pieces" :key="piece.key">
           <div v-if="!piece.row" aria-hidden="true" data-virtual-spacer :style="{ gridColumn: '1 / -1', height: `${piece.height}px` }"></div>

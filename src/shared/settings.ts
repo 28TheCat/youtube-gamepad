@@ -3,9 +3,10 @@ import { videoGridDefaults, normalizeVideoGrid } from './video-grid';
 import { playbackParameterDefaults, normalizePlaybackParameters } from './playback-settings';
 import { languageDefault, normalizeLanguage } from './i18n';
 import { normalizePlaybackLayout, type PlaybackLayout } from './playback-layout';
+import { normalizeDisplayDensity, type DisplayDensity } from './display-density';
 export const settingDefaults = {
   ...playbackParameterDefaults, ...homeFilterDefaults,
-  playbackLayout: 'fullscreen' as PlaybackLayout,
+  playbackLayout: 'fullscreen' as PlaybackLayout, displayDensity: 'standard' as DisplayDensity,
   ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, autoFullscreen: true,
   deadzone: 0.35, repeatDelay: 150, repeatInterval: 80
 };
@@ -17,6 +18,7 @@ export function normalizeSettings(raw: Record<string, unknown>): Settings {
   const values = { ...settingDefaults };
   values.playbackLayout = normalizePlaybackLayout(raw.playbackLayout);
   values.uiLanguage = normalizeLanguage(raw.uiLanguage);
+  values.displayDensity = normalizeDisplayDensity(raw.displayDensity);
   for (const key of ['enabled', 'theater', 'autoFullscreen', 'rightHandMode'] as const)
     if (typeof raw[key] === 'boolean') values[key] = raw[key];
   if (typeof raw.autoFullscreen !== 'boolean') values.autoFullscreen = values.theater;

@@ -1,5 +1,5 @@
 import { pageQuery, pageQueryAll } from '../shared/page-dom';
-import { searchHref } from '../shared/explore-pages';
+import { searchHref, pageRouteMode } from '../shared/explore-pages';
 import { PAGE_WATCH_NEXT, PAGE_COMMENTS, PAGE_WATCH_INFO } from '../bridge/page-protocol';
 import type { Capability, ModuleFactory, NavigationPolicy, SearchTarget, SiteDependencies, SitePort, WatchAction, WatchPageSnapshot } from '../../types/ports';
 
@@ -348,6 +348,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       page.title = details?.title || '';
       page.channel = details?.author || '';
       page.description = details?.shortDescription || '';
+      page.descriptionRuns = details?.descriptionRuns;
       page.viewCount = details?.viewCount ?? null;
       page.avatar = info?.avatar || '';
       page.channelBadge = info?.channelBadge;
@@ -359,6 +360,8 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
     }
     page.waiting = !!stale || info?.loading === true && !details;
     page.metadataFailed = metadataFailed;
+    page.metadataStatus = metadataFailed ? 'failed' : details ? 'ready' : 'loading';
+    page.recommendationsStatus = 'loading';
     if (details?.videoId === id && !metadataFailed) confirmedMetadata = { route: route.key, page: { ...page }, channelId };
     watchFeatures.metadata = metadataFailed ? 'failed' : details ? 'available' : 'missing';
     watchFeatures.channel = channelId ? 'available' : 'missing';
@@ -369,7 +372,9 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
       nextDestinations.clear();
       const next = optionalFeature('recommendations', () => pageAccess.readWatchNext!(), () => undefined);
       if (next?.route === route.key) {
+        page.commentCount = next.commentCount;
         page.recommendationsLoading = next.loading;
+        page.recommendationsStatus = next.failed ? 'failed' : next.loading && !next.recommendations.length && !next.queue.length ? 'loading' : 'ready';
         page.recommendationFilters = next.filters;
         page.queue = next.queue;
         page.playlistTitle = next.playlistTitle;
@@ -380,6 +385,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
         watchFeatures.recommendations = next.failed ? 'failed' : 'available';
       } else if (watchFeatures.recommendations !== 'failed') watchFeatures.recommendations = 'missing';
     } else watchFeatures.recommendations = 'missing';
+    page.commentCount = pageAccess?.readComments?.()?.commentCount || page.commentCount;
     return page;
   }
   function loadRecommendations(kind?: 'queue' | 'recommendations') { return pageAccess?.moreWatchNext?.(kind) || false; }
@@ -562,7 +568,6 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
         progress: { exits: { down: ['controls'] } }
       },
       getSection(el) {
-        if (el?.matches?.('[data-ytg-page-mode]')) return 'header';
         if (el?.closest<HTMLElement>('#ytg-search-host')) return 'searchEntry';
         if (el?.closest<HTMLElement>('[data-ytg-category]')) return 'categories';
         if (el?.closest<HTMLElement>('#ytg-browse-sidebar')) return 'sidebar';
@@ -602,6 +607,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
         return labels.length ? JSON.stringify(labels) : null;
       },
       filterCandidates(list) {
+        if (pageRouteMode(location.pathname + location.search) === 'native') return list;
         return list.filter((el) => {
           // Watch navigation stays with playback and recommendations; the
           // masthead belongs to the browse page and must not capture Up.
@@ -616,11 +622,15 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
           return true;
         });
       },
-      selectors: '[data-ytg-search-input],[data-ytg-page-mode],#ytg-browse-sidebar a[href],#ytg-subscription-channels a[href],#ytg-browse-grid a[data-browse-id],#ytg-browse-grid button,#ytg-browse-top button,[data-ytg-category],.ytp-button,.ytp-progress-bar',
+      get selectors() {
+        if (pageRouteMode(location.pathname + location.search) === 'native')
+          return 'a[href],button,input,select,textarea,[role="button"],[role="link"],[role="checkbox"],[role="switch"],[role="slider"],[tabindex="0"]';
+        return '[data-ytg-search-input],#ytg-browse-sidebar a[href],#ytg-subscription-channels a[href],#ytg-browse-grid a[data-browse-id],#ytg-browse-grid button,#ytg-browse-top button,[data-ytg-category],.ytp-button,.ytp-progress-bar';
+      },
       overlays: nativeLayerSelector,
       getPageHint() {
         const page = document.documentElement;
-        if (page.getAttribute('data-ytg-browse-mode') === 'youtube' || page.getAttribute('data-ytg-native') != null ||
+        if (pageRouteMode(location.pathname + location.search) === 'native' || page.getAttribute('data-ytg-browse-mode') === 'youtube' || page.getAttribute('data-ytg-native') != null ||
             location.pathname.startsWith('/shorts/')) return '';
         if (location.pathname === '/watch') {
           const video = getVideo();
@@ -697,6 +707,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
     inspectWatchCapabilities, inspectOptionalCapabilities, readWatchFeatures: () => ({ ...watchFeatures }), restoreNativeInterface,
     readRoute, readPlayback, readWatchPage, readComments,
     readCommentsStatus: () => pageAccess?.readComments?.(),
+    likeComment: key => pageAccess?.commentLike?.(key) || Promise.resolve(false),
     postComment: (text, key) => pageAccess?.commentPost?.(text, key) || Promise.resolve(false),
     sortComments: sort => pageAccess?.commentSort?.(sort) === true,
     openRecommendation, loadRecommendations, selectRecommendationFilter: key => pageAccess?.selectRecommendationFilter?.(key, readRoute().key) || false, openChannel, performWatchAction, expandReplies, translateComment, loadComments,

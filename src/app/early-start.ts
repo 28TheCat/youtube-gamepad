@@ -1,4 +1,4 @@
-import { isNativeFlowRoute } from '../shared/explore-pages';
+import { pageRouteMode } from '../shared/explore-pages';
 // Keep this document_start entry independent of Vue and the main application.
 const key = Symbol.for('yt-gamepad.early-start');
 interface Boot { contentReady(): void; destroy(): void }
@@ -15,7 +15,7 @@ export function abortEarlyContent() {
 export function startEarly() {
   const owner = window as BootWindow;
   owner[key]?.destroy();
-  if (isNativeFlowRoute(location.pathname)) return;
+  if (pageRouteMode(location.pathname + (location.search || '')) === 'native') return;
   let stopped = false;
   let root: HTMLElement | null = null;
   let revealFrame: number | undefined;

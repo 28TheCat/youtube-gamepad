@@ -3,6 +3,7 @@ import InterfaceIcon from '../ui/InterfaceIcon.vue';
 import LoadStatus from '../ui/LoadStatus.vue';
 import { useI18n } from '../shared/use-i18n';
 const { t } = useI18n();
+import DisplayDensitySettings from './DisplayDensitySettings.vue';
 import VideoGridSettings from './VideoGridSettings.vue';
 import PlaybackParameterSettings from './PlaybackParameterSettings.vue';
 import HomeFilterSettings from './HomeFilterSettings.vue';
@@ -59,6 +60,7 @@ onBeforeUnmount(model.dispose);
       <PlaybackParameterSettings :values="state.values" :disabled="state.saving" gamepad @save="model.savePlayback" />
     </template>
     <template v-if="state.category === 'display'">
+      <DisplayDensitySettings :value="state.values.displayDensity" :disabled="state.saving" @change="model.setDisplayDensity" />
       <button type="button" data-setting="theater" :disabled="state.saving" :aria-pressed="state.values.theater"
         @click="model.toggle('theater')">{{ t("TV layout ·") }} {{ state.values.theater ? t('On') : t('Off') }}</button>
       <button type="button" data-setting="autoFullscreen" :disabled="state.saving" :aria-pressed="!!state.values.autoFullscreen"

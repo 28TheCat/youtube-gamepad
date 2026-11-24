@@ -44,7 +44,7 @@ export function releaseFiles(root, { source = false } = {}) {
     ...manifest.content_scripts.flatMap(entry => [...entry.js, ...(entry.css || [])]),
     controllerManifest, 'assets/controller/template.json', 'licenses/nicefrog-gamepad-LICENSE.txt', ...Object.keys(controllerAssets.files),
     'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/material-icons-LICENSE.txt', 'licenses/kenney-input-prompts-LICENSE.txt',
-    'licenses/vue-LICENSE.txt', 'licenses/pinia-LICENSE.txt', 'licenses/mingcute-LICENSE.txt',
+    'licenses/vue-LICENSE.txt', 'licenses/pinia-LICENSE.txt', 'licenses/mingcute-LICENSE.txt', 'licenses/bewlycat-LICENSE.txt',
     'licenses/youtubei-LICENSE.txt', 'licenses/fflate-LICENSE.txt', 'licenses/meriyah-LICENSE.txt',
     'licenses/protobuf-LICENSE.txt', 'licenses/protobuf-BSD-LICENSE.txt'])].sort();
   for (const file of files) {

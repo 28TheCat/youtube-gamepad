@@ -4,14 +4,14 @@ const { t } = useI18n();
 import type { ControllerStyle } from '../../types/ports.js';
 import type { SearchView, SearchViewActions } from './search-view';
 import SearchDiscovery from './SearchDiscovery.vue';
-defineProps<{ view: SearchView; actions: SearchViewActions; controllerStyle: ControllerStyle }>();
-const vHint = { mounted(el: HTMLElement, binding: { value: ControllerStyle }) { binding.value.hint(el, ' · R3 Candidates · Y Confirm · LB / RB Page'); } };
+const props = defineProps<{ view: SearchView; actions: SearchViewActions; controllerStyle: ControllerStyle }>();
+const vHint = { mounted(el: HTMLElement, binding: { value: string }) { props.controllerStyle.hint(el, binding.value); }, updated(el: HTMLElement, binding: { value: string }) { props.controllerStyle.hint(el, binding.value); } };
 </script>
 
 <template>
   <div id="recent">
     <div id="composition" :hidden="!view.chinese || !view.composing">
-      <p>{{ t("Pinyin:") }} {{ view.composing }}<span v-if="view.composing" v-hint="controllerStyle"></span></p>
+      <p>{{ t("Pinyin:") }} {{ view.composing }}<span v-if="view.composing" v-hint="' · R3 Candidates · Y Confirm' + (view.previous || view.next ? ' · LB / RB Page' : '')"></span></p>
       <div v-if="view.composing" class="candidate-row">
         <button v-for="(candidate, index) in view.candidates" :key="`${candidate.key}:${candidate.text}:${candidate.consumed}`"
           :data-focus-id="`candidate:${candidate.key}:${candidate.text}`" data-row="-1" :data-column="index"

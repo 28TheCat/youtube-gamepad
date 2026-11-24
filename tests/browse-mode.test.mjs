@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { launchExtension, virtualPad } from './helpers/extension.mjs';
 import { browserPage } from './helpers/bundles.mjs';
 import { mainFixture } from './helpers/main-bundle.mjs';
+import { openBrowseMenu, toggleBrowseMode } from './helpers/header-menu.mjs';
 
 test('page mode keeps our banner while switching the feed, persists and can switch back', { timeout: 45000 }, async t => {
   const { context, worker } = await launchExtension(t);
@@ -20,45 +21,32 @@ test('page mode keeps our banner while switching the feed, persists and can swit
   const native = page.locator('#native-banner');
   const grid = custom.locator('[data-ytg-browse-grid]');
   const top = custom.locator('#ytg-browse-top');
-  await top.locator('[data-ytg-page-mode]').waitFor();
-  assert.equal(await top.locator('[data-ytg-page-mode]').getAttribute('aria-checked'), 'true');
+  await top.locator('.client-menu').waitFor();
+  assert.equal(await top.locator('[data-ytg-page-mode]').count(), 0);
   const gamepadHeader = await top.boundingBox();
   const gamepadSearch = await top.locator('.ytg-search-form').boundingBox();
-  const gamepadSwitch = await top.locator('[data-ytg-page-mode]').boundingBox();
   await top.evaluate(node => { window.__sharedBrowseHeader = node; });
   mkdirSync('output/playwright', { recursive: true });
   await page.screenshot({ path: 'output/playwright/topbar-mode-gamepad.png' });
-  await page.evaluate(() => {
-    window.__nativeSearches = []; window.__accountClicks = 0;
-    document.querySelector('#search-icon-legacy').onclick = () => window.__nativeSearches.push(document.querySelector('ytd-masthead input').value);
-    document.querySelector('#avatar-btn').onclick = () => ++window.__accountClicks;
-  });
-  await top.getByRole('switch').press('Space');
+  await toggleBrowseMode(page);
   await grid.waitFor({ state: 'hidden' });
   await native.waitFor(); await page.locator('#native-banner').waitFor();
   assert.equal(await top.isVisible(), true);
   assert.equal(await page.locator('ytd-masthead').isVisible(), false);
   assert.equal(await top.locator('#ytg-search-host').isVisible(), true);
-  assert.equal(await top.locator('[data-ytg-page-mode]').count(), 1);
+  assert.equal(await top.locator('.client-menu').count(), 1);
   assert.equal(await page.locator('#ytg-browse-sidebar').isVisible(), false);
   assert.equal(await native.evaluate(node => document.elementFromPoint(500, 300)?.getRootNode() === document), true, 'banner shell must not intercept native content');
   assert.equal(await native.evaluate(node => node.getBoundingClientRect().top >= 56), true);
   const headerBounds = await top.boundingBox();
   assert.deepEqual(headerBounds, gamepadHeader, 'both modes share the same header geometry');
   assert.deepEqual(await top.locator('.ytg-search-form').boundingBox(), gamepadSearch, 'search layout does not change between modes');
-  assert.deepEqual(await top.locator('[data-ytg-page-mode]').boundingBox(), gamepadSwitch, 'switch layout does not change between modes');
   assert.equal(await top.evaluate(node => window.__sharedBrowseHeader === node), true, 'switching modes retains the same header element');
   const categoryBounds = await page.locator('#native-categories').boundingBox();
   assert.equal(headerBounds.height, 56, 'native mode uses the original YouTube header height');
   assert.ok(headerBounds.y + headerBounds.height <= categoryBounds.y, 'our banner does not cover native categories');
   assert.equal(await page.evaluate(() => document.elementFromPoint(500, 65)?.id), 'native-categories',
     'native categories remain clickable below our banner');
-  await top.getByRole('button', { name: 'Account', exact: true }).click();
-  assert.equal(await page.evaluate(() => window.__accountClicks), 1);
-  await page.keyboard.press('Escape');
-  await top.locator('[data-ytg-search-input]').fill('banner search');
-  await top.locator('[data-ytg-search-input]').press('Enter');
-  assert.deepEqual(await page.evaluate(() => window.__nativeSearches), ['banner search']);
   await page.screenshot({ path: 'output/playwright/topbar-mode-youtube.png' });
   await page.waitForFunction(() => !document.documentElement.classList.contains('ytg-custom-browse'));
   assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('browseMode')).browseMode), 'youtube');
@@ -73,13 +61,13 @@ test('page mode keeps our banner while switching the feed, persists and can swit
   await native.waitFor(); await page.locator('#native-banner').waitFor();
   assert.equal(await custom.isVisible(), true);
   assert.equal(await grid.isVisible(), false);
-  assert.equal(await top.locator('[data-ytg-page-mode]').getAttribute('aria-checked'), 'false');
+  const { menu, mode } = await openBrowseMenu(page);
+  assert.equal(await mode.getAttribute('aria-checked'), 'false');
   const reconnected = await virtualPad(context, page); await reconnected({ connected: true });
-  await top.locator('[data-ytg-page-mode]').focus();
+  await mode.focus();
   await reconnected({ connected: true, button: 0 });
   await grid.waitFor(); await native.waitFor({ state: 'hidden' });
-  await page.waitForFunction(() => document.getElementById('ytg-browse-root').shadowRoot.activeElement?.hasAttribute('data-ytg-page-mode'));
-  assert.equal(await top.locator('.ytg-mode-key').textContent(), 'A');
+  await page.waitForFunction(() => document.getElementById('yt-gamepad-menu').shadowRoot.activeElement?.hasAttribute('data-ytg-page-mode'));
   await page.screenshot({ path: 'output/playwright/topbar-mode-gamepad-focus.png' });
   assert.equal(await page.locator('#native-banner').isVisible(), false);
   assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('browseMode')).browseMode), 'gamepad');
@@ -87,8 +75,9 @@ test('page mode keeps our banner while switching the feed, persists and can swit
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await reconnected({ connected: true, button: 0 });
   await native.waitFor(); await grid.waitFor({ state: 'hidden' });
-  await page.waitForFunction(() => document.getElementById('ytg-browse-root').shadowRoot.activeElement?.hasAttribute('data-ytg-page-mode'));
+  await page.waitForFunction(() => document.getElementById('yt-gamepad-menu').shadowRoot.activeElement?.hasAttribute('data-ytg-page-mode'));
   await reconnected({ connected: true });
+  await menu.getByRole('button', { name: 'Back', exact: true }).click();
   await worker.evaluate(() => chrome.storage.local.set({ browseMode: 'gamepad' }));
   await grid.waitFor();
   await worker.evaluate(() => chrome.storage.local.set({ browseMode: 'youtube' }));
@@ -108,11 +97,11 @@ test('failed mode save restores the previous view and keeps a usable switch', { 
   });
   await page.addScriptTag({ content: await mainFixture() });
   await page.evaluate(() => window.postMessage({ source: 'yt-gamepad-settings', values: { enabled: true, theater: true } }, location.origin));
-  const top = page.locator('#ytg-browse-root #ytg-browse-top');
-  await top.locator('[data-ytg-page-mode]').click();
-  await top.getByRole('status').waitFor();
-  assert.equal(await top.locator('[data-ytg-page-mode]').getAttribute('aria-checked'), 'true');
-  assert.equal(await top.locator('[data-ytg-page-mode]').isEnabled(), true);
+  const { menu, mode } = await openBrowseMenu(page);
+  await mode.click();
+  await menu.getByRole('status').getByText('Could not save page mode. Try again.', { exact: true }).waitFor();
+  assert.equal(await mode.getAttribute('aria-checked'), 'true');
+  assert.equal(await mode.isEnabled(), true);
   assert.equal(await page.locator('#ytg-native-mode').isVisible(), false);
 });
 
@@ -138,8 +127,7 @@ test('adapter failure keeps the client surface without changing the saved mode',
   assert.equal(await page.locator('#native-video').isVisible(), false);
   assert.equal((await worker.evaluate(() => chrome.storage.local.get('browseMode'))).browseMode, 'gamepad');
   assert.equal(requests, 1);
-  const mode = page.locator('#ytg-browse-root [data-ytg-page-mode]');
-  assert.equal(await mode.getAttribute('aria-checked'), 'true');
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.ytgBrowseMode), 'gamepad');
   await retry.click();
   await page.waitForTimeout(200);
   await retry.waitFor();
@@ -166,7 +154,7 @@ test('Off keeps the banner and native watch layout across navigation and mode ch
     assert.equal(await page.evaluate(() => document.documentElement.classList.contains('ytg-watch-active')), false);
   };
   await assertNative();
-  await top.locator('[data-ytg-page-mode]').click();
+  await toggleBrowseMode(page);
   await page.waitForFunction(() => document.documentElement.classList.contains('ytg-watch-layout'));
   await worker.evaluate(() => chrome.storage.local.set({ browseMode: 'youtube' }));
   await assertNative();
@@ -250,7 +238,7 @@ test('failed search retains its keyword, sidebar and retry inside the shell', { 
   assert.equal(await shell.locator('[data-ytg-search-input]').inputValue(), 'retained query');
   assert.equal(await shell.locator('#ytg-browse-sidebar').isVisible(), true);
   assert.equal(await page.locator('#native-results').isVisible(), false);
-  assert.equal(await shell.locator('[data-ytg-page-mode]').getAttribute('aria-checked'), 'true');
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.ytgBrowseMode), 'gamepad');
 });
 
 

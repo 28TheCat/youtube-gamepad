@@ -1,6 +1,5 @@
-import { nextTick, reactive } from 'vue';
+import { reactive } from 'vue';
 import type { CoreModule, Runtime } from '../../types/ports';
-import { pageActiveElement, pageQueryAll } from '../shared/page-dom';
 
 export type BrowseMode = 'gamepad' | 'youtube';
 export interface BrowseModeState { mode: BrowseMode; busy: boolean; error: string }
@@ -17,8 +16,6 @@ export function mountBrowseMode(runtime: Runtime, core: CoreModule) {
   // These handlers run in ISOLATED; page messages never write this preference.
   async function change(mode: BrowseMode) {
     if (lifecycle.destroyed || state.busy || state.mode === mode) return;
-    const keepFocus = root.classList.contains('ytg-gamepad-input') &&
-      (pageActiveElement()?.hasAttribute('data-ytg-page-mode') || core.current?.hasAttribute('data-ytg-page-mode'));
     const previous = state.mode; state.error = ''; state.busy = true; apply(mode);
     try {
       if (typeof chrome !== 'undefined' && chrome.storage?.local)
@@ -29,13 +26,6 @@ export function mountBrowseMode(runtime: Runtime, core: CoreModule) {
     } finally {
       if (!lifecycle.destroyed) {
         state.busy = false;
-        if (keepFocus) {
-          await nextTick();
-          lifecycle.frame(() => {
-            const target = pageQueryAll<HTMLElement>('[data-ytg-page-mode]').find(node => node.getBoundingClientRect().width > 0);
-            if (target) { core.refresh(); core.focus(target); }
-          });
-        }
       }
     }
   }

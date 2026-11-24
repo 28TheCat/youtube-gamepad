@@ -1,15 +1,23 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useI18n } from '../shared/use-i18n';
 const { t } = useI18n();
 import type { ControllerStyle } from '../../types/ports.js';
 import type { SearchView, SearchViewActions } from './search-view';
 import SearchKeyboard from './SearchKeyboard.vue';
 import CandidateList from './CandidateList.vue';
-defineProps<{ view: SearchView; actions: SearchViewActions; controllerStyle: ControllerStyle }>();
+const props = defineProps<{ view: SearchView; actions: SearchViewActions; controllerStyle: ControllerStyle }>();
 const vBadge = { mounted(el: HTMLElement, binding: { value: [ControllerStyle, string] }) { binding.value[0].badge(el, binding.value[1]); } };
-const shortcuts = [['D-pad / left stick', 'Select'], ['A', 'Type'], ['X', 'Delete · Hold to repeat'],
-  ['Y', 'Space'], ['LB / RB', 'Move cursor'], ['L3', 'Symbols'], ['R3', 'Candidates / history'],
-  ['LT', 'Letter case'], ['RT', 'Search'], ['B', 'Back'], ['Start', 'Close']];
+const shortcuts = computed(() => {
+  const view = props.view;
+  if (view.choosingLanguage) return [['D-pad / left stick', 'Select'], ['A', 'Confirm'], ['B', 'Back'], ['Start', 'Close']];
+  return [['D-pad / left stick', 'Select'], ['A', view.focusKind === 'candidate' ? 'Confirm candidate' : view.focusKind === 'history' ? 'Search' : 'Type'],
+    ...(view.query || view.composing ? [['X', 'Delete · Hold to repeat']] : []),
+    ['Y', view.composing ? 'Confirm candidate' : 'Space'],
+    ...(view.composing ? (view.previous || view.next ? [['LB / RB', 'Change page']] : []) : view.query ? [['LB / RB', 'Move cursor']] : []),
+    ['L3', 'Symbols'], ...(view.composing || view.recent.length ? [['R3', 'Candidates / history']] : []),
+    ['LT', 'Letter case'], ...(!view.composing && view.query.trim() ? [['RT', 'Search']] : []), ['B', 'Back'], ['Start', 'Close']];
+});
 </script>
 
 <template>

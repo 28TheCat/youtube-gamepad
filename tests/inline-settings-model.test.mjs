@@ -28,7 +28,7 @@ async function setup({ failLoad = false, invalidatedAt = '' } = {}) {
   const context = {
     console, setTimeout, clearTimeout,
     location: { pathname: '/' },
-    document: { documentElement: { dataset: {} }, createElement: () => ({}) },
+    document: { documentElement: { dataset: {}, setAttribute() {} }, createElement: () => ({}) },
     MutationObserver: class { observe() {} disconnect() { ++disconnected; } },
     chrome: { storage: {
       onChanged: { addListener(fn) {
@@ -188,3 +188,18 @@ for (const invalidatedAt of ['read', 'listener']) {
     assert.equal(s.disconnected, 1);
   });
 }
+
+
+test('display density saves, normalizes external changes and retains selection on write failure', async () => {
+  const { model, saved, change, failWrites } = await setup();
+  assert.equal(model.state.values.displayDensity, 'standard');
+  await model.setDisplayDensity('tv');
+  assert.equal(saved.displayDensity, 'tv');
+  assert.equal(model.state.values.displayDensity, 'tv');
+  failWrites();
+  await model.setDisplayDensity('standard');
+  assert.equal(model.state.values.displayDensity, 'tv');
+  change({ displayDensity: 'invalid' });
+  assert.equal(model.state.values.displayDensity, 'standard');
+  model.dispose();
+});

@@ -31,7 +31,10 @@ test('grid preferences save, resize the real browse surface and reset independen
   assert.equal(await cards.getAttribute('data-horizontal'), 'true');
   await options.locator('#gridDoubleCover').fill('65');
   await options.locator('#gridDoubleCover').dispatchEvent('change');
-  await page.waitForFunction(() => window.__pageDOM.querySelector('#ytg-browse-grid .cards')?.style.getPropertyValue('--ytg-cover-width') === '65%');
+  await page.waitForFunction(() => {
+    const style = window.__pageDOM.querySelector('#ytg-browse-grid .cards')?.style;
+    return style?.getPropertyValue('--ytg-cover-flex') === '65' && style.getPropertyValue('--ytg-info-flex') === '35';
+  });
   await options.locator('[data-setting="gridLayout-adaptive"]').click();
   await page.setViewportSize({ width: 1072, height: 900 });
   await page.waitForFunction(() => window.__pageDOM.querySelector('#ytg-browse-grid .cards')?.style.gridTemplateColumns === 'repeat(3, minmax(0px, 1fr))');

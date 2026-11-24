@@ -1,4 +1,4 @@
-import { isNativeFlowRoute } from '../shared/explore-pages';
+import { pageRouteMode } from '../shared/explore-pages';
 import type { BrowseDependencies, ModuleFactory } from '../../types/ports';
 export let YTGamepadBrowseModule!: ModuleFactory<BrowseDependencies,{destroy():void}>;
 // Synchronize the custom browse surface with mode and route changes.
@@ -8,10 +8,11 @@ export let YTGamepadBrowseModule!: ModuleFactory<BrowseDependencies,{destroy():v
     create({ runtime, core, isMenuOpen, mountGrid, prepareVideo }: import('../../types/ports.js').BrowseDependencies) {
   const lifecycle = runtime.scope('browse');
   function sync() {
+    document.documentElement.setAttribute('data-ytg-route-mode', pageRouteMode(location.pathname + location.search));
     const enabled = document.documentElement.classList.contains('ytg-theater') &&
       !['youtube', 'loading'].includes(document.documentElement.getAttribute('data-ytg-browse-mode') || '') &&
       !document.documentElement.hasAttribute('data-ytg-native') &&
-      !isNativeFlowRoute(location.pathname) && location.pathname !== '/watch' && !location.pathname.startsWith('/shorts/');
+      pageRouteMode(location.pathname + location.search) === 'browse';
     if (document.documentElement.classList.contains('ytg-browse') !== enabled)
       document.documentElement.classList.toggle('ytg-browse', enabled);
   }
@@ -23,6 +24,7 @@ export let YTGamepadBrowseModule!: ModuleFactory<BrowseDependencies,{destroy():v
   if (mountGrid) lifecycle.cleanup(mountGrid({ runtime, core, isMenuOpen, prepareVideo }));
   lifecycle.cleanup(() => {
     document.documentElement.classList.remove('ytg-browse');
+    document.documentElement.removeAttribute('data-ytg-route-mode');
   });
   return { destroy: lifecycle.destroy };
   } };

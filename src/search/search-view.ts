@@ -1,6 +1,7 @@
 import type { ControllerStyle, KeyboardKey, PinyinCandidate } from '../../types/ports.js';
 
 export interface SearchView {
+  focusKind?: 'key' | 'candidate' | 'history';
   query: string;
   composing: string;
   chinese: boolean;

@@ -11,28 +11,28 @@ export function appendFeedSkeletons(items: readonly BrowseItem[], columns: numbe
 }
 export function feedRows(items: readonly BrowseItem[], columns: number): FeedRow[] {
   columns = Math.max(1, Math.floor(columns));
-  const rows: FeedRow[] = [], shorts = items.filter(item => item.id.startsWith('short:'));
-  let pending: BrowseItem[] = [], addedShorts = false, shortsPending = false;
+  const rows: FeedRow[] = [];
+  const deferred: FeedRow[] = [];
+  let pending: BrowseItem[] = [], shorts: BrowseItem[] = [];
   const flush = () => {
     if (pending.length) rows.push({ id: pending[0].id, items: pending, shorts: false });
     pending = [];
   };
-  const addShorts = () => {
-    rows.push({ id: 'shorts-shelf', items: shorts, shorts: true });
-    addedShorts = true; shortsPending = false;
+  const flushShorts = () => {
+    if (shorts.length) (pending.length ? deferred : rows).push({ id: `shorts-shelf:${shorts[0].id}`, items: shorts, shorts: true });
+    shorts = [];
   };
+  const flushDeferred = () => { rows.push(...deferred); deferred.length = 0; };
   for (const item of items) {
     if (item.id.startsWith('short:')) {
-      if (!addedShorts) {
-        if (pending.length) shortsPending = true;
-        else addShorts();
-      }
+      shorts.push(item);
     } else {
+      flushShorts();
       pending.push(item);
-      if (pending.length === columns) { flush(); if (shortsPending) addShorts(); }
+      if (pending.length === columns) { flush(); flushDeferred(); }
     }
   }
-  flush(); if (shortsPending) addShorts(); return rows;
+  flushShorts(); flush(); flushDeferred(); return rows;
 }
 // Measurements belong to the row's contents and layout, not its array index.
 // Keep a few recent feeds for back navigation; discarded rows cannot accumulate.

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import type { Directive } from 'vue';
 import { useI18n } from '../shared/use-i18n';
+import InterfaceIcon from './InterfaceIcon.vue';
 import LoadStatus from './LoadStatus.vue';
 import { commentLanguage } from '../shared/comment-language';
 import type { CommentSnapshot, CommentReplySnapshot, ControllerStyle } from '../../types/ports';
@@ -11,6 +12,7 @@ const props = defineProps<{
   openThread?: (key: string) => void;
   translate?: (key: string) => void;
   focusKey?: string;
+  like?: (key: string) => Promise<boolean>;
   reply?: (key: string) => void;
 }>();
 const { t, language } = useI18n();
@@ -30,6 +32,13 @@ function toggleTranslation() {
   if (translation.value?.text) original.value = !original.value;
   else { original.value = false; props.translate?.(props.item.key); }
 }
+const liking = ref(false), likeFailed = ref(false);
+async function toggleLike() {
+  if (!props.like || !props.item.canLike || liking.value) return;
+  liking.value = true; likeFailed.value = false;
+  try { likeFailed.value = await props.like(props.item.key) !== true; } catch { likeFailed.value = true; }
+  finally { liking.value = false; }
+}
 const failedAvatar = ref('');
 const key = computed(() => props.focusKey || props.item.key);
 const canOpen = computed(() => !!props.openThread && 'replies' in props.item && (props.item.hasReplies || props.item.replies.length > 0));
@@ -46,7 +55,8 @@ const replyLabel = computed(() => 'replyCount' in props.item && props.item.reply
     </span>
     <div class="comment-main">
       <div class="comment-header">
-        <span class="comment-author">{{ item.author || t('Reply') }}</span>
+        <span class="comment-author" :title="item.author">{{ item.author || t('Reply') }}</span>
+        <span v-if="item.publishedTime" class="comment-published">· {{ item.publishedTime }}</span>
         <span v-if="item.replyTo" class="comment-reply-target">{{ t('Replying to {author}', { author: item.replyTo }) }}</span>
       </div>
       <div class="comment-body">
@@ -58,12 +68,15 @@ const replyLabel = computed(() => 'replyCount' in props.item && props.item.reply
         <LoadStatus class="translation-error" :failed="translation?.failed" error-role="status"
           :error-message="t('Translation unavailable. Original text is still shown.')" />
       </div>
-      <button v-if="reply && 'canReply' in item && item.canReply" class="comment-reply-action" :data-focus-id="`reply:${item.key}`" @click="reply(item.key)">{{ t('Reply') }}</button>
-      <button v-if="canOpen" class="comment-replies" :data-focus-id="`replies:${item.key}`" @click="openThread?.(item.key)">
-        <span class="comment-expand-hint key-controller-badge" aria-hidden="true"><span v-badge></span></span>
-        <span class="comment-replies-label">{{ replyLabel }}</span>
-        <span class="comment-replies-chevron" aria-hidden="true"></span>
-      </button>
+      <div class="comment-footer">
+        <button class="comment-likes" :data-focus-id="`comment-like:${key}`" :aria-label="t('Like')" :aria-pressed="item.liked === true" :disabled="!like || !item.canLike || liking" @click="toggleLike"><InterfaceIcon name="like" :filled="item.liked" /><span v-if="item.likeCount">{{ item.likeCount }}</span></button>
+        <span v-if="likeFailed" role="status">{{ t('Could not update like. Try again.') }}</span>
+        <button v-if="canOpen" class="comment-replies" :data-focus-id="`replies:${item.key}`" :aria-label="replyLabel" @click="openThread?.(item.key)">
+          <span class="comment-expand-hint key-controller-badge" aria-hidden="true"><span v-badge></span></span>
+          <InterfaceIcon name="comments" /><span class="comment-replies-label">{{ 'replyCount' in item && item.replyCount !== undefined ? item.replyCount : t('View replies') }}</span>
+        </button>
+        <button v-if="reply && 'canReply' in item && item.canReply" class="comment-reply-action" :data-focus-id="`reply:${item.key}`" @click="reply(item.key)">{{ t('Reply') }}</button>
+      </div>
     </div>
   </article>
 </template>

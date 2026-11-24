@@ -63,6 +63,22 @@ test('regional entries with unknown icons remain in the identified Explore secti
   assert.equal(explore(await s.service.read()).at(-1).label, 'Regional learning'); s.service.destroy();
 });
 
+test('guide resolves distinct explore and YouTube product icons by destination or icon type', async () => {
+  const entry = (label, href, iconType = 'UNKNOWN') => ({ guideEntryRenderer: {
+    formattedTitle: { simpleText: label }, icon: { iconType },
+    navigationEndpoint: { commandMetadata: { webCommandMetadata: { url: href } } }
+  } });
+  const f = fixture(() => ({ items: [{ guideSectionRenderer: { items: [
+    entry('Music', '/channel/UC-9-kyTW8ZkZNDHQJ6FgpwQ'), entry('Movies', '/feed/storefront'),
+    entry('Live', '/channel/UC4R8DWoMoI7CAwX8_LjQHig'), entry('Premium', '/premium'),
+    entry('YouTube Music', 'https://music.youtube.com/'), entry('Kids', 'https://www.youtubekids.com/'),
+    entry('Labs', '/new', 'YOUTUBE_LABS_RED_LOGO'), entry('Reports', '/feed/report_history')
+  ] } }] }));
+  assert.deepEqual(Array.from(links(await f.service.read()), item => item.icon),
+    ['music', 'movies', 'live', 'youtube-premium', 'youtube-music', 'youtube-kids', 'youtube-labs', 'report']);
+  f.service.destroy();
+});
+
 test('malformed guide responses fail without consulting page data and can be retried', async () => {
   const s = fixture(count => count === 1 ? { contents: {} } : guideData());
   await assert.rejects(s.service.read(), /Sidebar guide unavailable/);

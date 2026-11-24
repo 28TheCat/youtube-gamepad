@@ -1,30 +1,28 @@
-#ytg-search-host{width:100%;min-width:0;max-width:650px;color:var(--ytg-text,#0f0f0f);font-family:var(--ytg-font-family,Roboto,Arial,sans-serif)}
+#ytg-search-host{width:100%;min-width:0;color:var(--ytg-text,#0f0f0f);font-family:var(--ytg-font-family)}
 .ytg-search-bar{display:flex;align-items:center;gap:16px;width:100%;min-width:0}
-.ytg-search-form{display:flex;flex:1;min-width:0;gap:16px;height:48px;margin:0}
-.ytg-search-field{display:flex;align-items:center;flex:1;min-width:0;gap:12px;padding:0 16px;border:1px solid var(--ytg-border,#ccc);border-radius:24px;background:var(--ytg-background,#fff);box-shadow:inset 0 1px 2px #0001}
-.ytg-search-field:focus-within,.ytg-search-field:has(input.ytg-selected){border-color:#1c62b9;box-shadow:inset 1px 0 #1c62b9}
-.ytg-search-field:has(input.ytg-selected){outline:var(--ytg-focus-width,6px) solid var(--ytg-focus-color,#000);outline-offset:2px}
+.ytg-search-form{display:flex;flex:1;min-width:0;gap:16px;height:40px;margin:0}
+.ytg-search-field{display:flex;align-items:center;flex:1;min-width:0;gap:12px;padding:0 16px;border:1px solid var(--ytg-border,#ccc);border-radius:var(--ytg-pill-radius);background:var(--ytg-client-background)}
+.ytg-search-field:has(input.ytg-selected):not(:focus-within){border-color:var(--ytg-search-focus-color)}
+.ytg-search-field:focus-within{border-color:var(--ytg-focus-color)}
+.ytg-search-field:has(input.ytg-selected){outline:var(--ytg-focus-width) solid var(--ytg-focus-color,#000);outline-offset:var(--ytg-focus-offset)}
 .ytg-search-bar svg{width:24px;height:24px;flex:none;fill:none;stroke:none;pointer-events:none}
 .ytg-search-leading{display:block;color:var(--ytg-muted,#606060)}
-.ytg-search-field input{width:100%;min-width:0;margin:0;padding:0;border:0;outline:0;background:transparent;color:inherit;font:400 16px/24px var(--ytg-font-family,Roboto,Arial,sans-serif);box-shadow:none}
+.ytg-search-field input{width:100%;min-width:0;margin:0;padding:0;border:0;outline:0;background:transparent;color:inherit;font:400 16px/24px var(--ytg-font-family);box-shadow:none}
 .ytg-search-field input::placeholder{color:var(--ytg-muted,#606060);opacity:1}
-.ytg-search-bar button{display:flex;align-items:center;justify-content:center;flex:none;margin:0;padding:0;color:inherit;background:var(--ytg-surface,#f8f8f8);cursor:pointer}
-.ytg-search-submit,.ytg-search-clear{border:1px solid var(--ytg-border,#ccc);border-radius:24px;font:600 16px/1.4 var(--ytg-font-family,Roboto,Arial,sans-serif);white-space:nowrap}
-.ytg-search-submit{width:80px}
-.ytg-search-clear{width:64px}
-.ytg-search-submit .ytg-search-submit-icon{display:none}
-.ytg-search-voice{width:48px;height:48px;border:0;border-radius:50%}
+.ytg-search-bar button{display:flex;align-items:center;justify-content:center;flex:none;margin:0;color:inherit;background:var(--ytg-surface,#f8f8f8);cursor:pointer}
+.ytg-search-clear{width:64px;padding:0;border:1px solid var(--ytg-border,#ccc);border-radius:24px;font:600 16px/1.4 var(--ytg-font-family);white-space:nowrap}
+.ytg-search-voice{width:40px;height:40px;padding:8px;border:0;border-radius:50%}
 .ytg-search-bar button:hover{filter:brightness(.95)}
-.ytg-search-bar button:focus-visible,.ytg-search-bar button.ytg-selected{outline:var(--ytg-focus-width,6px) solid var(--ytg-focus-color,#000);outline-offset:2px}
-html.ytg-custom-browse ytd-masthead #center.ytg-search-replaced > :not(#ytg-search-host){display:none!important}
+.ytg-search-bar button:focus-visible,.ytg-search-bar button.ytg-selected{outline:var(--ytg-focus-width) solid var(--ytg-focus-color,#000);outline-offset:var(--ytg-focus-offset)}
 #ytg-search-host[hidden]{display:none!important}
 .ytg-search-container{position:relative;min-width:0}
 .ytg-search-container>.search-discovery{position:absolute;top:calc(100% + 8px);left:0;right:0;z-index:20;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;max-height:60vh;overflow:auto;box-sizing:border-box;padding:20px;border:1px solid var(--ytg-border,#ccc);border-radius:16px;background:var(--ytg-background,#fff);box-shadow:0 8px 24px #0002}
 .search-discovery-group{display:flex;flex-direction:column;gap:8px;min-width:0}
 .search-discovery-title{margin:0 0 4px;font-size:15px;font-weight:600;color:var(--ytg-text,#0f0f0f)}
-.search-discovery-empty{margin:0;font-size:14px;line-height:1.6;color:var(--ytg-muted,#606060)}
-.search-discovery-group button{width:100%;min-width:0;min-height:44px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;border:0;border-radius:8px;padding:10px 12px;background:var(--ytg-surface,#f8f8f8);color:inherit;font:400 15px/24px var(--ytg-font-family,Roboto,Arial,sans-serif);cursor:pointer}
-.search-discovery-group button:is(:focus-visible,.ytg-selected){outline:var(--ytg-focus-width,3px) solid var(--ytg-focus-color,#000);outline-offset:2px}
+.search-discovery-empty{margin:0;font-size:var(--ytg-font-small);line-height:1.6;color:var(--ytg-muted,#606060)}
+.search-discovery-group button{width:100%;min-width:0;min-height:44px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;border:0;border-radius:8px;padding:10px 12px;background:var(--ytg-surface,#f8f8f8);color:inherit;font:400 15px/24px var(--ytg-font-family);cursor:pointer}
+.search-discovery-group button:is(:focus-visible,.ytg-selected){outline:var(--ytg-focus-width) solid var(--ytg-focus-color,#000);outline-offset:var(--ytg-focus-offset)}
 @media(max-width:500px){.ytg-search-container>.search-discovery{grid-template-columns:1fr;gap:16px;padding:16px}}
-@media(max-width:650px){.ytg-search-bar,.ytg-search-form{gap:8px}.ytg-search-submit{width:72px}.ytg-search-field{padding:0 12px}}
-@media(max-width:420px){.ytg-search-submit,.ytg-search-clear{width:48px}.ytg-search-clear{font-size:14px}.ytg-search-submit span{display:none}.ytg-search-submit .ytg-search-submit-icon{display:block}.ytg-search-field{padding-inline:8px;gap:8px}}
+@media(max-width:650px){.ytg-search-bar,.ytg-search-form{gap:8px}.ytg-search-field{padding:0 12px}}
+@media(max-width:700px){.ytg-search-leading{display:none}}
+@media(max-width:420px){.ytg-search-clear{width:40px;font-size:var(--ytg-font-small)}.ytg-search-field{padding-inline:8px;gap:8px}}

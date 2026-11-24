@@ -1,0 +1,14 @@
+/* Notification dialog, list and item presentation. */
+#ytg-notifications-page{position:fixed;inset:0;z-index:2200;overflow:auto;overscroll-behavior:contain;background:var(--ytg-client-background);color:var(--ytg-text);padding:28px;box-sizing:border-box}
+.notification-layout{max-width:800px;margin:auto}
+.notification-heading{display:flex;align-items:center;gap:24px;margin-bottom:28px}
+.notification-heading h1{font-size:28px}
+#ytg-notifications-page button{font:inherit;color:inherit;cursor:pointer;border:0;border-radius:12px;background:var(--ytg-client-surface);padding:12px}
+#ytg-notifications-page button:is(:focus-visible,.ytg-selected){outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset)}
+.notification-list{display:grid;gap:8px}
+.notification-list .notification-item{display:flex;width:100%;align-items:center;gap:16px;text-align:left;min-height:76px}
+.notification-item.unread{background:var(--ytg-current-background)}
+.notification-avatar{width:44px;height:44px;flex:none;object-fit:cover;border-radius:50%;background:var(--ytg-surface)}
+.notification-text{flex:1;min-width:0;line-height:1.5;overflow-wrap:anywhere}
+.notification-text small{display:block;color:var(--ytg-muted);margin-top:4px}
+.notification-thumbnail{width:96px;aspect-ratio:16/9;object-fit:cover;border-radius:8px}

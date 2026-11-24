@@ -195,3 +195,39 @@ test('subscription remains usable when the player metadata API rejects an otherw
   assert.deepEqual(writes[0].body.channelIds, ['UCcreator']);
   assert.equal(subscribed, true);
 });
+
+test('recommendations remain interactive while player and metadata are loading', { timeout: 30000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, playbackLayout: 'page' }));
+  await context.addInitScript(() => {
+    window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientName: 'WEB', clientVersion: 'fixture' }, user: {} } : undefined };
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelector('#movie_player').getVideoData = () => ({ video_id: 'previous' });
+    });
+  });
+  const held = [];
+  await context.route('https://www.youtube.com/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/player')) { held.push(route); return; }
+    if (path.endsWith('/next')) {
+      const data = next();
+      data.contents.twoColumnWatchNextResults.secondaryResults.secondaryResults.results = [{ compactVideoRenderer: {
+        videoId: 'second', title: { simpleText: 'Second video' }, navigationEndpoint: { watchEndpoint: { videoId: 'second' } }
+      } }];
+      return route.fulfill({ json: data });
+    }
+    return route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body><ytd-app><div id="movie_player"><video class="html5-main-video"></video></div></ytd-app></body></html>' });
+  });
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/watch?v=first');
+  const host = page.locator('#ytg-watch');
+  await page.waitForFunction(() => document.querySelector('#ytg-watch')?.dataset.recommendationsStatus === 'ready');
+  assert.equal(await host.getAttribute('data-player-status'), 'loading');
+  assert.equal(await host.getAttribute('data-metadata-status'), 'loading');
+  const card = host.locator('[data-video-id="second"]');
+  await card.waitFor({ state: 'visible' });
+  assert.equal(await card.evaluate(node => !!node.closest('[inert]')), false);
+  assert.equal(await page.locator('video').evaluate(video => video.readyState), 0);
+  assert.ok(held.length > 0);
+  for (const route of held) await route.abort().catch(() => {});
+});

@@ -1,3 +1,4 @@
+import { confirmHint, dialogHints } from '../ui/context-hints';
 import { pageShadowRoots, pageActiveElement, pageQuery, pageQueryAll } from '../shared/page-dom';
 import { createStickScroller } from './stick-scroll';
 import type { Action, CoreDependencies, CoreModule, Direction, ModuleFactory, MeasuredItem } from '../../types/ports';
@@ -299,12 +300,18 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
     update();
   }
   let lastHelpText = '', lastSceneText = '';
+  function pageHints() {
+    const text = config.getPageHint?.() || '';
+    if (!text.includes('A Open')) return text;
+    const action = current?.matches?.('a[href],[role="link"]') && !current.matches('[aria-disabled="true"]') ? 'A Open' : confirmHint(current);
+    return text.split(' · ').map(part => part === 'A Open' ? action : part).filter(Boolean).join(' · ');
+  }
   function updateSceneHint() {
     host.toggleAttribute?.('data-native-dialog', enabled && activeScope !== document);
     const text = !enabled || navigating || config.isNavigating?.() || helpVisible || config.getPriorityLayer?.() ? ''
       : adjustingTarget ? '← / → Adjust · A Confirm · B Back'
-      : activeScope !== document || config.getInputLayer?.() ? 'D-pad: Select · A Confirm · B Back'
-      : config.getPageHint?.() || '';
+      : activeScope !== document || config.getInputLayer?.() ? dialogHints(current)
+      : pageHints();
     sceneHint.hidden = !text;
     if (text && text !== lastSceneText) {
       lastSceneText = text;
@@ -313,9 +320,9 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
   }
   function updateHelp() {
     const text = adjustingTarget ? '← / → Adjust · A Confirm · B Back'
-      : activeScope !== document ? 'D-pad: Select · A Confirm · B Back'
+      : activeScope !== document ? dialogHints(current)
       : location.pathname === '/watch' ? '↑ Show controls · X Play / pause · B Back · Start Menu'
-      : 'D-pad / left stick: Move · A Open · B Back · Y Search · LB / RB Switch categories · Start Menu';
+      : pageHints();
     if (text === lastHelpText) return;
     lastHelpText = text;
     if (overlay) overlay.update({ helpText: text });
@@ -714,15 +721,16 @@ export let YTGamepadCoreModule!: ModuleFactory<CoreDependencies,CoreModule>, YTG
   const observeNativeNavigation = () => {
     observer!.disconnect();
     observer!.observe(document.documentElement, { attributes: true, attributeOldValue: true,
-      attributeFilter: ['class', 'style', 'lang', 'dir', 'data-ytg-language', 'data-ytg-native'] });
+      attributeFilter: ['class', 'style', 'lang', 'dir', 'data-ytg-language', 'data-ytg-native', 'data-ytg-route-mode'] });
     observer!.observe(document.body, { childList: true });
-    for (const root of document.querySelectorAll('#movie_player,ytd-popup-container')) {
+    const nativeRoute = document.documentElement.getAttribute('data-ytg-route-mode') === 'native';
+    for (const root of document.querySelectorAll(nativeRoute ? 'ytd-page-manager,ytd-guide-renderer,ytd-masthead,#movie_player,ytd-popup-container' : '#movie_player,ytd-popup-container')) {
       observer!.observe(root, { childList: true, subtree: true, attributes: true, attributeOldValue: true,
         characterData: true, attributeFilter: ['hidden', 'aria-hidden', 'aria-expanded', 'disabled', 'aria-disabled', 'inert', 'style', 'class'] });
     }
   };
   observer = lifecycle.observer(records => {
-    if (records.some(record => record.type === 'childList' && record.target === document.body)) observeNativeNavigation();
+    if (records.some(record => record.type === 'childList' && record.target === document.body || record.attributeName === 'data-ytg-route-mode')) observeNativeNavigation();
     if (!records.some(relevantMutation)) return;
     invalidateTargets();
     scheduleRecover(true);

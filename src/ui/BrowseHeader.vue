@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import InterfaceIcon from './InterfaceIcon.vue';
 import youtubeIcon from '../../assets/brand/youtube-icon.svg?inline';
-import BrowseModeSwitch from './BrowseModeSwitch.vue';
 import AccountPage from './AccountPage.vue';
-import type { mountBrowseMode } from './browse-mode';
-const props = defineProps<{ browseMode: ReturnType<typeof mountBrowseMode>; refreshHome?: () => void; refreshNavigation?: () => void; focusAccount?: (node: HTMLElement) => void }>();
+const props = defineProps<{ refreshHome?: () => void; refreshNavigation?: () => void; focusAccount?: (node: HTMLElement) => void }>();
 import { useI18n } from '../shared/use-i18n';
 import { createPageClient } from '../bridge/page-client';
 import { ui } from './ui-api';
@@ -13,19 +11,6 @@ import type { NotificationSnapshot } from '../sites/youtube-notifications';
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useBrowseStore } from '../app/browse-store';
 const store = useBrowseStore();
-const refreshButton = ref<HTMLButtonElement>();
-let refreshAnimation: Animation | undefined;
-watch(() => store.refreshing, refreshing => {
-  if (!refreshing || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  refreshAnimation?.cancel();
-  refreshAnimation = refreshButton.value?.querySelector('svg')?.animate(
-    [{ transform: 'rotate(0deg)' }, { transform: 'rotate(720deg)' }],
-    { duration: 600, easing: 'cubic-bezier(.25,.46,.45,.94)' }
-  );
-}, { flush: 'post' });
-function refreshFeed() {
-  if (!store.loading) props.refreshHome?.();
-}
 const { t } = useI18n();
 const account = ref<AccountSnapshot>();
 const accountLoading = ref(false), accountFailed = ref(false);
@@ -133,7 +118,6 @@ onMounted(() => {
 });
 const reloadNotifications = () => { if (!notificationOpen.value) loadNotifications('count'); };
 onBeforeUnmount(() => {
-  refreshAnimation?.cancel();
   for (const release of releases) release();
   disposed = true; ++generation; page.destroy?.();
   document.removeEventListener('yt-navigate-start', routeChanged);
@@ -154,16 +138,15 @@ onBeforeUnmount(() => {
       <span>YouTube <small>Gamepad</small></span>
     </button>
     <div id="ytg-client-search"></div>
-    <BrowseModeSwitch :state="browseMode.state" :change="browseMode.change" />
-    <button v-if="store.snapshot.route?.split('?')[0] === '/' && refreshHome" ref="refreshButton" class="client-refresh" type="button" :aria-label="t('Refresh recommendations')" :title="t('Refresh recommendations')" :aria-disabled="store.loading" :aria-busy="store.refreshing" @click="refreshFeed">
-      <InterfaceIcon name="refresh" />
-    </button>
     <button ref="notificationButton" class="notification-entry" type="button" :aria-label="t('Notification center')" aria-haspopup="dialog" :aria-expanded="notificationOpen" @click="ui.openPanel('notifications')">
       <InterfaceIcon name="bell" /><span v-if="notifications?.count" class="notification-count">{{ notifications.count > 99 ? '99+' : notifications.count }}</span>
     </button>
     <button ref="accountButton" :title="accountName" class="client-account" :class="{ 'has-avatar': accountAvatar && !avatarFailed }" type="button" :aria-label="t('Account')" aria-haspopup="dialog" :aria-expanded="accountOpen" @click="ui.openPanel('account')">
       <img v-if="accountAvatar && !avatarFailed" :src="accountAvatar" alt="" @error="avatarFailed = true" />
       <InterfaceIcon v-else name="person" />
+    </button>
+    <button class="client-menu" type="button" :aria-label="t('Quick menu')" :title="t('Quick menu')" aria-haspopup="dialog" :aria-expanded="ui.state.openPanels.includes('menu')" @click="ui.openPanel('menu')">
+      <InterfaceIcon name="more" />
     </button>
   </header>
   <AccountPage v-if="accountOpen" :snapshot="account" :loading="accountLoading" :failed="accountFailed" :retry="reloadAccount" :refresh="refresh" :focus="focus" @close="ui.closePanel('account')" />

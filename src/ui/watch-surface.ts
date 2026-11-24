@@ -2,7 +2,7 @@ import { nativeControlId, nativeControlTargetId } from '../sites/native-player-c
 import type { Action, FocusTarget, InteractionEvent, Mode, PlaybackSnapshot, RecommendationSnapshot, Scope, SharedDependencies, WatchPanels, WatchPanelsPort, WatchPageSnapshot, WatchPort, WatchSnapshot, WatchView, WatchViewDependencies } from '../../types/ports';
 import type { PlaybackFeedback } from './playback-presentation';
 import { recommendationFocusIds, sameRecommendations } from './playback-presentation';
-import { ui } from './ui-api';
+import { ui, type WatchMenuItem } from './ui-api';
 import { playbackControlIds } from './playback-control-config';
 import { createStickScroller } from '../navigation/stick-scroll';
 import { YTGamepadBindings } from '../input/bindings';
@@ -46,12 +46,12 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
   const view = dependencies.createView({ activate: callbacks.activate, seek: callbacks.seek,
     closePanel: () => { if (!panels.back()) panels.close(); }, controllerStyle });
   const { host, root, surface, dialog, sheet, close, status, presentation } = view;
-  let destroyed = false, descriptionText = '', feedbackAction = '', canSeek = false;
+  let destroyed = false, descriptionText = '', descriptionRuns: WatchPageSnapshot['descriptionRuns'], feedbackAction = '', canSeek = false;
   let recommendations: readonly RecommendationSnapshot[] = [];
   let recommendationTargetsCache: readonly WatchTarget[] = [];
   const panels = dependencies.createPanels({ ...view, watchState: callbacks.state,
     send: callbacks.send, focus: callbacks.focus, focusManager, controllerStyle,
-    get controller() { return callbacks.controller(); }, get descriptionText() { return descriptionText; }
+    get controller() { return callbacks.controller(); }, get descriptionText() { return descriptionText; }, get descriptionRuns() { return descriptionRuns; }
   });
   const releasePanels = (['description', 'comments', 'playlists', 'subscription'] as const).map(id => ui.registerPanel(id, {
     isOpen: () => !destroyed && callbacks.state().panel === id,
@@ -63,6 +63,26 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
   }));
   const unregisterPanels = () => releasePanels.forEach(release => release());
   lifecycle.cleanup(unregisterPanels);
+  lifecycle.cleanup(ui.registerWatchActions({
+    read: () => {
+      const controller = callbacks.controller();
+      if (destroyed || host.hidden || !controller?.state.enabled || !controller.readRoute().isWatch) return [];
+      const page = controller.readWatchPage();
+      const actions: WatchMenuItem[] = [
+        { id: 'channel', label: 'Channel' },
+        { id: 'subscribe', label: page.subscribed ? 'Subscribed, manage subscription' : 'Subscribe' },
+        { id: 'like', label: 'Like / remove like', pressed: !!page.liked },
+        { id: 'dislike', label: 'Dislike / remove dislike', pressed: !!page.disliked },
+        { id: 'save', label: 'Save to playlist' }, { id: 'description', label: 'Description' },
+        { id: 'comments', label: 'Comments' }, { id: 'mute', label: 'Mute / unmute', pressed: controller.readPlayback().video?.muted },
+        { id: 'settings', label: 'Settings' }
+      ];
+      if (page.queue?.length || new URL(controller.readRoute().key, location.origin).searchParams.has('list'))
+        actions.push({ id: 'collection', label: 'Collection' });
+      return actions;
+    },
+    activate: action => { callbacks.activate(action); }
+  }));
   lifecycle.cleanup(controllerStyle.register(root));
   const cards = () => presentation.cards();
   const available = (node: HTMLElement) => !node.hidden && !(node as HTMLButtonElement).disabled && node.getAttribute('aria-disabled') !== 'true';
@@ -138,6 +158,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
   lifecycle.listen(root, 'scroll', () => callbacks.activity(), true);
   return {
     snapshot,
+    openActions: () => ui.openPanel('menu'),
     toggleFullCollection() { return view.toggleFullCollection?.() || false; },
     closeFullCollection() { return view.closeFullCollection?.() || false; },
     get fullCollectionOpen() { return view.surface.classList.contains('fullscreen-collection-open'); },
@@ -162,6 +183,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       if (destroyed) return;
       document.documentElement.classList.toggle('ytg-watch-active', active);
       host.hidden = !active;
+      host.dataset.playerStatus = callbacks.controller()?.state.playerStatus || (callbacks.controller()?.state.surfaceReady === false ? 'loading' : 'ready');
       host.dataset.passive = String(mode !== 'controls'); presentation.visible(!host.hidden);
       if (host.hidden) { stickScroller.stop(); document.documentElement.classList.remove('ytg-recommendations'); panels.hide(); }
       if (!active) document.documentElement.classList.remove('ytg-settings-open');
@@ -169,7 +191,11 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
     playback(value: PlaybackSnapshot) { if (!destroyed) { canSeek = !!value.video?.timeline.canSeek; presentation.playback(value); view.updateHint(callbacks.state().row, callbacks.state().adjusting, canSeek); } },
     page(value: WatchPageSnapshot, features: import('../../types/ports').WatchFeatures) {
       if (destroyed) return;
-      descriptionText = value.description;
+      const descriptionChanged = descriptionText !== value.description || JSON.stringify(descriptionRuns) !== JSON.stringify(value.descriptionRuns);
+      descriptionText = value.description; descriptionRuns = value.descriptionRuns;
+      if (descriptionChanged && callbacks.state().panel === 'description') panels.refresh();
+      host.dataset.metadataStatus = value.metadataStatus || (value.metadataFailed ? 'failed' : value.title ? 'ready' : 'loading');
+      host.dataset.recommendationsStatus = value.recommendationsStatus || (features.recommendations === 'failed' ? 'failed' : value.recommendationsLoading ? 'loading' : 'ready');
       if (!sameRecommendations(recommendations, value.recommendations)) {
         recommendations = value.recommendations;
         const ids = recommendationFocusIds(recommendations);
@@ -184,6 +210,11 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       if (destroyed) return;
       const state = callbacks.state(), panel = !!state.panel && !state.commentsParked;
       view.updateHint(state.row, adjusting, canSeek);
+      if (surface.classList.contains('browsing') && state.row !== 'recommendations' &&
+          document.documentElement.dataset.ytgPlaybackLayout === 'fullscreen' && !surface.querySelector('.collection-panel')) {
+        view.recommendations.scrollTop = 0;
+        surface.scrollTop = 0;
+      }
       surface.classList.toggle('browsing', state.row === 'recommendations');
       document.documentElement.classList.toggle('ytg-recommendations', state.row === 'recommendations' && mode === 'controls');
       [close, ...panels.buttons].forEach(node => node.classList.remove('selected'));
@@ -219,7 +250,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
           if (delta) toolbar.scrollBy({ left: delta, behavior });
         }
       }
-      if (target.region === 'recommendations' || (panel && state.panel !== 'description')) node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior });
+      if (target.region === 'recommendations' || panel) node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior });
     },
     items(region: string): FocusTarget[] {
       const data = region === 'filters' ? snapshot().filters || [] : region === 'tabs' ? snapshot().tabs || [] : region === 'player' || region === 'metadata' ? [snapshot()[region]].filter((target): target is WatchTarget => !!target) : region === 'recommendations' ? recommendationTargets() : region === 'progress' ? [{ id: 'progress', region, itemKey: 'progress', index: 0, available: canSeek }] : region === 'panel' ? panelTargets() : controlTargets();

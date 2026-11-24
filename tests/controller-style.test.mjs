@@ -155,3 +155,24 @@ test('keyboard prompts follow actions even when gamepad buttons are remapped', (
   style.use({ id: 'DualSense' });
   assert.equal(style.format('A confirm'), '○ confirm');
 });
+
+
+test('unmapped hints disappear and keyboard mode restores its available shortcuts', () => {
+  const { style, document } = setup();
+  const entry = { hidden: false }, badge = node();
+  badge.closest = () => entry;
+  style.badge(badge, 'A');
+  const hint = style.hint(node(), 'A Confirm · B Back · Start Menu');
+  style.register({ querySelectorAll: () => [badge, hint] });
+  style.configureBindings({}, { 1: 'back', 9: 'help' });
+  assert.equal(entry.hidden, true);
+  assert.equal(hint.textContent, 'B Back · Start Menu');
+  style.configureBindings({}, { 3: 'confirm', 1: 'back', 9: 'help' });
+  assert.equal(entry.hidden, false);
+  assert.equal(badge.textContent, 'Y');
+  document.documentElement.dataset.ytgInputMode = 'keyboard';
+  style.configureBindings({}, { 1: 'back', 9: 'help' });
+  assert.equal(entry.hidden, false);
+  assert.equal(badge.textContent, 'Enter');
+  assert.equal(hint.textContent, 'Enter Confirm · Esc Back · F1 Menu');
+});

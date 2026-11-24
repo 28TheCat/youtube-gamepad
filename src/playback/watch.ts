@@ -139,9 +139,12 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     lastActivity = Date.now();
     const nativeAction = action && nativeControlId(action);
     if (nativeAction !== undefined && nativeAction !== '') {
+      if (controller.state.surfaceReady === false) return;
       controller.nativePlayer?.activate(nativeAction);
     } else if (action === 'adjustProgress') {
       send({ type: 'WATCH_FOCUS', region: 'progress' }); handle('confirm');
+    } else if (action === 'moreActions') {
+      view.openActions();
     } else if (action === 'collection') {
       view.toggleFullCollection?.();
     } else if (action === 'collectionClosed') {
@@ -269,7 +272,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     }
     wasActive = active;
     if (entering && typeof history !== 'undefined') pendingReturn = readWatchReturn(history, controller.readRoute().key);
-    view.sync(active, loadingShell ? 'playback' : mode());
+    view.sync(active, mode());
     if (!active) { clearFeedback(); controller?.nativePlayer?.clear(); }
     if (active) {
       const nextRoute = controller.readRoute().key;
@@ -299,7 +302,7 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
         if (mode() === 'controls' && (!hasTemporaryLayer() || watchState().commentsParked)) focus();
       }
       readPage();
-      if (loadingShell) { view.hold(true); return; }
+      if (loadingShell) { focus(); return; }
       updateProgress();
       if (pendingReturn) {
         const saved = pendingReturn;
@@ -330,15 +333,6 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     if (mode() !== 'controls') return false;
     if (controller.navigating) return true;
     lastActivity = Date.now();
-    if (view.fullCollectionOpen) {
-      if (action === 'back') { view.closeFullCollection(); activate('collectionClosed'); return true; }
-      if (action === 'up' || action === 'down') {
-        const count = snapshot().recommendations.length;
-        if (count) { send({ type: 'WATCH_FOCUS', region: 'recommendations', index: Math.max(0, Math.min(count - 1, watchState().index + (action === 'down' ? 1 : -1))) }); focus(); }
-        return true;
-      }
-      if (action === 'left' || action === 'right') return true;
-    }
     if (action === 'back') {
       if (controller.request('backSettings')) return true;
       // Windowed comments stay open when focus moves back to the player.
@@ -348,6 +342,15 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
         return true;
       }
     }
+    if (view.fullCollectionOpen) {
+      if (action === 'back') { view.closeFullCollection(); activate('collectionClosed'); return true; }
+      if (action === 'up' || action === 'down') {
+        const count = snapshot().recommendations.length;
+        if (count) { send({ type: 'WATCH_FOCUS', region: 'recommendations', index: Math.max(0, Math.min(count - 1, watchState().index + (action === 'down' ? 1 : -1))) }); focus(); }
+        return true;
+      }
+      if (action === 'left' || action === 'right') return true;
+    }
     const filters = snapshot().filters || [];
     if (!panelFocused() && filters.length) {
       const state = watchState();
@@ -356,7 +359,10 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
       }
       if (state.row === 'filters') {
         if (action === 'left' || action === 'right') {
-          send({ type: 'WATCH_FOCUS', region: 'filters', index: (state.index + (action === 'right' ? 1 : filters.length - 1)) % filters.length }); focus();
+          if (action === 'left' && state.index === 0 && windowed()) returnLeft();
+          else {
+            send({ type: 'WATCH_FOCUS', region: 'filters', index: Math.max(0, Math.min(filters.length - 1, state.index + (action === 'right' ? 1 : -1))) }); focus();
+          }
         } else if (action === 'up' && windowed()) {
           send({ type: 'WATCH_FOCUS', region: 'tabs', index: view.activeTab() }); focus();
         } else if (action === 'confirm') view.activateFilter(state.index);
@@ -372,8 +378,10 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
         send({ type: 'WATCH_FOCUS', region: 'tabs', index: view.activeTab() }); focus(); return true;
       }
       if (!panelFocused() && state.row === 'tabs') {
-        if (action === 'left' || action === 'back') returnLeft();
-        else if (action === 'right') { send({ type: 'WATCH_FOCUS', region: 'tabs', index: (state.index + 1) % snapshot().tabs!.length }); focus(); }
+        if (action === 'left' && state.index > 0) {
+          send({ type: 'WATCH_FOCUS', region: 'tabs', index: state.index - 1 }); focus();
+        } else if (action === 'left' || action === 'back') returnLeft();
+        else if (action === 'right') { send({ type: 'WATCH_FOCUS', region: 'tabs', index: Math.min(state.index + 1, snapshot().tabs!.length - 1) }); focus(); }
         else if (action === 'confirm' || action === 'down') view.activateTab(state.index);
         return true;
       }
@@ -396,6 +404,18 @@ export let YTGamepadWatchModule!: ModuleFactory<WatchDependencies,WatchModule>, 
     // media/seek/poll updates and must not repaint on every held direction.
     if (!['up', 'down', 'left', 'right', 'back'].includes(action)) updateProgress();
     const data = snapshot(), previousRow = watchState().row;
+    // An empty side list still has reachable tabs. Respect the remaining
+    // controls in the current row before crossing the region boundary.
+    if (windowed() && !panelFocused() && !watchState().adjusting && action === 'right' &&
+        !data.recommendations.length && data.tabs?.length &&
+        ['player', 'metadata', 'progress', 'controls'].includes(previousRow)) {
+      const available = data.controls.filter(target => target.available);
+      const native = nativeControlId(data.controls[watchState().index]?.id || '') !== undefined;
+      const row = available.filter(target => (nativeControlId(target.id) !== undefined) === native);
+      if (previousRow !== 'controls' || row.at(-1)?.index === watchState().index) {
+        rememberLeft(); send({ type: 'WATCH_FOCUS', region: 'tabs', index: view.activeTab() }); focus(); return true;
+      }
+    }
     // Geometry remains in the view; the reducer receives only a scroll observation.
     const { panel, panelIndex } = watchState();
     const panelTarget = panel === 'comments' && ['up', 'down'].includes(action) ? data.panel[panelIndex] : undefined;

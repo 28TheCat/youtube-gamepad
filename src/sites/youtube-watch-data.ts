@@ -1,6 +1,27 @@
 import { parseWatchLink, parseShortLink } from '../shared/watch-link';
 import { requestYouTube, YouTubeRequestError } from './youtube-request';
 
+type NativePlayer = HTMLElement & { getPlayerResponse?: () => Record<string, any>; getVideoData?: () => { video_id?: string } };
+
+// Native responses are usable only with positive destination identity. Never use
+// ytInitialData here: it can still describe the first page after SPA navigation.
+export function nativeWatchResponse(kind: 'player' | 'next'): Record<string, any> | undefined {
+  try {
+    const target = parseWatchLink(location.pathname + location.search);
+    if (!target) return;
+    if (kind === 'player') {
+      const raw = document.querySelector<NativePlayer>('#movie_player')?.getPlayerResponse?.();
+      if (raw?.videoDetails?.videoId === target.videoId && raw.videoDetails.channelId && raw.videoDetails.title) return raw;
+      return;
+    }
+    const raw = document.querySelector<HTMLElement & { data?: Record<string, any> }>('ytd-watch-flexy')?.data;
+    const endpoint = raw?.currentVideoEndpoint?.watchEndpoint;
+    if (!raw?.contents?.twoColumnWatchNextResults || !endpoint) return;
+    if (['videoId', 'playlistId', 'index', 'params', 'startRadio'].every(key =>
+      endpoint[key] === (target.watchEndpoint as Record<string, unknown>)[key])) return raw;
+  } catch { /* The native page may not expose its response; use our request. */ }
+}
+
 // One page-owned initial response. Continuations and comments bypass this store.
 export function createWatchDataService() {
   let currentRoute = '', destroyed = false;
@@ -22,7 +43,8 @@ export function createWatchDataService() {
     if (entry?.key !== key) {
       clear();
       const controller = new AbortController();
-      const next = { key, controller, promise: requestYouTube('next', { ...init, body, signal: controller.signal }) };
+      const native = nativeWatchResponse('next');
+      const next = { key, controller, promise: native ? Promise.resolve(structuredClone(native)) : requestYouTube('next', { ...init, body, signal: controller.signal }) };
       entry = next;
       // Failed responses must not poison subsequent retries or erase a newer entry.
       void next.promise.catch(() => { if (entry === next) entry = undefined; });

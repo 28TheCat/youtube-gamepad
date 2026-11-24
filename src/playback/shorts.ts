@@ -337,6 +337,7 @@ export let YTGamepadShortsModule = {
         ...comments.callbacks({
           active: () => !lifecycle.destroyed && panel === 'comments',
           changed() { panelKey = ''; readComments(); },
+          like: async key => await pageAccess?.commentLike?.(key) === true,
           post: async (text, key) => await pageAccess?.commentPost?.(text, key),
           sort: value => pageAccess?.commentSort?.(value),
           translate: (key, target) => { pageAccess?.commentTranslate?.(key, target); },

@@ -1,4 +1,4 @@
-import { createWatchDataService, type WatchDataService } from './youtube-watch-data';
+import { nativeWatchResponse, createWatchDataService, type WatchDataService } from './youtube-watch-data';
 import { Innertube, Parser, YTNodes } from 'youtubei.js/web';
 import { createYouTubeSession } from './youtube-session';
 import type { YouTubeVideoDetails } from '../../types/core';
@@ -63,7 +63,10 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
       const init = { method: 'POST', credentials: 'same-origin' as const, headers,
         body: JSON.stringify({ context, ...body }), signal };
       let raw: Node;
-      if (readOnly) raw = await (path === 'next' ? dataService.read(init) : requestYouTube(path, init));
+      if (readOnly) {
+        const native = path === 'player' ? nativeWatchResponse('player') : undefined;
+        raw = native ? structuredClone(native) : await (path === 'next' ? dataService.read(init) : requestYouTube(path, init));
+      }
       else raw = await mutateYouTube(path, init);
       if (destroyed || captured !== state || signal.aborted || captured.route !== route()) throw Error('Watch request cancelled');
       if (path === 'next') nextResponse = raw;
@@ -122,6 +125,15 @@ export function createWatchInfoService(sharedData?: WatchDataService) {
         captured.details = { videoId: basic.id, title: basic.title, author: basic.author,
           channelId, shortDescription: basic.short_description, viewCount: String(basic.view_count ?? ''), isLive: basic.is_live };
         const secondary = info.secondary_info;
+        const description = secondary?.description;
+        if (description?.runs?.length) {
+          captured.details.descriptionRuns = description.runs.map(run => {
+            const endpoint = 'endpoint' in run ? run.endpoint : undefined;
+            const href = endpoint?.metadata?.url || endpoint?.toURL?.();
+            return { text: run.toString(), ...(typeof href === 'string' ? { href } : {}) };
+          });
+          captured.details.shortDescription = description.toString();
+        }
         captured.channelBadge = channelBadge(secondary?.owner?.author, secondary?.owner?.attributed_title);
         const subscribe = secondary?.subscribe_button;
         const subscriptionEntity = nextResponse?.frameworkUpdates?.entityBatchUpdate?.mutations?.find((entry: Node) =>

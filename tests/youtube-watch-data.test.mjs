@@ -10,12 +10,15 @@ const compiled = await build({ configFile: false, logLevel: 'silent', build: { w
   target: 'es2022', lib: { entry: fileURLToPath(new URL('./helpers/watch-data-fixture.ts', import.meta.url)), formats: ['iife'], name: 'Fixture' } } });
 const code = (Array.isArray(compiled) ? compiled[0] : compiled).output.find(item => item.type === 'chunk').code;
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function fixture() {
+function fixture({ media, nativePlayer, nativeNext, nativeDataId } = {}) {
   const calls = [];
   let jsonReads = 0;
   const location = { pathname: '/watch', search: '?v=first&list=PLtest&index=3&start_radio=1&params=test', origin: 'https://www.youtube.com' };
   const sandbox = { URL, URLSearchParams, AbortController, setTimeout, clearTimeout, structuredClone, TextEncoder, Event,
-    crypto: webcrypto, location, console, document: { cookie: '', dispatchEvent() {} },
+    crypto: webcrypto, location, console, document: { cookie: '', dispatchEvent() {}, querySelector(selector) {
+      if (selector === 'ytd-watch-flexy') return { data: nativeNext };
+      if (selector === '#movie_player') return { getVideoData: () => ({ video_id: nativeDataId }), getPlayerResponse: () => nativePlayer, querySelector: () => media };
+    } },
     window: { ytcfg: { get: key => ({ INNERTUBE_CONTEXT: { client: { clientVersion: 'test' }, user: {} } })[key] } },
     fetch: (url, init) => new Promise(resolve => calls.push({ url, init, body: JSON.parse(init.body),
       resolve: raw => resolve({ ok: true, json: async () => { jsonReads++; return raw; } }) })) };
@@ -53,6 +56,54 @@ for (const infoFirst of [true, false]) test(`details and recommendations share n
     f.calls[2].resolve({ contents: {} }); await tick();
     f.info.destroy();
     assert.equal(initial.init.signal.aborted, false);
+  } finally { f.destroy(); }
+});
+
+test('destination requests start immediately while reused media still belongs to the old video', async () => {
+  const media = { readyState: 0, videoWidth: 0 };
+  const nativePlayer = player('old');
+  const f = fixture({ media, nativePlayer, nativeDataId: 'old' });
+  try {
+    assert.equal(f.info.read().loading, true);
+    assert.equal(f.recommendations.read().loading, true);
+    await tick();
+    assert.equal(f.calls.length, 2, 'player and shared next start without waiting for frames or native identity');
+    assert.ok(f.calls.every(call => call.body.videoId === 'first'));
+    f.calls.find(call => call.url.endsWith('/next')).resolve(next());
+    f.calls.find(call => call.url.endsWith('/player')).resolve(player('first'));
+    await tick(); await tick();
+    assert.equal(f.info.read().failed, false);
+    assert.equal(f.info.read().details.videoId, 'first');
+    assert.equal(f.recommendations.read().loading, false);
+    assert.equal(media.readyState, 0, 'data readiness is independent of media readiness');
+  } finally { f.destroy(); }
+});
+
+test('matching native next and player responses avoid all initial auxiliary network requests', async () => {
+  const nativeNext = next();
+  nativeNext.currentVideoEndpoint = { watchEndpoint: { videoId: 'first', playlistId: 'PLtest', index: 2, startRadio: true, params: 'test' } };
+  const f = fixture({ nativePlayer: player('first'), nativeNext });
+  try {
+    f.info.read(); f.recommendations.read();
+    await tick(); await tick();
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.info.read().details.title, 'Title first');
+    assert.equal(f.info.read().loading, false);
+    assert.equal(f.recommendations.read().loading, false);
+    const raw = await f.shared.read(f.init());
+    assert.notEqual(raw, nativeNext, 'parsers never mutate the page-owned response');
+  } finally { f.destroy(); }
+});
+
+for (const endpoint of [{ videoId: 'old' }, { videoId: 'first', playlistId: 'PLother', index: 2 },
+  { videoId: 'first', playlistId: 'PLtest', index: 1, startRadio: true, params: 'test' }])
+test(`native next with stale destination is ignored: ${JSON.stringify(endpoint)}`, async () => {
+  const nativeNext = next(); nativeNext.currentVideoEndpoint = { watchEndpoint: endpoint };
+  const f = fixture({ nativeNext });
+  try {
+    const pending = f.shared.read(f.init());
+    assert.equal(f.calls.length, 1);
+    f.calls[0].resolve({ contents: {} }); await pending;
   } finally { f.destroy(); }
 });
 

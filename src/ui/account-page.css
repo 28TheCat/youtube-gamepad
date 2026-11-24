@@ -15,10 +15,13 @@
 .account-options{display:grid;gap:16px;min-width:0}.account-group{border:1px solid var(--ytg-border);border-radius:16px;padding:8px;background:var(--ytg-client-surface)}
 .account-group button{display:flex;align-items:center;gap:18px;min-height:60px;width:100%;padding:16px;border-radius:10px;text-align:left;background:transparent;scroll-margin:24px;font-size:16px;font-weight:400}
 .account-group button>span{flex:1;overflow-wrap:anywhere}.account-chevron{width:18px;height:18px;flex:none;color:var(--ytg-muted)}
-#ytg-account-page button:is(:focus-visible,.ytg-selected){outline:var(--ytg-focus-width,6px) solid var(--ytg-focus-color);outline-offset:2px;background:var(--ytg-surface)}
+#ytg-account-page button:where(:not([data-account-close])):is(:focus-visible,.ytg-selected){outline:var(--ytg-focus-width) solid var(--ytg-focus-color);outline-offset:var(--ytg-focus-offset);background:var(--ytg-surface)}
+#ytg-account-page .account-toolbar button[data-account-close]{border:1px solid var(--ytg-border);box-shadow:none;outline-offset:var(--ytg-focus-offset)}
+#ytg-account-page .account-toolbar button[data-account-close]:is(:focus-visible,.ytg-selected){outline:var(--ytg-focus-width) solid var(--ytg-border);background:var(--ytg-client-active)}
+html[data-ytg-input-mode=mouse] #ytg-account-page .account-toolbar button[data-account-close].ytg-selected:not(:focus-visible){outline:none}
 .account-empty{padding:32px;border:1px solid var(--ytg-border);border-radius:16px;background:var(--ytg-client-surface);font-weight:400}.account-empty button{padding:12px 20px;border-radius:12px;background:var(--ytg-surface)}
 @media(hover:hover){#ytg-account-page button:hover{background:var(--ytg-surface)}}
-@media(max-width:760px){.account-layout{padding:20px 20px 40px}.account-toolbar{margin-bottom:32px}.account-columns{grid-template-columns:1fr;gap:20px}.account-profile{position:static;padding:24px}.account-profile>img,.account-avatar-fallback{width:64px;height:64px;margin-bottom:16px}.account-profile-note{display:none}.account-heading{margin-bottom:24px}.account-group button{min-height:56px;gap:14px}.account-brand{font-size:14px}}
+@media(max-width:760px){.account-layout{padding:20px 20px 40px}.account-toolbar{margin-bottom:32px}.account-columns{grid-template-columns:1fr;gap:20px}.account-profile{position:static;padding:24px}.account-profile>img,.account-avatar-fallback{width:64px;height:64px;margin-bottom:16px}.account-profile-note{display:none}.account-heading{margin-bottom:24px}.account-group button{min-height:56px;gap:14px}.account-brand{font-size:var(--ytg-font-small)}}
 @media(prefers-reduced-motion:no-preference){.account-group button{transition:background 120ms ease}}
 
 

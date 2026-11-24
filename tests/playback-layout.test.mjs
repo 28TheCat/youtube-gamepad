@@ -1,4 +1,3 @@
-import { build } from 'vite';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -239,47 +238,39 @@ test('mouse and gamepad share custom controls while choosing the correct layout 
 });
 
 
-for (const layout of ['windowed', 'fullscreen']) test(`${layout} transition covers native details and releases on destination frame or playing`, async t => {
+for (const layout of ['windowed', 'fullscreen']) test(`${layout} navigation leaves native video exposed while destination loads`, async t => {
   const page = await browserPage(t);
-  await page.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<html><body><div id="movie_player"><video></video></div><div id="below">Native details</div></body></html>' }));
+  await page.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: `<html><body>
+    <ytd-watch-flexy><div id="movie_player"><video></video></div></ytd-watch-flexy>
+    <script>
+      window.playerIdentity = 'old';
+      const player = document.querySelector('#movie_player'), video = player.querySelector('video');
+      Object.defineProperties(video, { paused: { get: () => false }, duration: { get: () => 120 }, readyState: { get: () => 2 }, videoWidth: { get: () => 640 } });
+      player.getPlayerResponse = () => ({ videoDetails: { videoId: window.playerIdentity, title: 'Test' } });
+      window.frameRequests = 0;
+      video.requestVideoFrameCallback = () => { window.frameRequests++; return 1; };
+      // Delay the health poll so only media/navigation events can restore readiness.
+      const nativeInterval = window.setInterval.bind(window);
+      window.setInterval = (callback, delay, ...args) => nativeInterval(callback, delay === 500 ? 60000 : delay, ...args);
+    </script></body></html>` }));
   await page.goto('https://www.youtube.com/watch?v=old');
   await page.addStyleTag({ content: readFileSync(new URL('../src/app/theater.css', import.meta.url), 'utf8') });
-  const result = await build({ configFile: false, publicDir: false, logLevel: 'silent',
-    build: { write: false, minify: false, lib: { entry: fileURLToPath(new URL('../src/ui/watch-transition.ts', import.meta.url)), formats: ['iife'], name: 'WatchTransitionFixture' } } });
-  const source = (Array.isArray(result) ? result[0] : result).output.find(item => item.type === 'chunk').code;
-  await page.addScriptTag({ content: source + ';window.makeTransition = WatchTransitionFixture.createWatchTransition;' });
-  const geometry = await page.evaluate(layout => {
-    document.documentElement.classList.add('ytg-watch-layout');
-    document.documentElement.dataset.ytgPlaybackLayout = layout;
-    const media = document.querySelector('video');
-    for (const [name, value] of Object.entries({ readyState: 2, videoWidth: 640, videoHeight: 360, paused: false }))
-      Object.defineProperty(media, name, { configurable: true, value });
-    media.requestVideoFrameCallback = fn => { window.destinationFrame = fn; return 1; };
-    media.cancelVideoFrameCallback = () => { window.destinationFrame = undefined; };
-    window.playerIdentity = 'old';
-    window.transition = window.makeTransition(() => window.playerIdentity);
-    window.transition.sync(true, '/watch?v=old', false);
-    window.transition.sync(true, '/watch?v=new', true);
-    const mask = document.querySelector('#ytg-watch-transition').getBoundingClientRect();
-    const mediaCover = document.querySelector('#ytg-watch-transition :is(img,canvas):not([hidden])').getBoundingClientRect();
-    const player = document.querySelector('#movie_player').getBoundingClientRect();
-    history.pushState({}, '', '/watch?v=new'); window.playerIdentity = 'new';
-    return { mask: [mask.width, mask.height], media: [mediaCover.x, mediaCover.y, mediaCover.width, mediaCover.height], player: [player.x, player.y, player.width, player.height], viewport: [innerWidth, innerHeight] };
-  }, layout);
-  assert.deepEqual(geometry.mask, geometry.player.slice(2));
-  for (let i = 0; i < 4; i++) assert.ok(Math.abs(geometry.media[i] - geometry.player[i]) < 1);
-  await page.waitForFunction(() => !!window.destinationFrame);
-  assert.equal(await page.locator('#ytg-watch-transition').count(), 1);
-  await page.evaluate(() => window.destinationFrame());
-  assert.equal(await page.locator('#ytg-watch-transition').count(), 0);
+  await page.addScriptTag({ content: await mainFixture() });
+  await page.evaluate(playbackLayout => window.postMessage({ source: 'yt-gamepad-settings', values: { enabled: true, playbackLayout } }, location.origin), layout);
+  await page.waitForFunction(() => window.YTGamepadCoordinator.state.surfaceReady);
   await page.evaluate(() => {
-    window.transition.sync(true, '/watch?v=third', true);
-    history.pushState({}, '', '/watch?v=third'); window.playerIdentity = undefined;
-    window.transition.sync(true, '/watch?v=third', false);
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.pushState({}, '', '/watch?v=new');
+    document.dispatchEvent(new Event('yt-navigate-finish'));
+  });
+  await page.waitForFunction(() => document.documentElement.dataset.ytgAdaptation === 'waiting');
+  assert.equal(await page.locator('#ytg-watch-transition').count(), 0);
+  assert.equal(await page.locator('#movie_player video').isVisible(), true);
+  await page.evaluate(() => {
+    window.playerIdentity = 'new';
     document.querySelector('video').dispatchEvent(new Event('playing', { bubbles: true }));
   });
-  await page.waitForFunction(() => !!window.destinationFrame);
-  await page.evaluate(() => window.destinationFrame());
-  assert.equal(await page.locator('#ytg-watch-transition').count(), 0, 'presented frame releases cover after navigation completes');
-  await page.evaluate(() => window.transition.destroy());
+  await page.waitForFunction(() => window.YTGamepadCoordinator.state.surfaceReady);
+  assert.equal(await page.evaluate(() => window.frameRequests), 0, 'new video is usable without waiting for an extra frame callback');
+  assert.equal(await page.locator('#ytg-watch-transition').count(), 0);
 });

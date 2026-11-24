@@ -35,6 +35,8 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
   const host = page.locator('#ytg-search-host');
   const input = host.locator('input');
   await host.waitFor({ state: 'visible' });
+  assert.equal(await host.evaluate(node => node.parentElement.id), 'ytg-client-search');
+  assert.equal(await host.locator('button[type=submit]').count(), 0);
   assert.equal(await input.inputValue(), 'existing');
   assert.equal(await page.locator('#search').isVisible(), false);
   const clear = host.getByRole('button', { name: 'Clear', exact: true });
@@ -59,7 +61,7 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
   await input.press('Enter');
   assert.equal(await page.evaluate(() => window.submissions.length), 1);
   await input.dispatchEvent('compositionend');
-  await host.locator('button[type=submit]').click();
+  await input.press('Enter');
   assert.deepEqual(await page.evaluate(() => window.submissions), ['component search', '中文']);
   await host.getByRole('button', { name: 'Voice search' }).click();
   assert.equal(await page.evaluate(() => window.voiceClicked), true);
@@ -109,7 +111,7 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
   assert.ok((await input.boundingBox()).width >= 32, 'the clear button leaves room for the query on a narrow header');
   assert.ok(await host.evaluate(node => node.scrollWidth <= node.clientWidth), 'search controls fit their header without overlap');
   assert.equal(await input.isVisible(), true);
-  assert.equal(await host.locator('button:visible,input:visible').count(), 4);
+  assert.equal(await host.locator('button:visible,input:visible').count(), 3);
   assert.equal(await input.getAttribute('data-ytg-search-input'), '');
   assert.equal((await host.boundingBox()).height, mouseHeight);
   assert.equal(await input.evaluate(node => node === window.__unifiedSearchInput), true);
@@ -117,21 +119,15 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
   const searchTargets = await host.evaluate(node => {
     const entry = node.querySelector('input');
     const clear = node.querySelector('.ytg-search-clear');
-    const submit = node.querySelector('button[type=submit]');
     const voice = node.querySelector('.ytg-search-voice');
     window.YTGamepad.focus(entry);
-    return ['right', 'right', 'right', 'left', 'left', 'left'].map(direction => {
+    return ['right', 'right', 'left', 'left'].map(direction => {
       window.YTGamepad.act(direction);
       const current = window.YTGamepad.current;
-      return current === entry ? 'input' : current === clear ? 'clear' : current === submit ? 'search' : current === voice ? 'voice' : 'outside';
+      return current === entry ? 'input' : current === clear ? 'clear' : current === voice ? 'voice' : 'outside';
     });
   });
-  assert.deepEqual(searchTargets, ['clear', 'search', 'voice', 'search', 'clear', 'input'], 'each search control is a separate target in both directions');
-  await page.evaluate(() => {
-    window.YTGamepad.focus(window.__pageDOM.querySelector('#ytg-search-host button[type=submit]'));
-    window.YTGamepad.act('confirm');
-  });
-  assert.equal(await page.evaluate(() => window.submissions.at(-1)), 'from gamepad keyboard');
+  assert.deepEqual(searchTargets, ['clear', 'voice', 'clear', 'input'], 'each search control is a separate target in both directions');
   await page.evaluate(() => {
     window.voiceClicked = false;
     window.YTGamepad.focus(window.__pageDOM.querySelector('#ytg-search-host .ytg-search-voice'));
@@ -155,7 +151,7 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
   assert.equal(await page.evaluate(() => window.submissions.at(-1)), 'from gamepad keyboard');
   await clear.click();
   await page.evaluate(() => window.YTGamepad.act('right'));
-  assert.equal(await host.locator('button[type=submit]').evaluate(node => window.YTGamepad.current === node), true, 'navigation skips the removed clear button');
+  assert.equal(await host.locator('.ytg-search-voice').evaluate(node => window.YTGamepad.current === node), true, 'navigation skips the removed clear button');
   await input.fill('from gamepad keyboard');
   await input.focus();
   await host.screenshot({ path: 'output/search-bar/gamepad.png' });
@@ -182,7 +178,7 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
   await input.fill('');
   await input.evaluate(node => node.blur());
   await page.evaluate(() => document.documentElement.setAttribute('data-ytg-language', 'zh-CN'));
-  await host.getByRole('button', { name: '搜索', exact: true }).waitFor();
+  await host.getByRole('textbox', { name: '搜索', exact: true }).waitFor();
   await host.screenshot({ path: 'output/search-bar/unified.png' });
   assert.equal(await host.getByRole('button', { name: '清空', exact: true }).count(), 0);
   await input.fill('手柄搜索');
@@ -209,6 +205,21 @@ test('component search uses API destinations, IME, voice, gamepad editing and te
   assert.equal(await discovery.getByRole('group', { name: '最近搜索' }).count(), 0);
   await suggested.click();
   assert.equal(await page.evaluate(() => window.submissions.at(-1)), 'elden walkthrough');
+  // A missing custom slot must never move our search input into the native masthead.
+  await page.evaluate(() => {
+    const slot = window.__pageDOM.querySelector('#ytg-client-search');
+    window.__searchSlot = { slot, parent: slot.parentElement, next: slot.nextSibling, host: slot.querySelector('#ytg-search-host') };
+    slot.remove();
+  });
+  await page.waitForFunction(() => window.__searchSlot.host.hidden);
+  assert.equal(await page.locator('ytd-masthead #ytg-search-host').count(), 0);
+  assert.equal(await page.locator('ytd-masthead #center').evaluate(node => node.classList.contains('ytg-search-replaced')), false);
+  await page.evaluate(() => {
+    const { slot, parent, next } = window.__searchSlot;
+    parent.insertBefore(slot, next);
+  });
+  await host.waitFor({ state: 'visible' });
+  assert.equal(await host.evaluate(node => node === window.__searchSlot.host && node.parentElement === window.__searchSlot.slot), true);
   await page.evaluate(() => { document.querySelector('#center').append(...window.detachedSearch); window.YTGamepadRuntime.destroy(); });
   assert.equal(await host.count(), 0);
   assert.equal(await page.locator('#search').isVisible(), true);

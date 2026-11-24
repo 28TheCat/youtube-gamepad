@@ -8,6 +8,7 @@ import type { DisposerHost } from '../../types/core';
 import { YTGamepadBindings } from '../input/bindings.ts';
 import { findPrimaryController } from '../input/primary-controller.ts';
 import { YTGamepadInlineSettings } from '../settings/inline-settings.ts';
+import { applyDisplayDensity } from '../shared/display-density';
 import { applyLanguage, languageDefault } from '../shared/i18n';
 export function startContent(localChannel?: import("../../types/ports").ApplicationChannel, onInvalidated?: Dispose, onSettingsApplied?: Dispose,
   interactionTrace?: import('../diagnostics/interaction-trace.ts').InteractionTrace) {
@@ -81,13 +82,14 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
       catch (other) { return Promise.reject(other); }
     }
   }
-  const defaults = { ...homeFilterDefaults, ...playbackParameterDefaults, playbackLayout: 'fullscreen' as const, ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, deadzone: 0.35, repeatDelay: 150, repeatInterval: 80, bindings: {}, bindingLayouts: null, shortcutLayouts: {} };
+  const defaults = { ...homeFilterDefaults, ...playbackParameterDefaults, playbackLayout: 'fullscreen' as const, displayDensity: 'standard', ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, deadzone: 0.35, repeatDelay: 150, repeatInterval: 80, bindings: {}, bindingLayouts: null, shortcutLayouts: {} };
   let appliedSettings: Settings | undefined;
   let themeRevision = 0;
   // Production settings stay inside the isolated module graph.
   const send = (raw: Record<string,unknown>) => {
     if (lifecycle.destroyed) return;
     applyLanguage(raw?.uiLanguage);
+    applyDisplayDensity(raw?.displayDensity);
     const { bindingLayouts: _layouts, uiLanguage: _language, ...initialValues } = defaults;
     const values: Settings = { ...initialValues, ...normalizePlaybackParameters(raw), ...normalizeHomeFilter(raw) };
     for (const key of ['enabled', 'theater', 'rightHandMode'] as const) if (typeof raw?.[key] === 'boolean') values[key] = raw[key];
@@ -223,9 +225,10 @@ export function startContent(localChannel?: import("../../types/ports").Applicat
         document.documentElement.toggleAttribute('dark', changes.uiTheme.newValue === 'dark');
       }
       if (changes.uiLanguage) applyLanguage(changes.uiLanguage.newValue);
+      if (changes.displayDensity) applyDisplayDensity(changes.displayDensity.newValue);
       // UI language does not change input policy. Avoid reapplying disabled
       // controls, which would otherwise close an open search during translation.
-      const pageSettingsChanged = Object.keys(changes).some(key => key !== 'uiLanguage' && key in defaults);
+      const pageSettingsChanged = Object.keys(changes).some(key => key !== 'uiLanguage' && key !== 'displayDensity' && key in defaults);
       if (pageSettingsChanged) void readSettings();
       if (pageSettingsChanged || changes.autoFullscreen) reportConnection(true);
     }

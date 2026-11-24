@@ -35,16 +35,27 @@ export function createCommentOperations(port: {
     callbacks(actions: {
       active(): boolean; changed(): void; openThread(key: string): void;
       load(): void; post(text: string, key?: string): Promise<unknown>;
+      like?(key: string): Promise<boolean>;
       sort(value: 'TOP_COMMENTS' | 'NEWEST_FIRST'): unknown;
       translate(key: string, target: string): void;
     }): WatchPanelActions {
       return {
         openThread(key) { if (actions.active() && operations.canOpen(key)) actions.openThread(key); },
-        replies() { if (actions.active() && operations.more()) actions.changed(); },
+        replies(key) {
+          if (!actions.active()) return;
+          if (key) { port.replies(key); actions.changed(); }
+          else if (operations.more()) actions.changed();
+        },
         load() { if (actions.active()) { actions.load(); actions.changed(); } },
         async postComment(text, key) {
           if (!actions.active()) return false;
           const ok = await actions.post(text, key);
+          if (actions.active()) actions.changed();
+          return ok === true;
+        },
+        async likeComment(key) {
+          if (!actions.active()) return false;
+          const ok = await actions.like?.(key);
           if (actions.active()) actions.changed();
           return ok === true;
         },

@@ -16,7 +16,7 @@ test('bundled next parser preserves queue positions and return cache under CSP',
     if (new URL(request.url()).pathname !== '/youtubei/v1/next') {
       return route.fulfill({ contentType: 'text/html', headers: {
         'Content-Security-Policy': "default-src 'self'; script-src 'self'; connect-src 'self'"
-      }, body: '<!doctype html><html><body><ytd-app></ytd-app></body></html>' });
+      }, body: '<!doctype html><html><body><ytd-app></ytd-app><div id="movie_player"><video></video></div></body></html>' });
     }
     const body = request.postDataJSON(); calls.push(body);
     if (body.continuation) return route.fulfill({ json: { onResponseReceivedEndpoints: [{ reloadContinuationItemsCommand: {
@@ -45,6 +45,10 @@ test('bundled next parser preserves queue positions and return cache under CSP',
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('https://www.youtube.com/watch?v=current&list=PLtest&index=2');
   await page.evaluate(() => {
+    // SPA reuse: neither decoded frames nor the old native ID may block next.
+    const player = document.querySelector('#movie_player');
+    player.getVideoData = () => ({ video_id: 'previous' });
+    player.getPlayerResponse = () => ({ videoDetails: { videoId: 'previous' } });
     window.callNextFixture = (operation, args = {}) => {
       const id = crypto.randomUUID(); let snapshot;
       const receive = event => {

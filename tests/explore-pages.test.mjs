@@ -1,7 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { importSettingsModel } from './helpers/settings-model.mjs';
-const { explorePages, resolveExplorePage, isNativeFlowRoute, isInnerTubeBrowseRoute, searchHref, sidebarBrowseEndpoint } = await importSettingsModel('src/shared/explore-pages.ts');
+const { pageRouteMode, explorePages, resolveExplorePage, isNativeFlowRoute, isInnerTubeBrowseRoute, searchHref, sidebarBrowseEndpoint } = await importSettingsModel('src/shared/explore-pages.ts');
+
+test('page ownership defaults to native and distinguishes supported surfaces', () => {
+  for (const route of ['/feed/downloads', '/premium', '/new', '/feed/report_history', '/account', '/future-page', 'https://music.youtube.com/'])
+    assert.equal(pageRouteMode(route), 'native', route);
+  for (const route of ['/', '/results?search_query=cat', '/feed/subscriptions', '/@creator/videos', '/playlist?list=WL'])
+    assert.equal(pageRouteMode(route), 'browse', route);
+  assert.equal(pageRouteMode('/watch?v=abc'), 'watch');
+  assert.equal(pageRouteMode('/shorts/abc'), 'shorts');
+});
 
 test('search navigation uses bounded queries and fixed search endpoints', () => {
   const href = searchHref('  中文 & music  ');

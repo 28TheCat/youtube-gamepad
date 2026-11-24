@@ -39,9 +39,11 @@ export interface NavigationReads {
   candidates: Map<NavigationRoot, InteractiveElement[]>;
 }
 export interface RowMemory { column: number | null }
-export interface YouTubeVideoDetails { videoId?: string; isLive?: boolean; title?: string; author?: string; shortDescription?: string; channelId?: string; viewCount?: string }
+export interface DescriptionRun { text: string; href?: string }
+export interface YouTubeVideoDetails { descriptionRuns?: DescriptionRun[]; videoId?: string; isLive?: boolean; title?: string; author?: string; shortDescription?: string; channelId?: string; viewCount?: string }
 export interface YouTubePlayer extends HTMLElement {
   loadVideoById?(videoId: string): void;
+  playVideo?(): void;
   getVideoData?(): { video_id?: unknown };
   getPlayerResponse?(): { videoDetails?: { videoId?: unknown } };
   showControls?(): void; hideControls?(): void;

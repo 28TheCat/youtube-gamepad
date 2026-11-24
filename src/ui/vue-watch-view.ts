@@ -10,6 +10,7 @@ import type { PlaybackMetadata as Metadata, PlaybackControlState, PlaybackPresen
 import { sameRecommendations } from './playback-presentation';
 import { createPlaybackModel } from '../playback/playback-model';
 import { currentLanguage } from '../shared/i18n';
+import commentsCSS from './comments.css?inline';
 import mediaActionCSS from './media-action.css?inline';
 import channelControlsCSS from './channel-controls.css?inline';
 
@@ -22,7 +23,7 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
     if (text !== undefined) node.textContent = text;
     return node;
   };
-  const style = make('style'); style.textContent = styles.watch + mediaActionCSS + channelControlsCSS;
+  const style = make('style'); style.textContent = styles.watch + mediaActionCSS + channelControlsCSS + commentsCSS;
   // Separate Vue roots keep high-frequency progress/focus work out of metadata
   // and list rendering. The shell and control DOM identities remain stable.
   const surface = make('div', 'surface'), bottom = make('section', 'bottom');
@@ -47,7 +48,7 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
       observedLayout = nextLayout;
       if (!windowed()) { collectionOpen = false; surface.classList.remove('fullscreen-collection-open'); }
       else if (hasCollection()) collectionOpen = true;
-      paintProgress(); paintControls(); paintRecommendations(); if (sidePositions.has(sideKey())) restoreSideScroll(); else revealCollectionCurrent();
+      paintProgress(); paintControls(); paintRecommendations(); paintHints(); if (sidePositions.has(sideKey())) restoreSideScroll(); else revealCollectionCurrent();
     }
   });
   languageObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-ytg-language', 'data-ytg-playback-layout'] });
@@ -149,9 +150,11 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
         container.scrollTop += item.top - bounds.top - heading - 8;
     });
   }
-  let hints: { row: WatchSnapshot['row']; adjusting: boolean; canSeek: boolean } | undefined;
+  let hints: Record<string, unknown> | undefined;
   function paintHints() {
-    const next = { row, adjusting, canSeek: model.state.value.canSeek };
+    const target = [...controlNodes.values()].find(node => node.dataset.focusId === selected);
+    const next = { row, adjusting, canSeek: model.state.value.canSeek, windowed: windowed(), hasRecommendations: (collectionOpen ? queue : recommendations).length > 0,
+      focusLabel: target && !target.disabled ? target.getAttribute('aria-label') || target.textContent?.trim() || '' : '' };
     if (hints && equal(hints, next)) return;
     hints = next; render(h(PlaybackHints, { ...next, controllerStyle }), hintsRoot);
   }
@@ -175,18 +178,19 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
       queue = nextQueue.map(item => ({ ...item })); playlistTitle = value.playlistTitle || ''; playlistTotal = value.playlistTotal;
       if (!hasCollection()) { collectionOpen = false; collectionBackdrop.hidden = true; surface.classList.remove('fullscreen-collection-open'); }
       else if (!hadCollection && windowed()) collectionOpen = true;
-      const next: Metadata = { title: value.title, channel: value.channel, viewCount: value.viewCount, likeCount: value.likeCount, metadataFailed: value.metadataFailed,
+      const next: Metadata = { title: value.title, channel: value.channel, viewCount: value.viewCount, likeCount: value.likeCount, commentCount: value.commentCount, metadataFailed: value.metadataFailed, metadataStatus: value.metadataStatus, waiting: value.waiting,
         channelBadge: value.channelBadge, avatar: value.avatar, notificationPreference: value.notificationPreference, subscribed: value.subscribed, liked: value.liked, disliked: value.disliked };
-      const headingChanged = ['title', 'channel', 'channelBadge', 'viewCount', 'metadataFailed'].some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
-      const controlsChanged = ['channel', 'channelBadge', 'avatar', 'notificationPreference', 'subscribed', 'liked', 'disliked', 'likeCount'].some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
+      const headingChanged = ['title', 'channel', 'channelBadge', 'viewCount', 'metadataFailed', 'metadataStatus', 'waiting'].some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
+      const controlFields = windowed() ? ['channel', 'channelBadge', 'avatar', 'notificationPreference', 'subscribed', 'liked', 'disliked', 'likeCount', 'commentCount', 'metadataFailed', 'metadataStatus', 'waiting'] : ['commentCount'];
+      const controlsChanged = controlFields.some(key => metadata[key as keyof Metadata] !== next[key as keyof Metadata]);
       metadata = next;
       if (headingChanged) render(h(PlaybackMetadata, { page: metadata, activate }), headingRoot);
       if (controlsChanged || queueChanged) paintControls();
       const previousFilter = recommendationFilters.find(item => item.selected)?.key;
       const filtersChanged = JSON.stringify(recommendationFilters) !== JSON.stringify(value.recommendationFilters || []);
       recommendationFilters = (value.recommendationFilters || []).map(item => ({ ...item }));
-      const failed = features.recommendations === 'failed';
-      const loading = value.recommendationsLoading === true;
+      const failed = value.recommendationsStatus === 'failed' || features.recommendations === 'failed';
+      const loading = value.recommendationsStatus === 'loading' || value.recommendationsLoading === true;
       if (!sameRecommendations(recommendations, value.recommendations) || failed !== recommendationsFailed || loading !== recommendationsLoading || queueChanged || filtersChanged) {
         recommendations = value.recommendations; recommendationsFailed = failed; recommendationsLoading = loading; paintRecommendations();
         if (previousFilter !== recommendationFilters.find(item => item.selected)?.key && !collectionOpen) {
@@ -195,6 +199,7 @@ export function createVueWatchView({ activate, seek, closePanel, controllerStyle
         }
         if (queueChanged) revealCollectionCurrent();
       }
+      paintHints();
     },
     selection(nextRow, nextSelected, nextAdjusting) {
       if (destroyed) return;

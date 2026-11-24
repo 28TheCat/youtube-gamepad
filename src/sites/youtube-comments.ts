@@ -25,11 +25,12 @@ export function createCommentsService() {
   let state: CommentsSnapshot = { route: '', items: [], loading: false, failed: false, hasMore: true };
   let page: YT.Comments | undefined, api: Innertube | undefined;
   let pending: AbortController | undefined, destroyed = false, initialized = false, emptyPages = 0;
-  let failedKey: string | undefined;
+  let failedKey: string | undefined, failedBranch: string | undefined;
   let sort: 'TOP_COMMENTS' | 'NEWEST_FIRST' = 'TOP_COMMENTS', posting = false;
   let writeController: AbortController | undefined;
   const signedIn = () => (window as any).ytcfg?.get?.('LOGGED_IN') === true;
   const threads = new Map<string, ThreadState>();
+  const reactionNodes = new Map<string, InstanceType<typeof YTNodes.CommentView>>();
   const translations = new Map<string, NonNullable<CommentReplySnapshot['translation']>>();
   const translationJobs = new Map<string, AbortController>();
   const nativeTranslations = new Map<string, NativeCommentTranslation>();
@@ -38,7 +39,7 @@ export function createCommentsService() {
   function syncRoute() {
     if (state.route === route()) return;
     pending?.abort(); pending = undefined; page = undefined; api = undefined;
-    initialized = false; failedKey = undefined; emptyPages = 0; threads.clear();
+    initialized = false; failedKey = undefined; emptyPages = 0; threads.clear(); reactionNodes.clear();
     writeController?.abort(); writeController = undefined; posting = false; sort = 'TOP_COMMENTS';
     for (const job of translationJobs.values()) job.abort();
     translationJobs.clear(); translations.clear();
@@ -53,7 +54,7 @@ export function createCommentsService() {
     if (!context?.client) throw new Error('YouTube context unavailable');
     const headers = await createYouTubeHeaders(context);
     const raw = await requestYouTube('next', { method: 'POST', credentials: 'same-origin', headers,
-      body: JSON.stringify({ context, continuation }), signal: controller.signal });
+      body: JSON.stringify({ context, continuation }), signal: controller.signal }, 20000, false);
     if (destroyed || captured !== state || captured.route !== route() || controller.signal.aborted) throw new Error('Comments cancelled');
     for (const [key, entry] of nativeCommentTranslations(raw)) {
       if (entry) nativeTranslations.set(key, entry);
@@ -74,7 +75,7 @@ export function createCommentsService() {
     session.actions.execute = (async (endpoint: string, args?: Record<string, any>) => {
       const path = endpoint.replace(/^\//, '');
       if (args?.protobuf || args?.override_endpoint) throw new Error('Unexpected comments request');
-      if (['comment/create_comment', 'comment/create_comment_reply'].includes(path)) {
+      if (['comment/create_comment', 'comment/create_comment_reply', 'comment/perform_comment_action'].includes(path)) {
         if (!posting || !writeController || !signedIn()) throw new Error('Comment submission unavailable');
         const controller = writeController, captured = state;
         const context = (window as any).ytcfg?.get?.('INNERTUBE_CONTEXT');
@@ -101,22 +102,44 @@ export function createCommentsService() {
     const dialog = entry.thread.comment?.reply_command?.dialog as YTNodes.CommentReplyDialog | undefined;
     return signedIn() && !!dialog?.reply_button?.endpoint;
   }
+  function reactionState(key: string) {
+    const node = reactionNodes.get(key);
+    return { liked: node?.is_liked === true, canLike: signedIn() && !!(node?.is_liked ? node.unlike_command : node?.like_command), likeCount: node?.like_count?.slice(0, 80) };
+  }
+  async function like(key: string) {
+    syncRoute();
+    const node = reactionNodes.get(key);
+    if (destroyed || posting || pending || !node || !reactionState(key).canLike) return false;
+    const captured = state, controller = new AbortController(), liked = node.is_liked === true;
+    const endpoint = liked ? node.unlike_command : node.like_command;
+    posting = true; writeController = controller; notify();
+    try {
+      const result = await endpoint!.call(client().actions);
+      if (destroyed || captured !== state || controller.signal.aborted || captured.route !== route() || !result.success) return false;
+      node.is_liked = !liked;
+      const count = Number(node.like_count?.replace(/,/g, ''));
+      if (Number.isSafeInteger(count) && count >= 0) node.like_count = String(Math.max(0, count + (liked ? -1 : 1)));
+      snapshot(); return true;
+    } catch { return false; }
+    finally { if (writeController === controller) { writeController = undefined; posting = false; notify(); } }
+  }
   function snapshot() {
     let remainingReplies = 200;
     state.items = [...threads].map(([key, entry]) => {
       const comment = entry.thread.comment;
       const replyCount = Number(comment?.reply_count?.replace(/,/g, ''));
       const replies = [...entry.replies.values()].slice(0, Math.min(100, remainingReplies))
-        .map(reply => ({ ...reply, ...(nativeTranslations.has(reply.key) ? { translationTarget: nativeTranslations.get(reply.key)!.language } : {}),
+        .map(reply => ({ ...reply, ...(entry.cursors.has(reply.key) ? { hasChildReplies: true } : {}), ...reactionState(reply.key), ...(nativeTranslations.has(reply.key) ? { translationTarget: nativeTranslations.get(reply.key)!.language } : {}),
           ...(translations.has(reply.key) ? { translation: translations.get(reply.key) } : {}) }));
       remainingReplies -= replies.length;
-      return { key, ...(canReply(entry) ? { canReply: true } : {}), author: String(comment?.author?.name || '').slice(0, 200),
+      return { key, ...reactionState(key), ...(canReply(entry) ? { canReply: true } : {}), author: String(comment?.author?.name || '').slice(0, 200),
         ...(nativeTranslations.has(key) ? { translationTarget: nativeTranslations.get(key)!.language } : {}),
         ...(translations.has(key) ? { translation: translations.get(key) } : {}),
         ...(comment?.author?.best_thumbnail?.url ? { avatar: comment.author.best_thumbnail.url.slice(0, 4096) } : {}),
         text: String(comment?.content?.toString() || '').slice(0, 4000),
+        publishedTime: comment?.published_time?.slice(0, 100),
         ...(Number.isSafeInteger(replyCount) && replyCount >= 0 ? { replyCount } : {}),
-        hasReplies: remainingReplies > 0 && hasReplies(entry), repliesLabel: 'Load replies',
+        hasReplies: remainingReplies > 0 && hasReplies(entry) && entry.cursors.has(key), repliesLabel: 'Load replies',
         replies };
     });
   }
@@ -136,10 +159,12 @@ export function createCommentsService() {
         const comment = thread?.comment || (item.is(YTNodes.CommentView) ? item : undefined);
         const key = comment?.comment_id;
         if (!key || !comment?.content || key === entry.thread.comment?.comment_id) continue;
+        reactionNodes.set(key, comment);
         if (!entry.replies.has(key)) {
-          entry.replies.set(key, { key, ...(replyTo ? { replyTo } : {}),
+          entry.replies.set(key, { key, ...(parent !== entry.thread.comment?.comment_id ? { parentId: parent } : {}), ...(replyTo ? { replyTo } : {}),
             ...(comment.author?.best_thumbnail?.url ? { avatar: comment.author.best_thumbnail.url.slice(0, 4096) } : {}),
-            author: String(comment.author?.name || '').slice(0, 200), text: String(comment.content).slice(0, 2000) });
+            author: String(comment.author?.name || '').slice(0, 200), text: String(comment.content).slice(0, 2000),
+            publishedTime: comment.published_time?.slice(0, 100) });
           budget--;
         }
         const data = thread?.comment_replies_data;
@@ -153,7 +178,7 @@ export function createCommentsService() {
     entry.cursors.delete(owner);
     collect(owner, items);
   }
-  async function request(key?: string) {
+  async function request(key?: string, branch?: string) {
     const captured = state, controller = new AbortController();
     pending = controller; captured.loading = true; captured.failed = false;
     // Let the synchronous bridge reply before publishing a loading update.
@@ -163,7 +188,9 @@ export function createCommentsService() {
       if (key) {
         const entry = threads.get(key);
         if (!entry || !hasReplies(entry)) return;
-        const [owner, endpoint] = entry.cursors.entries().next().value!;
+        const selected = branch ? [branch, entry.cursors.get(branch)] as const : entry.cursors.entries().next().value;
+        if (!selected?.[1]) return;
+        const [owner, endpoint] = selected;
         const next = await endpoint.call(client().session.actions, { parse: true });
         if (captured !== state || captured.route !== route() || controller.signal.aborted || destroyed) return;
         const action = next.on_response_received_endpoints?.find(item => 'contents' in item);
@@ -182,15 +209,18 @@ export function createCommentsService() {
           const entry: ThreadState = { thread, cursors: new Map(), seenBranches: new Set(), replies: new Map() };
           const data = thread.comment_replies_data;
           if (data) replyPage(entry, comment.comment_id, [...data.contents, ...data.sub_threads]);
+          reactionNodes.set(comment.comment_id, comment);
           threads.set(comment.comment_id, entry);
         }
         page = next; initialized = true;
+        const count = [next.header?.comments_count?.toString(), next.header?.count?.toString()].find(value => value && value !== 'N/A');
+        if (count && count !== 'N/A') captured.commentCount = count.slice(0, 80);
         emptyPages = threads.size === before ? emptyPages + 1 : 0;
         captured.hasMore = next.has_continuation && threads.size < 100 && emptyPages < 2;
       }
-      failedKey = undefined; snapshot();
+      failedKey = undefined; failedBranch = undefined; snapshot();
     } catch {
-      if (captured === state && captured.route === route() && !destroyed) { captured.failed = true; failedKey = key; }
+      if (captured === state && captured.route === route() && !destroyed) { captured.failed = true; failedKey = key; failedBranch = branch; }
     } finally {
       clearTimeout(timer);
       if (pending === controller) { pending = undefined; captured.loading = false; }
@@ -203,17 +233,20 @@ export function createCommentsService() {
     if (pending) return true;
     if (start && initialized && !state.failed) return true;
     if (!state.hasMore && !state.failed) return false;
-    void request(state.failed ? failedKey : undefined); return true;
+    void request(state.failed ? failedKey : undefined, state.failed ? failedBranch : undefined); return true;
   }
   function replies(key: string) {
     syncRoute();
-    if (destroyed || !threads.has(key)) return false;
+    const root = threads.has(key) ? key : [...threads].find(([, entry]) => entry.replies.has(key))?.[0];
+    if (destroyed || !root) return false;
     if (pending) return true;
-    if (!hasReplies(threads.get(key)!)) return false;
-    void request(key); return true;
+    const branch = state.failed && failedKey === root ? failedBranch : key;
+    if (!hasReplies(threads.get(root)!) || !branch || !threads.get(root)!.cursors.has(branch)) return false;
+    void request(root, branch); return true;
   }
   function interaction() {
-    return { signedIn: signedIn(), canPost: signedIn() && !!(page?.header?.create_renderer as any)?.submit_button?.endpoint,
+    const composer = page?.header?.create_renderer as YTNodes.CommentSimplebox | undefined;
+    return { avatar: composer?.author_thumbnail?.[0]?.url, placeholder: composer?.placeholder?.toString(), signedIn: signedIn(), canPost: signedIn() && !!(page?.header?.create_renderer as any)?.submit_button?.endpoint,
       sort, sortAvailable: initialized, posting };
   }
   function changeSort(value: 'TOP_COMMENTS' | 'NEWEST_FIRST') {
@@ -221,7 +254,7 @@ export function createCommentsService() {
     if (destroyed || posting || pending || !initialized || !['TOP_COMMENTS', 'NEWEST_FIRST'].includes(value)) return false;
     if (sort === value) return true;
     sort = value; page = undefined; initialized = false; failedKey = undefined; emptyPages = 0;
-    threads.clear(); state.items = []; state.hasMore = true;
+    threads.clear(); reactionNodes.clear(); state.items = []; state.hasMore = true;
     void request(); return true;
   }
   async function post(text: string, key?: string) {
@@ -235,7 +268,7 @@ export function createCommentsService() {
       const result = key ? await entry!.thread.comment!.reply(text.trim()) : await page!.createComment(text.trim());
       if (destroyed || captured !== state || captured.route !== route() || controller.signal.aborted || !result.success) return false;
       // Refresh through the server rather than inventing an author or comment ID.
-      page = undefined; initialized = false; threads.clear(); state.items = []; state.hasMore = true;
+      page = undefined; initialized = false; threads.clear(); reactionNodes.clear(); state.items = []; state.hasMore = true;
       void request(); return true;
     } catch { return false; }
     finally { if (writeController === controller) { writeController = undefined; posting = false; notify(); } }
@@ -277,7 +310,7 @@ export function createCommentsService() {
     })();
     return true;
   }
-  return { read() { syncRoute(); return { ...state, interaction: interaction() }; }, more, replies, translate, post, changeSort, routeChanged: syncRoute,
+  return { read() { syncRoute(); return { ...state, interaction: interaction() }; }, more, replies, translate, like, post, changeSort, routeChanged: syncRoute,
     destroy() { destroyed = true; pending?.abort(); writeController?.abort(); pending = undefined; for (const job of translationJobs.values()) job.abort();
-      translationJobs.clear(); translations.clear(); nativeTranslations.clear(); threads.clear(); api = undefined; page = undefined; } };
+      translationJobs.clear(); translations.clear(); nativeTranslations.clear(); threads.clear(); reactionNodes.clear(); api = undefined; page = undefined; } };
 }

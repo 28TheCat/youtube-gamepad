@@ -18,12 +18,95 @@ const result = await build({ configFile: false, publicDir: false, logLevel: 'sil
     formats: ['iife'], name: 'PlaybackViewFixture' } }
 });
 const code = (Array.isArray(result) ? result[0] : result).output.find(item => item.type === 'chunk').code;
-const styles = readFileSync(new URL('../src/ui/watch.css', import.meta.url), 'utf8');
+const styles = ['watch.css', 'watch-recommendations.css', 'watch-collection.css']
+  .map(file => readFileSync(new URL(`../src/ui/${file}`, import.meta.url), 'utf8')).join('\n');
 const theme = readFileSync(new URL('../src/ui/theme.css', import.meta.url), 'utf8');
+
+for (const layout of ['windowed', 'fullscreen']) test(`metadata skeletons resolve independently (${layout})`, async t => {
+  const page = await browserPage(t);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setContent(`<html data-ytg-playback-layout="${layout}"><head><style>${theme}</style></head><body></body></html>`);
+  await page.evaluate(code);
+  await page.evaluate(styles => {
+    window.view = PlaybackViewFixture.createVueWatchView({ activate() {}, closePanel() {}, styles: { watch: styles }, controllerStyle: { badge() {}, hint() {}, bind() {} } });
+    window.view.host.hidden = false; window.view.presentation.visible(true);
+    window.info = { key: 'loading', isWatch: true, title: '', channel: '', waiting: true, recommendations: [] };
+    window.view.presentation.page(window.info, {});
+  }, styles);
+  const host = page.locator('#ytg-watch');
+  assert.equal(await host.locator('.metadata-skeleton').count(), layout === 'windowed' ? 4 : 2);
+  const before = await host.locator('.heading').boundingBox();
+  await page.evaluate(() => {
+    window.info = { ...window.info, title: 'Loaded title', viewCount: 1234 };
+    window.view.presentation.page(window.info, {});
+  });
+  assert.equal(await host.locator('.metadata-title-skeleton,.metadata-views-skeleton').count(), 0);
+  assert.equal(await host.locator('.channel-avatar-skeleton,.channel-name-skeleton').count(), layout === 'windowed' ? 2 : 0);
+  await page.evaluate(() => window.view.presentation.page({ ...window.info, channel: 'Creator', waiting: false }, {}));
+  assert.equal(await host.locator('.metadata-skeleton').count(), 0);
+  const after = await host.locator('.heading').boundingBox();
+  assert.ok(Math.abs(before.height - after.height) <= 1, 'loading and loaded headings reserve the same height');
+  await page.evaluate(() => window.view.presentation.page({ ...window.info, title: '', channel: '', metadataFailed: true }, {}));
+  assert.equal(await host.locator('.metadata-skeleton').count(), 0, 'failure exits skeleton state');
+});
+
+for (const width of [1920, 1510, 1280, 800]) test(`fullscreen toolbar centers transport and keeps action groups apart (${width})`, async t => {
+  const page = await browserPage(t);
+  await page.setViewportSize({ width, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setContent(`<html class="ytg-gamepad-input" data-ytg-language="zh-CN" data-ytg-playback-layout="fullscreen"><head><style>${theme}body{background:#182126}</style></head><body></body></html>`);
+  await page.evaluate(code);
+  await page.evaluate(styles => {
+    window.view = PlaybackViewFixture.createVueWatchView({ activate() {}, closePanel() {}, styles: { watch: styles },
+      controllerStyle: { badge() {}, hint() {}, bind(node, text, attribute) { if (attribute) node.setAttribute(attribute, text); } } });
+    window.view.host.hidden = false; window.view.presentation.visible(true);
+    window.view.presentation.page({ key: '/watch?v=layout&list=PLtest', isWatch: true, title: '视频标题', channel: '频道名称',
+      subscribed: true, notificationPreference: 'NONE', likeCount: 28000, commentCount: '176', recommendations: [],
+      queue: [{ key: 'episode', label: 'Episode', channel: 'Creator', thumbnail: '', queue: true, selected: true }] }, {});
+    window.updatePlayback = live => window.view.presentation.playback({ video: { paused: true, currentTime: 20,
+      duration: live ? Infinity : 100, volume: .5, muted: false, timeline: { isLive: live, canSeek: true, start: 0, end: 100, atLiveEdge: false } },
+      captionsEnabled: true, settingsOpen: false });
+    window.updatePlayback(false);
+  }, styles);
+  for (const live of [false, true]) {
+    await page.evaluate(live => window.updatePlayback(live), live);
+    const geometry = await page.locator('#ytg-watch .toolbar').evaluate(toolbar => {
+      const rect = node => { const b = node.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }; };
+      const root = toolbar.getRootNode();
+      return { transport: rect(toolbar.querySelector('.transport-group')),
+        actions: rect(toolbar.querySelector('.right-group')), play: rect(toolbar.querySelector('.play')),
+        track: root.querySelector('.track').getBoundingClientRect().height,
+        buttons: [...toolbar.querySelectorAll('button:not([hidden])')].map(node => ({ ...rect(node), action: node.dataset.action,
+          children: [...node.children].filter(child => getComputedStyle(child).display !== 'none').map(rect) })) };
+    });
+    assert.equal(geometry.track, 10, 'fullscreen timeline has a thicker visible track');
+    assert.equal(await page.locator('#ytg-watch .toolbar .channel-group,.toolbar .media-action').count(), 0, 'secondary actions leave the primary toolbar');
+    if (width > 800) {
+      assert.ok(Math.abs((geometry.play.left + geometry.play.right) / 2 - width / 2) < 1, 'play is centered on the video');
+      assert.ok(geometry.transport.right <= geometry.actions.left || geometry.actions.top >= geometry.transport.bottom,
+        'right actions stay separate from centered transport');
+    } else assert.ok(geometry.actions.top >= geometry.transport.bottom, 'narrow screens keep primary actions on separate rows');
+    for (let index = 0; index < geometry.buttons.length; index++) {
+      const button = geometry.buttons[index];
+      assert.ok(button.left >= 0 && button.right <= width, `${button.action} stays on screen`);
+      for (const child of button.children) assert.ok(child.left >= button.left - 1 && child.right <= button.right + 1,
+        `${button.action} content fits its button`);
+      for (const other of geometry.buttons.slice(index + 1)) assert.ok(button.right <= other.left || other.right <= button.left ||
+        button.bottom <= other.top || other.bottom <= button.top, `${button.action} and ${other.action} do not overlap`);
+    }
+  }
+  await page.evaluate(() => window.updatePlayback(false));
+  mkdirSync(new URL('../output/playwright/', import.meta.url), { recursive: true });
+  const toolbar = await page.locator('#ytg-watch .toolbar').boundingBox();
+  const timeline = await page.locator('#ytg-watch .times').boundingBox();
+  await page.screenshot({ path: fileURLToPath(new URL(`../output/playwright/fullscreen-toolbar-${width}.png`, import.meta.url)),
+    clip: { x: 0, y: timeline.y - 12, width, height: toolbar.y + toolbar.height - timeline.y + 28 } });
+  await page.evaluate(() => window.view.presentation.destroy());
+});
 
 test('shared action buttons reflect player state and delegate commands', async t => {
   const page = await browserPage(t);
-  await page.setContent('<html data-ytg-language="zh-CN"><body></body></html>');
+  await page.setContent('<html data-ytg-language="zh-CN" data-ytg-playback-layout="windowed"><body></body></html>');
   await page.evaluate(code);
   await page.evaluate(styles => {
     window.actions = [];
@@ -33,18 +116,19 @@ test('shared action buttons reflect player state and delegate commands', async t
     window.view.presentation.playback({ video: { paused: true, muted: true, currentTime: 0, duration: 30, volume: .5 }, captionsEnabled: false, settingsOpen: false });
   }, styles);
   const controls = page.locator('#ytg-watch .toolbar');
-  assert.equal(await controls.locator('.media-action').count(), 4);
+  assert.equal(await controls.locator('.media-action').count(), 3);
   assert.equal(await controls.locator('[data-action=like]').getAttribute('aria-pressed'), 'true');
-  assert.equal(await controls.locator('[data-action=mute]').getAttribute('aria-pressed'), 'true');
   assert.equal(await controls.locator('[data-action=save]').getAttribute('aria-pressed'), null);
   const like = controls.locator('[data-action=like]');
   assert.equal(await like.textContent(), '');
   await page.evaluate(() => window.view.presentation.page({ key: 'video', isWatch: true, title: 'Video',
-    channel: 'Creator', liked: true, likeCount: 28000, recommendations: [] }, {}));
+    channel: 'Creator', liked: true, likeCount: 28000, commentCount: '21', recommendations: [] }, {}));
+  assert.match(await page.locator('#ytg-watch [data-action=comments]').textContent(), /(?:Comments|评论) 21/);
+  assert.match(await page.locator('#ytg-watch [data-action=comments]').getAttribute('aria-label'), /(?:Comments|评论) 21/);
   assert.equal(await like.textContent(), '2.8万');
-  for (const action of ['like', 'comments', 'save', 'mute']) await controls.locator(`[data-action=${action}]`).click();
-  assert.deepEqual(await page.evaluate(() => window.actions), ['like', 'comments', 'save', 'mute']);
-  await page.evaluate(() => document.documentElement.setAttribute('data-ytg-language', 'en'));
+  for (const action of ['like', 'comments', 'save']) await controls.locator(`[data-action=${action}]`).click();
+  assert.deepEqual(await page.evaluate(() => window.actions), ['like', 'comments', 'save']);
+  await page.evaluate(() => { document.documentElement.setAttribute('data-ytg-language', 'en'); document.documentElement.dataset.ytgPlaybackLayout = 'fullscreen'; });
   for (const seekStep of [20, 7]) {
     await page.evaluate(seekStep => window.view.presentation.playback({ seekStep, video: { paused: true, currentTime: 0, duration: 30 }, captionsEnabled: false, settingsOpen: false }), seekStep);
     assert.equal(await controls.locator('[data-action=seekBack]').getAttribute('aria-label'), `Rewind ${seekStep} seconds`);
@@ -78,8 +162,8 @@ test('shared channel avatars fall back on errors and recover when the source cha
   assert.equal(await avatar.textContent(), '😀');
   assert.equal(await avatar.locator('img').count(), 0);
   const before = await avatar.boundingBox();
-  assert.equal(before.width, 36);
-  assert.equal(before.height, 36);
+  assert.equal(before.width, 44);
+  assert.equal(before.height, 44);
   await page.evaluate(() => window.view.presentation.page({ ...window.pageInfo, avatar: 'https://avatars.test/good.svg' }, {}));
   await page.waitForFunction(() => window.view.root.querySelector('.channel-portrait img')?.naturalWidth > 0);
   assert.deepEqual(await avatar.boundingBox(), before, 'switching between an image and fallback preserves avatar size');
@@ -90,25 +174,23 @@ test('shared channel avatars fall back on errors and recover when the source cha
   for (const controller of [true, false]) {
     await page.evaluate(value => document.documentElement.classList.toggle('ytg-gamepad-input', value), controller);
     for (const action of ['channel', 'subscribe', 'description']) {
-      assert.equal(await page.locator(`#ytg-watch [data-action="${action}"]`).evaluate(node => getComputedStyle(node).height), controller ? '48px' : '38px');
+      assert.equal(await page.locator(`#ytg-watch [data-action="${action}"]`).evaluate(node => getComputedStyle(node).height), controller || action === 'channel' ? '48px' : '38px');
     }
-    assert.equal(await avatar.evaluate(node => getComputedStyle(node).width), '36px');
+    const size = await avatar.boundingBox();
+    assert.equal(size.width, 44);
+    assert.equal(size.height, 44);
   }
   await page.evaluate(() => window.view.presentation.page({ ...window.pageInfo, channel: '一隻土撥鼠MrMarmot', channelBadge: 'verified', avatar: 'https://avatars.test/good.svg' }, {}));
   await avatar.locator('img').waitFor();
   mkdirSync('output/playwright', { recursive: true });
   await page.locator('#ytg-watch .channel-group').screenshot({ path: 'output/playwright/channel-controls.png' });
   await page.evaluate(() => document.documentElement.setAttribute('data-ytg-playback-layout', 'fullscreen'));
-  assert.equal(await page.locator('#ytg-watch .channel-name').isVisible(), false);
-  assert.equal(await channel.evaluate(node => getComputedStyle(node).width), '48px');
-  const subscribe = page.locator('#ytg-watch [data-action="subscribe"]');
-  const colors = await subscribe.evaluate(node => { const style = getComputedStyle(node); return [style.color, style.backgroundColor]; });
-  assert.notEqual(colors[0], colors[1], 'fullscreen subscription text contrasts with its fill');
+  assert.equal(await page.locator('#ytg-watch [data-action="channel"],#ytg-watch [data-action="subscribe"]').count(), 0, 'fullscreen moves channel actions into its secondary menu');
 
 
 });
 
-test('recommendations leave loading blank and show text before delayed covers without shifting cards', async t => {
+test('recommendations show skeletons while loading and text before delayed covers without shifting cards', async t => {
   const page = await browserPage(t);
   let releaseCover;
   const coverReady = new Promise(resolve => { releaseCover = resolve; });
@@ -129,10 +211,15 @@ test('recommendations leave loading blank and show text before delayed covers wi
   }, styles);
   const host = page.locator('#ytg-watch');
   assert.equal(await host.locator('.empty').count(), 0);
+  await page.evaluate(() => window.view.presentation.page({ ...window.pageInfo, recommendationsLoading: true }, {}));
+  assert.equal(await host.locator('.recommendation-skeleton').count(), 6);
+  assert.equal(await host.locator('.recommendation-skeleton[data-focus-id], .recommendation-skeleton button').count(), 0);
+  assert.equal(await host.locator('.recommendation-loading-status[role="status"]').count(), 1);
   await page.evaluate(() => window.view.presentation.page({ ...window.pageInfo, recommendations: [
     { key: 'next', label: 'Next video', channel: 'Creator', metadata: '12K views', thumbnail: 'https://covers.test/next.svg' }
   ] }, {}));
   const card = host.locator('.card'), image = card.locator('img');
+  assert.equal(await host.locator('.recommendation-skeleton').count(), 0);
   assert.equal(await card.locator('.card-title').textContent(), 'Next video');
   assert.equal(await card.locator('.card-meta').first().textContent(), 'Creator');
   assert.equal(await image.evaluate(node => getComputedStyle(node).opacity), '0');
@@ -141,6 +228,7 @@ test('recommendations leave loading blank and show text before delayed covers wi
   await page.waitForFunction(() => getComputedStyle(window.view.root.querySelector('.card img')).opacity === '1');
   assert.deepEqual(await card.boundingBox(), before);
   await page.evaluate(() => window.view.presentation.page(window.pageInfo, { recommendations: 'failed' }));
+  assert.equal(await host.locator('.recommendation-skeleton').count(), 0);
   assert.equal(await host.locator('.empty[role="status"]').count(), 1);
   await page.evaluate(() => window.view.presentation.page(window.pageInfo, {}));
   assert.equal(await host.locator('.empty').count(), 0);
@@ -215,7 +303,7 @@ test('windowed collections appear as the first conditional tab with ordered entr
   await page.evaluate(() => { document.documentElement.dataset.ytgPlaybackLayout = 'fullscreen'; });
   assert.equal(await host.locator('.collection-tab').count(), 0);
   assert.equal(await host.locator('.recommendations .card').count(), 3, 'fullscreen retains the existing combined recommendation navigation');
-  await host.locator('[data-action="collection"]').click();
+  await page.evaluate(() => window.view.toggleFullCollection());
   assert.equal(await host.locator('.collection-panel').isVisible(), true);
   assert.equal(await host.locator('.collection-panel').getAttribute('aria-modal'), 'true');
   assert.equal(await page.evaluate(() => window.view.sideIndex()), 1, 'fullscreen selection starts after the playing episode');
@@ -225,10 +313,10 @@ test('windowed collections appear as the first conditional tab with ordered entr
   await host.locator('.collection-close').click();
   assert.equal(await host.locator('.collection-panel').count(), 0);
   assert.equal(await page.evaluate(() => window.actions.at(-1)), 'collectionClosed');
-  await host.locator('[data-action="collection"]').click();
+  await page.evaluate(() => window.view.toggleFullCollection());
   await host.locator('.collection-backdrop').click({ position: { x: 10, y: 100 } });
   assert.equal(await host.locator('.collection-panel').count(), 0, 'clicking outside closes the drawer');
-  await host.locator('[data-action="collection"]').click();
+  await page.evaluate(() => window.view.toggleFullCollection());
   assert.equal(await host.locator('.collection-entry').count(), 3);
   await host.locator('[data-video-id="queue:next"]').click();
   assert.equal(await host.locator('.collection-panel').count(), 0, 'selecting an episode closes the fullscreen collection');
@@ -262,7 +350,7 @@ test('windowed collections appear as the first conditional tab with ordered entr
   assert.deepEqual(await focusedEntry.evaluate(node => {
     const style = getComputedStyle(node);
     return [style.outlineStyle, style.outlineWidth, style.outlineOffset];
-  }), ['solid', '2px', '-2px']);
+  }), ['solid', '6px', '-6px']);
   assert.notEqual(await focusedEntry.evaluate(node => getComputedStyle(node).backgroundColor),
     await host.locator('.currently-playing').evaluate(node => getComputedStyle(node).backgroundColor), 'focus and playback have distinct backgrounds');
   await page.evaluate(() => { document.documentElement.dataset.ytgInputMode = 'mouse'; });
@@ -443,20 +531,20 @@ test('progress, focus, metadata and recommendation updates render independently'
   await reset();
   await page.evaluate(() => window.view.presentation.page({ ...window.pageInfo, recommendations: window.pageInfo.recommendations.map(item => ({ ...item })) }, {}));
   assert.deepEqual(await counts(), {});
-  await page.evaluate(() => window.view.presentation.selection('controls', 'like', false));
+  await page.evaluate(() => window.view.presentation.selection('controls', 'moreActions', false));
   await reset();
   await page.evaluate(() => {
     window.pageInfo = { ...window.pageInfo, liked: true };
     window.view.presentation.page(window.pageInfo, {});
   });
   const reaction = await counts();
-  assert.equal(reaction.PlaybackControls, 1);
+  assert.equal(reaction.PlaybackControls || 0, 0, 'secondary reaction state does not repaint the fullscreen primary controls');
   for (const region of ['PlaybackMetadata', 'PlaybackRecommendations', 'PlaybackCard', 'Timeline']) assert.equal(reaction[region] || 0, 0, region);
-  assert.equal(await host.locator('[data-action="like"]').getAttribute('aria-pressed'), 'true');
-  assert.equal(await host.locator('[data-action="like"]').evaluate(node => node.classList.contains('selected')), true);
+  assert.equal(await host.locator('[data-action="like"]').count(), 0);
+  assert.equal(await host.locator('[data-action="moreActions"]').evaluate(node => node.classList.contains('selected')), true);
   await page.evaluate(() => { window.view.updateHint('progress', true); window.view.presentation.selection('progress', 'progress', true); });
   assert.equal(await host.locator('.progress').evaluate(node => node.classList.contains('adjusting') && node.classList.contains('selected')), true);
-  await page.evaluate(() => { window.view.presentation.destroy(); window.tick(50); window.view.presentation.selection('controls', 'like', false); });
+  await page.evaluate(() => { window.view.presentation.destroy(); window.tick(50); window.view.presentation.selection('controls', 'moreActions', false); });
   assert.equal(await host.locator('.card').count(), 0);
 });
 test('gamepad watch layout hides desktop recommendations even during capability recovery', async t => {
@@ -649,4 +737,23 @@ test('subscribed control uses a bell and dropdown arrow without a state dot', as
   await page.evaluate(() => window.view.presentation.page({ ...window.pageInfo, subscribed: false }, {}));
   assert.equal(await button.locator('.subscription-bell, .subscription-chevron').count(), 0);
   assert.equal(await button.textContent().then(text => text.trim()), '订阅');
+});
+
+
+test('fullscreen recommendations reserve space for filters', async t => {
+  const page = await browserPage(t);
+  await page.setContent(`<html data-ytg-playback-layout="fullscreen"><head><style>${theme}</style></head><body></body></html>`);
+  const values = await page.evaluate(css => {
+    const host = document.createElement('div'); document.body.append(host);
+    const root = host.attachShadow({ mode: 'open' });
+    const style = document.createElement('style'); style.textContent = css;
+    const list = document.createElement('div'); list.className = 'recommendations';
+    root.append(style, list);
+    const without = getComputedStyle(list).getPropertyValue('--watch-filter-space').trim();
+    const filters = document.createElement('nav'); filters.className = 'recommendation-filters'; list.append(filters);
+    const withFilters = getComputedStyle(list).getPropertyValue('--watch-filter-space').trim();
+    return { without, withFilters };
+  }, styles);
+  assert.equal(values.without, '0px');
+  assert.notEqual(values.withFilters, '0px');
 });

@@ -76,3 +76,14 @@ export function isNativeFlowRoute(route: string): boolean {
     return url.origin === 'https://www.youtube.com' && /^\/(?:account|signin|logout|channel_switcher)(?:\/|$)/.test(url.pathname);
   } catch { return false; }
 }
+
+/** Shared ownership rule for startup, layout and navigation. Unknown pages stay native. */
+export function pageRouteMode(route: string): 'browse' | 'watch' | 'shorts' | 'native' {
+  try {
+    const url = new URL(route, 'https://www.youtube.com');
+    if (url.origin !== 'https://www.youtube.com') return 'native';
+    if (url.pathname === '/watch') return 'watch';
+    if (/^\/shorts\/[^/]+\/?$/.test(url.pathname)) return 'shorts';
+    return isInnerTubeBrowseRoute(route) ? 'browse' : 'native';
+  } catch { return 'native'; }
+}

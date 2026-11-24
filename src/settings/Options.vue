@@ -6,6 +6,7 @@ import { useSettingsStore } from './store';
 import type { SettingKey } from '../shared/settings';
 import { usePageAppearance } from '../shared/page-appearance';
 import BindingsPanel from './BindingsPanel.vue';
+import DisplayDensitySettings from './DisplayDensitySettings.vue';
 import VideoGridSettings from './VideoGridSettings.vue';
 import PlaybackParameterSettings from './PlaybackParameterSettings.vue';
 import HomeFilterSettings from './HomeFilterSettings.vue';
@@ -82,6 +83,7 @@ onUnmounted(() => {
 <div class="setting-copy"><label for="autoFullscreen">{{ t("Enter fullscreen when a gamepad is detected") }}</label><p id="fullscreenHelp">{{ t("Make the browser window fullscreen to hide its tabs and address bar.") }}</p></div>
 <input class="toggle" id="autoFullscreen" :checked="settings.values.autoFullscreen" @change="saveSetting('autoFullscreen', $event)" type="checkbox" aria-describedby="fullscreenHelp fullscreenDetails">
 </div>
+<DisplayDensitySettings :value="settings.values.displayDensity" :disabled="!settings.ready || settings.saving" @change="value => settings.saveValues({ displayDensity: value })" />
 <VideoGridSettings :values="settings.values" :disabled="!settings.ready || settings.saving" @save="settings.saveValues" @reset="resetGridColumns" />
 <div class="setting-row">
   <div class="setting-copy"><label for="playbackLayout">{{ t('Default playback layout') }}</label><p>{{ t('Choose the gamepad playback layout. Mouse and keyboard use the windowed gamepad interface. Browser fullscreen is separate.') }}</p></div>

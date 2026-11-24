@@ -4,6 +4,33 @@ import { importSettingsModel } from './helpers/settings-model.mjs';
 const { requestYouTube, mutateYouTube } = await importSettingsModel('src/sites/youtube-request.ts');
 const ok = () => ({ ok: true, json: async () => ({ contents: [] }) });
 
+test('secondary watch reads wait for first media data and abort before issuing fetch', async t => {
+  const savedDocument = globalThis.document, savedLocation = globalThis.location;
+  const document = new EventTarget(); document.readyState = 2;
+  let videoId = 'old'; document.getVideoData = () => ({ video_id: videoId });
+  document.querySelector = () => document;
+  globalThis.document = document; globalThis.location = { pathname: '/watch', search: '?v=one' };
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => { calls++; return ok(); });
+  try {
+    const pending = requestYouTube('next', {});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 0, 'outgoing media must not release recommendations for the destination');
+    videoId = 'one'; document.dispatchEvent(new Event('loadeddata'));
+    await pending; assert.equal(calls, 1, 'first media data releases the request immediately');
+    document.readyState = 0;
+    const controller = new AbortController();
+    const cancelled = requestYouTube('next', { signal: controller.signal });
+    controller.abort();
+    await assert.rejects(cancelled, error => error.kind === 'cancelled');
+    assert.equal(calls, 1, 'leaving during media startup prevents the secondary request');
+    await requestYouTube('browse', {}); assert.equal(calls, 2, 'explicit browsing is unaffected');
+  } finally {
+    if (savedDocument === undefined) delete globalThis.document; else globalThis.document = savedDocument;
+    if (savedLocation === undefined) delete globalThis.location; else globalThis.location = savedLocation;
+  }
+});
+
 test('requests use YouTube.js action normalization and retain page context and credentials', async t => {
   let sent;
   t.mock.method(globalThis, 'fetch', async (url, options) => { sent = { url, options }; return ok(); });

@@ -14,7 +14,7 @@ export const PAGE_HISTORY = 'ytg-page-history-v1';
 export const PAGE_WATCH_NEXT = 'ytg-watch-next-updated-v1';
 export const PAGE_COMMENTS = 'ytg-comments-updated-v1';
 export const PAGE_WATCH_INFO = 'ytg-watch-info-updated-v1';
-export type PageOperation = 'readNotifications' | 'shortsRecommendations' | 'playShorts' | 'readShortsSettings' | 'shortsSetting' | 'readSidebar' | 'readAccount' | 'ping' | 'readPlayerVideoId' | 'readVideoDetails' | 'readWatchInfo' | 'watchAction' | 'watchPlaylists' | 'watchPlaylistToggle' | 'showControls' | 'hideControls' | 'readWatchNext' | 'moreWatchNext' | 'selectRecommendationFilter' | 'openBrowseVideo' | 'openWatchVideo' | 'openBrowseRoute' | 'readComments' | 'moreComments' | 'commentReplies' | 'commentTranslate' | 'commentPost' | 'commentSort';
+export type PageOperation = 'readNotifications' | 'shortsRecommendations' | 'playShorts' | 'readShortsSettings' | 'shortsSetting' | 'readSidebar' | 'readAccount' | 'ping' | 'readPlayerVideoId' | 'readVideoDetails' | 'readWatchInfo' | 'watchAction' | 'watchPlaylists' | 'watchPlaylistToggle' | 'showControls' | 'hideControls' | 'readWatchNext' | 'moreWatchNext' | 'selectRecommendationFilter' | 'openBrowseVideo' | 'openWatchVideo' | 'openBrowseRoute' | 'readComments' | 'moreComments' | 'commentReplies' | 'commentTranslate' | 'commentLike' | 'commentPost' | 'commentSort';
 export interface PageAccess {
   readNotifications?(mode: 'count' | 'list' | 'more'): Promise<NotificationSnapshot | undefined>;
   shortsRecommendations?(videoId: string, reset?: boolean): Promise<{ ids: string[]; hasMore: boolean } | undefined>;
@@ -43,6 +43,7 @@ export interface PageAccess {
   moreComments?(start?: boolean): boolean;
   commentReplies?(key: string): boolean;
   commentTranslate?(key: string, language: string): boolean;
+  commentLike?(key: string): Promise<boolean>;
   commentPost?(text: string, key?: string): Promise<boolean>;
   commentSort?(sort: 'TOP_COMMENTS' | 'NEWEST_FIRST'): boolean;
 }
@@ -101,6 +102,12 @@ export function commentsSnapshot(raw: unknown): CommentsSnapshot | undefined {
     const target = commentLanguage(value.translationTarget);
     return target ? { translationTarget: target } : {};
   };
+  const commentMetadata = (item: import('../../types/ports').CommentReplySnapshot) => ({
+    ...(typeof item.liked === 'boolean' ? { liked: item.liked } : {}),
+    ...(typeof item.canLike === 'boolean' ? { canLike: item.canLike } : {}),
+    ...(typeof item.publishedTime === 'string' ? { publishedTime: item.publishedTime.slice(0, 100) } : {}),
+    ...(typeof item.likeCount === 'string' ? { likeCount: item.likeCount.slice(0, 80) } : {})
+  });
   const items = value.items.slice(0, 100).flatMap(item => {
     if (!item || typeof item.key !== 'string' || item.key.length > 200 || typeof item.author !== 'string' ||
       typeof item.text !== 'string' || !Array.isArray(item.replies)) return [];
@@ -110,17 +117,21 @@ export function commentsSnapshot(raw: unknown): CommentsSnapshot | undefined {
       typeof reply.text === 'string'
         ? [{ key: reply.key, author: reply.author.slice(0, 200), text: reply.text.slice(0, 2000),
           ...(typeof reply.replyTo === 'string' ? { replyTo: reply.replyTo.slice(0, 200) } : {}),
-          ...avatar(reply.avatar), ...translationEntry(reply), ...translation(reply.translation) }] : []);
+          ...(typeof reply.parentId === 'string' && reply.parentId.length <= 200 ? { parentId: reply.parentId } : {}),
+          ...(reply.hasChildReplies === true ? { hasChildReplies: true } : {}),
+          ...commentMetadata(reply), ...avatar(reply.avatar), ...translationEntry(reply), ...translation(reply.translation) }] : []);
     replyBudget -= replies.length;
-    return [{ key: item.key, author: item.author.slice(0, 200), text: item.text.slice(0, 4000), ...avatar(item.avatar), ...translationEntry(item), ...translation(item.translation),
+    return [{ key: item.key, author: item.author.slice(0, 200), text: item.text.slice(0, 4000), ...commentMetadata(item), ...avatar(item.avatar), ...translationEntry(item), ...translation(item.translation),
       ...(Number.isSafeInteger(item.replyCount) && item.replyCount! >= 0 ? { replyCount: item.replyCount } : {}),
       ...(item.canReply === true ? { canReply: true } : {}), hasReplies: item.hasReplies === true, repliesLabel: typeof item.repliesLabel === 'string' ? item.repliesLabel.slice(0, 100) : '', replies }];
   });
   const interaction = value.interaction;
   return { ...(interaction && typeof interaction === 'object' ? { interaction: {
+    ...avatar(interaction.avatar),
+    ...(typeof interaction.placeholder === 'string' && interaction.placeholder !== 'N/A' ? { placeholder: interaction.placeholder.slice(0, 200) } : {}),
     signedIn: interaction.signedIn === true, canPost: interaction.canPost === true, posting: interaction.posting === true,
     sort: interaction.sort === 'NEWEST_FIRST' ? 'NEWEST_FIRST' as const : 'TOP_COMMENTS' as const, sortAvailable: interaction.sortAvailable === true
-  } } : {}), route: value.route, items, loading: value.loading === true, failed: value.failed === true, hasMore: value.hasMore === true };
+  } } : {}), ...(typeof value.commentCount === 'string' ? { commentCount: value.commentCount.slice(0, 80) } : {}), route: value.route, items, loading: value.loading === true, failed: value.failed === true, hasMore: value.hasMore === true };
 }
 
 export function watchNextSnapshot(raw: unknown): WatchNextSnapshot | undefined {
@@ -141,7 +152,7 @@ export function watchNextSnapshot(raw: unknown): WatchNextSnapshot | undefined {
         ? { watchedPercent: Math.min(100, item.watchedPercent) } : {}),
       duration: typeof item.duration === 'string' ? item.duration.slice(0, 40) : '', isPlaylist: item.isPlaylist === true, queue: item.queue === true, selected: item.selected === true }];
   });
-  return { filters: Array.isArray(value.filters) ? value.filters.slice(0, 40).flatMap(item => typeof item?.key === 'string' && /^filter:\d{1,3}$/.test(item.key) && typeof item.label === 'string' && item.label.trim() ? [{ key: item.key, label: item.label.slice(0, 200), selected: item.selected === true }] : []) : [], route: value.route, recommendations: items(value.recommendations), queue: items(value.queue), loading: value.loading === true, failed: value.failed === true,
+  return { ...(typeof value.commentCount === 'string' ? { commentCount: value.commentCount.slice(0, 80) } : {}), filters: Array.isArray(value.filters) ? value.filters.slice(0, 40).flatMap(item => typeof item?.key === 'string' && /^filter:\d{1,3}$/.test(item.key) && typeof item.label === 'string' && item.label.trim() ? [{ key: item.key, label: item.label.slice(0, 200), selected: item.selected === true }] : []) : [], route: value.route, recommendations: items(value.recommendations), queue: items(value.queue), loading: value.loading === true, failed: value.failed === true,
     ...(typeof value.playlistTitle === 'string' ? { playlistTitle: value.playlistTitle.slice(0, 2000) } : {}),
     ...(typeof value.playlistTotal === 'number' && Number.isSafeInteger(value.playlistTotal) && value.playlistTotal > 0 ? { playlistTotal: value.playlistTotal } : {}) };
 }
@@ -153,6 +164,24 @@ export function videoDetails(raw: unknown): YouTubeVideoDetails | undefined {
   const result: YouTubeVideoDetails = {};
   for (const key of ['videoId', 'title', 'author', 'shortDescription', 'channelId', 'viewCount'] as const) {
     if (typeof source[key] === 'string') result[key] = source[key].slice(0, key === 'shortDescription' ? 20000 : 2000);
+  }
+  if (Array.isArray(source.descriptionRuns) && source.descriptionRuns.length <= 1000) {
+    let length = 0;
+    const runs: NonNullable<YouTubeVideoDetails['descriptionRuns']> = [];
+    for (const item of source.descriptionRuns) {
+      if (!item || typeof item !== 'object' || typeof item.text !== 'string') { runs.length = 0; break; }
+      length += item.text.length;
+      if (length > 20000) { runs.length = 0; break; }
+      let href: string | undefined;
+      if (typeof item.href === 'string' && item.href.length <= 4000) {
+        try {
+          const url = new URL(item.href, 'https://www.youtube.com');
+          if (url.protocol === 'https:' || url.protocol === 'http:') href = url.href;
+        } catch { /* Discard malformed destinations. */ }
+      }
+      runs.push({ text: item.text, ...(href ? { href } : {}) });
+    }
+    if (runs.length && runs.map(run => run.text).join('') === result.shortDescription) result.descriptionRuns = runs;
   }
   if (typeof source.isLive === 'boolean') result.isLive = source.isLive;
   return result;

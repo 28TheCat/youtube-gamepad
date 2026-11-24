@@ -6,6 +6,13 @@
 :host .media-action.control:hover{background:var(--ytg-overlay-subtle,#444)}
 :host .media-action.control[aria-pressed=true]{background:var(--ytg-text,#f1f1f1);color:var(--ytg-background,#111)}
 :host .media-action.control:disabled{opacity:.4;cursor:default}
-:host .media-action.control:is(:focus-visible,.selected,[data-selected]){outline:3px solid var(--ytg-focus-color,#fff);outline-offset:4px}
+:host .media-action.control:is(:focus-visible,.selected,[data-selected]){outline:var(--ytg-focus-width) solid var(--ytg-focus-color,#fff);outline-offset:var(--ytg-focus-offset)}
 :host .drawer-body .media-action.control{width:100%;justify-content:flex-start;border-radius:12px;padding-inline:16px;margin-top:12px}
-:host-context(html) .toolbar .right-group .cluster .media-action.control.has-like-count{width:auto;gap:6px;padding-inline:10px;font-size:14px;border-radius:var(--ytg-pill-radius)}
+:host-context(html) .toolbar .right-group .cluster .media-action.control.has-like-count{width:auto;gap:6px;padding-inline:10px;font-size:var(--ytg-font-small);border-radius:var(--ytg-pill-radius)}
+
+
+/* Give the windowed player's reaction group a larger, readable hit area. */
+:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .toolbar .right-group .cluster{padding:3px 6px;gap:4px;border-radius:14px}
+:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .toolbar .right-group .cluster .control{width:44px;min-width:44px;height:44px;min-height:44px;font-size:16px}
+:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .toolbar .right-group .cluster .control svg{width:24px;height:24px;flex:none}
+:host-context(html:not([data-ytg-playback-layout="fullscreen"])) .toolbar .right-group .cluster .control:is(.has-like-count,[data-action="comments"]){width:auto;gap:8px;padding-inline:12px;font-size:16px;border-radius:12px;white-space:nowrap}

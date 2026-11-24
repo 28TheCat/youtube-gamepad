@@ -12,7 +12,7 @@ const emit = defineEmits<{ select: [id: string]; open: [id: string] }>();
 const viewport = ref<HTMLElement>();
 const left = ref(0), width = ref(800), cardWidth = ref(288);
 const overflow = ref(false);
-const gap = 16;
+const gap = 32;
 let slideFrame = 0, slideTarget: number | undefined;
 function stopSlide() {
   cancelAnimationFrame(slideFrame); slideFrame = 0; slideTarget = undefined;
@@ -72,11 +72,11 @@ const pieces = computed(() => {
   const result: { key: string; item?: BrowseItem; space?: number }[] = [];
   let cursor = 0;
   for (const index of indexes) {
-    if (offsets[index] > cursor) result.push({ key: `space:${index}`, space: offsets[index] - cursor - gap });
+    if (offsets[index] - cursor > 1) result.push({ key: `space:${index}`, space: offsets[index] - cursor - gap });
     result.push({ key: props.items[index].id, item: props.items[index] }); cursor = offsets[index] + step;
   }
   const remaining = props.items.length * step - cursor;
-  if (remaining > 0) result.push({ key: 'end-space', space: remaining - gap });
+  if (remaining > 1) result.push({ key: 'end-space', space: remaining - gap });
   return result;
 });
 function measure() {
@@ -112,7 +112,7 @@ watch(() => props.items, async () => { stopSlide(); await nextTick(); measure();
         </button>
       </div>
     </div>
-    <div ref="viewport" class="shorts-row" :style="{ '--ytg-shorts-card-width': `${cardWidth}px` }" @scroll.passive="left = viewport?.scrollLeft || 0"
+    <div ref="viewport" class="shorts-row" :style="{ '--ytg-shorts-card-width': `${cardWidth}px`, '--ytg-shorts-gap': `${gap}px` }" @scroll.passive="left = viewport?.scrollLeft || 0"
       @wheel.passive="stopSlide" @pointerdown="stopSlide" @touchstart.passive="stopSlide">
       <template v-for="piece in pieces" :key="piece.key">
         <ShortsCard v-if="piece.item" :item="piece.item" :selected="piece.item.id === selectedId"

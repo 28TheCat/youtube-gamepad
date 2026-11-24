@@ -82,3 +82,41 @@ test('destroy invalidates pending acknowledgements and all later commands', asyn
   assert.equal(ui.focus('late'), false); assert.equal(await ui.setTheme('dark'), false);
   assert.equal(ui.state.theme, undefined);
 });
+
+test('browse commands follow availability, storage results and owner teardown', async () => {
+  const ui = fixture(), calls = [];
+  assert.equal(await ui.refreshHome(), false);
+  assert.equal(await ui.setBrowseMode('youtube'), false);
+  const state = { mode: 'gamepad', busy: false, error: '', home: true, canRefreshHome: true };
+  const release = ui.registerBrowse({ read: () => state,
+    refresh() { calls.push('refresh'); },
+    change(mode) { calls.push(mode); if (mode === 'youtube') return false; state.mode = mode; }
+  });
+  assert.equal(await ui.setBrowseMode('invalid'), false);
+  state.canRefreshHome = false;
+  assert.equal(await ui.refreshHome(), false);
+  state.canRefreshHome = true; state.busy = true;
+  assert.equal(await ui.refreshHome(), false);
+  assert.equal(await ui.setBrowseMode('youtube'), false);
+  state.busy = false;
+  assert.equal(await ui.refreshHome(), true);
+  assert.equal(await ui.setBrowseMode('youtube'), false);
+  assert.equal(ui.state.browse.mode, 'gamepad');
+  assert.deepEqual(calls, ['refresh', 'youtube']);
+  release(); assert.equal(ui.state.browse, undefined);
+  assert.equal(await ui.refreshHome(), false);
+});
+
+test('secondary watch commands only invoke actions offered by the active owner', () => {
+  const ui = fixture(), calls = [];
+  assert.equal(ui.performWatchAction('like'), false);
+  let visible = true;
+  const release = ui.registerWatchActions({ read: () => visible ? [{ id: 'like', label: 'Like', pressed: false }] : [],
+    activate: action => { calls.push(action); } });
+  assert.equal(ui.performWatchAction('unknown'), false);
+  assert.equal(ui.performWatchAction('like'), true);
+  visible = false;
+  assert.equal(ui.performWatchAction('like'), false);
+  assert.deepEqual(calls, ['like']);
+  release(); assert.equal(ui.state.watchActions.length, 0);
+});

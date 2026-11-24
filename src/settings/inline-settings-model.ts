@@ -11,11 +11,14 @@ import { YTGamepadDiagnosticStore as diagnostics } from '../diagnostics/diagnost
 import type { InteractionTrace } from '../diagnostics/interaction-trace.ts';
 import { t, applyLanguage, languageDefault, normalizeLanguage, type UILanguage } from '../shared/i18n';
 
+import { normalizeDisplayDensity, applyDisplayDensity, type DisplayDensity } from '../shared/display-density';
+
 type Layout = 'watch' | 'browse';
 type Category = '' | 'general' | 'display' | 'controller' | 'help';
 type Bindings = Record<string, number>;
 interface Settings extends VideoGridSettings, PlaybackParameters, HomeFilterSettings {
   playbackLayout: PlaybackLayout;
+  displayDensity: DisplayDensity;
   uiLanguage: UILanguage;
   enabled: boolean;
   rightHandMode: boolean;
@@ -45,7 +48,7 @@ export const adjustments = [
 ] as const;
 const defaults = {
   ...playbackParameterDefaults, ...homeFilterDefaults,
-  playbackLayout: 'fullscreen' as const,
+  playbackLayout: 'fullscreen' as const, displayDensity: 'standard' as DisplayDensity,
   ...videoGridDefaults, uiLanguage: languageDefault, enabled: true, rightHandMode: false, theater: true, autoFullscreen: null, deadzone: .35,
   repeatDelay: 150, repeatInterval: 80, bindings: {}, bindingLayouts: null, shortcutLayouts: null
 };
@@ -86,6 +89,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     const values: Settings = {
       ...defaults, ...normalizeVideoGrid(stored), ...normalizePlaybackParameters(stored), ...normalizeHomeFilter(stored),
       uiLanguage: normalizeLanguage(stored.uiLanguage),
+      displayDensity: normalizeDisplayDensity(stored.displayDensity),
       bindings: schema.normalize(stored.bindings),
       bindingLayouts: schema.normalizeLayouts(stored.bindingLayouts, stored.bindings),
       shortcutLayouts: schema.normalizeShortcuts(stored.shortcutLayouts)
@@ -120,6 +124,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
       if (disposed) return;
       apply({ ...state.values, ...next });
       if (next.uiLanguage) applyLanguage(state.values!.uiLanguage);
+      if (next.displayDensity) applyDisplayDensity(state.values!.displayDensity);
       feedback(text);
     } catch { feedback('Could not save settings. Please try again.'); }
     finally {
@@ -274,6 +279,7 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
       const index = Object.keys(schema.keys).find(index => schema.keys[Number(index)] === state.bindingKey);
       if (index !== undefined) assign(action, Number(index), `assign-${action}`);
     },
+    setDisplayDensity: (density: DisplayDensity) => save({ displayDensity: normalizeDisplayDensity(density) }, `density-${density}`),
     setPlaybackLayout: (layout: Settings['playbackLayout']) => save({ playbackLayout: layout }, `playback-${layout}`),
     setLanguage: (language: UILanguage) => save({ uiLanguage: normalizeLanguage(language) }, `language-${language}`),
     clearDiagnostics, exportDiagnostics,

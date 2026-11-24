@@ -10,14 +10,12 @@ import ExplorePage from './ExplorePage.vue';
 import ChannelAvatar from './ChannelAvatar.vue';
 import { computed, ref } from 'vue';
 import { resolveExplorePage } from '../shared/explore-pages';
-import type { mountBrowseMode } from './browse-mode';
 import { useBrowseSidebar } from './use-browse-sidebar';
 
 defineProps<{
   shellState: { unsupported: string; unavailable: boolean };
   retryFeed: () => void;
   openOriginal: () => void;
-  browseMode: ReturnType<typeof mountBrowseMode>;
   open: (id: string) => void;
   more: (manual?: boolean) => void;
   ownsFocus: () => boolean;
@@ -40,7 +38,7 @@ const showCategories = computed(() => {
 </script>
 
 <template>
-  <BrowseHeader :refresh-home="refreshHome" :browse-mode="browseMode" :refresh-navigation="refreshNavigation" :focus-account="focusAccount" />
+  <BrowseHeader :refresh-home="refreshHome" :refresh-navigation="refreshNavigation" :focus-account="focusAccount" />
   <BrowseSidebar :snapshot="sidebar" :open-route="openRoute" :refresh-home="refreshHome" :route="store.snapshot.route" @changed="refreshNavigation?.()" @settings="openSettings" />
   <section v-if="shellState.unsupported || shellState.unavailable" class="ytg-shell-status" role="status" data-ytg-shell-status>
     <h1>{{ shellState.unsupported ? '此页面尚未适配' : '暂时无法加载视频' }}</h1>

@@ -31,8 +31,12 @@ for (const trustedTypes of [false, true]) {
     await press(9); await press(0);
     await menu.locator('[data-vue-search]').waitFor();
     assert.equal((await active()).focusId, 'key:0:0');
+    assert.equal(await menu.locator('#shortcuts .shortcut-item').filter({ hasText: 'Delete' }).count(), 0);
+    assert.equal(await menu.locator('#shortcuts .shortcut-item').filter({ hasText: 'Search' }).count(), 0);
     await press(0);
     assert.equal(await input.inputValue(), 'A');
+    assert.equal(await menu.locator('#shortcuts .shortcut-item').filter({ hasText: 'Delete' }).count(), 1);
+    assert.equal(await menu.locator('#shortcuts .shortcut-item').filter({ hasText: 'Search' }).count(), 1);
     await input.fill('A😀B');
     await input.evaluate(node => { node.setSelectionRange(3, 3); node.dispatchEvent(new Event('select')); });
     await press(2);
@@ -151,4 +155,30 @@ test('Vue search submits API destinations without native controls and bounds unt
   await page.setViewportSize({ width: 390, height: 720 });
   assert.ok(await menu.locator('#query').isVisible());
   assert.equal(await page.evaluate(() => document.querySelector('#yt-gamepad-menu').shadowRoot.querySelector('section').scrollWidth <= innerWidth), true);
+});
+
+
+test('search hints follow empty query, editing and language selection', { timeout: 30000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false }));
+  await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: fixture }));
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/');
+  const menu = page.locator('#yt-gamepad-menu');
+  await menu.waitFor({ state: 'attached' });
+  const pad = await virtualPad(context, page);
+  await pad({ connected: true }); await page.waitForTimeout(200);
+  await pad({ connected: true, button: 3 }); await page.waitForTimeout(100);
+  await pad({ connected: true });
+  await menu.locator('[data-vue-search]').waitFor();
+  const hints = menu.locator('#shortcuts .shortcut-item');
+  assert.equal(await hints.filter({ hasText: 'Search' }).count(), 0);
+  assert.equal(await hints.filter({ hasText: 'Delete' }).count(), 0);
+  await menu.locator('#query').fill('hello');
+  assert.equal(await hints.filter({ hasText: 'Search' }).count(), 1);
+  assert.equal(await hints.filter({ hasText: 'Delete' }).count(), 1);
+  await menu.getByRole('button', { name: 'Switch input language', exact: true }).click();
+  assert.equal(await hints.filter({ hasText: 'Search' }).count(), 0);
+  assert.equal(await hints.filter({ hasText: 'Delete' }).count(), 0);
+  assert.equal(await hints.filter({ hasText: 'Confirm' }).count(), 1);
 });

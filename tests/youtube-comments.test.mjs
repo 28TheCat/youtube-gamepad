@@ -222,7 +222,7 @@ test('replies and their continuation append to their parent only', async () => {
   assert.equal(f.calls[1].body.continuation, 'replies:parent');
   assert.equal(f.service.read().items[0].replies[0].text, 'Text reply1');
   assert.deepEqual(JSON.parse(JSON.stringify(f.service.read().items[0].replies)),
-    [{ key: 'reply1', author: 'Author reply1', text: 'Text reply1', avatar: 'https://yt3.ggpht.com/reply1=s88' }]);
+    [{ key: 'reply1', author: 'Author reply1', text: 'Text reply1', avatar: 'https://yt3.ggpht.com/reply1=s88', publishedTime: 'today', likeCount: '0', liked: false, canLike: false }]);
   f.service.replies('parent'); await f.idle();
   assert.equal(f.calls[2].body.continuation, 'reply-next');
   assert.deepEqual(Array.from(f.service.read().items[0].replies, reply => reply.text), ['Text reply1', 'Text reply2']);
@@ -255,7 +255,8 @@ test('nested reply previews and continuations stay in the root thread', async ()
   f.service.more(true); await f.idle();
   f.service.replies('parent'); await f.idle();
   assert.deepEqual(replies(), [['second', undefined], ['third', 'Author second']]);
-  while (f.calls.length < 4 && f.service.replies('parent')) await f.idle();
+  assert.equal(f.service.replies('third'), true); await f.idle();
+  assert.equal(f.service.replies('parent'), true); await f.idle();
   assert.deepEqual(f.calls.slice(1).map(call => call.body.continuation), ['replies:parent', 'deep-next', 'root-next']);
   assert.deepEqual(replies(), [['second', undefined], ['third', 'Author second'], ['fourth', 'Author third'], ['other', undefined]]);
   assert.equal(f.service.read().items[0].hasReplies, false);
@@ -419,4 +420,36 @@ test('duplicate sends are blocked and navigation discards late mutation results'
   for(let i=0;i<20&&!complete;i++)await new Promise(resolve=>setTimeout(resolve,5));
   f.location.search='?v=second';f.service.routeChanged();complete({ success: true });
   assert.equal(await sending,false);assert.equal(f.service.read().items.length,0);
+});
+
+test('comment likes toggle once, use native commands and preserve state on failure', async () => {
+  let fail = false;
+  const f = fixture(async body => {
+    if (body.actions) { if (fail) throw Error('network'); return { actionResults: [{ status: 'STATUS_SUCCEEDED' }] }; }
+    const raw = interactiveResponse();
+    const toolbar = raw.frameworkUpdates.entityBatchUpdate.mutations.find(m => m.entityKey === 'toolbar:parent').payload.engagementToolbarSurfaceEntityPayload;
+    for (const [field, token] of [['likeCommand', 'like-token'], ['unlikeCommand', 'unlike-token']]) toolbar[field] = {
+      commandMetadata: { webCommandMetadata: { apiUrl: '/youtubei/v1/comment/perform_comment_action' } }, performCommentActionEndpoint: { action: token }
+    };
+    return raw;
+  });
+  const original = f.sandbox.window.ytcfg.get;
+  f.sandbox.window.ytcfg.get = key => key === 'LOGGED_IN' ? true : original(key);
+  try {
+    f.service.more(true); await f.idle();
+    assert.equal(f.service.read().items[0].canLike, true);
+    const liking = f.service.like('parent');
+    assert.equal(await f.service.like('parent'), false, 'duplicate clicks cannot send twice');
+    assert.equal(await liking, true);
+    assert.equal(f.service.read().items[0].liked, true);
+    assert.equal(f.calls.at(-1).body.actions[0], 'like-token');
+    assert.equal(await f.service.like('parent'), true);
+    assert.equal(f.service.read().items[0].liked, false);
+    assert.equal(f.calls.at(-1).body.actions[0], 'unlike-token');
+    fail = true;
+    const before = f.calls.length;
+    assert.equal(await f.service.like('parent'), false);
+    assert.equal(f.calls.length, before + 1, 'mutations are never retried automatically');
+    assert.equal(f.service.read().items[0].liked, false);
+  } finally { f.service.destroy(); }
 });

@@ -98,6 +98,45 @@ test('watch channel verification follows owner badges independently of subscript
   }
 });
 
+test('preserves YouTube description navigation runs', async () => {
+  const s = fixture({ handler: url => {
+    if (!url.endsWith('/next')) return;
+    const response = next();
+    response.contents.twoColumnWatchNextResults.results.results.contents[1].videoSecondaryInfoRenderer.description = { runs: [
+      { text: '链接 ' },
+      { text: '网站', navigationEndpoint: { commandMetadata: { webCommandMetadata: { url: '/redirect?event=video_description&q=https%3A%2F%2Fexample.com' } }, urlEndpoint: { url: 'https://example.com' } } },
+      { text: ' ' },
+      { text: '#游戏', navigationEndpoint: { commandMetadata: { webCommandMetadata: { url: '/hashtag/%E6%B8%B8%E6%88%8F' } }, browseEndpoint: { browseId: 'FEhashtag' } } }
+    ] };
+    return response;
+  } });
+  const info = await ready(s);
+  assert.equal(info.details.shortDescription, '链接 网站 #游戏');
+  assert.deepEqual(JSON.parse(JSON.stringify(info.details.descriptionRuns)), [
+    { text: '链接 ' }, { text: '网站', href: '/redirect?event=video_description&q=https%3A%2F%2Fexample.com' },
+    { text: ' ' }, { text: '#游戏', href: '/hashtag/%E6%B8%B8%E6%88%8F' }
+  ]);
+  s.service.destroy();
+});
+
+test('preserves attributed description command runs', async () => {
+  const s = fixture({ handler: url => {
+    if (!url.endsWith('/next')) return;
+    const response = next();
+    response.contents.twoColumnWatchNextResults.results.results.contents[1].videoSecondaryInfoRenderer.attributedDescription = {
+      content: '关注 #游戏', commandRuns: [{ startIndex: 3, length: 3, onTap: {
+        commandMetadata: { webCommandMetadata: { url: '/hashtag/%E6%B8%B8%E6%88%8F' } }, browseEndpoint: { browseId: 'FEhashtag' }
+      } }]
+    };
+    return response;
+  } });
+  const info = await ready(s);
+  assert.deepEqual(JSON.parse(JSON.stringify(info.details.descriptionRuns)), [
+    { text: '关注 ' }, { text: '#游戏', href: '/hashtag/%E6%B8%B8%E6%88%8F' }
+  ]);
+  s.service.destroy();
+});
+
 test('video details come from player/next APIs and reuse the selected page account', async () => {
   const s = fixture(), info = await ready(s);
   assert.equal(info.details.title, 'Title first');

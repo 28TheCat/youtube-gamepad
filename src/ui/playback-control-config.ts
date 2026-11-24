@@ -9,7 +9,7 @@ export const secondaryPlaybackGroups = [
 ] as const;
 
 const secondaryIds = secondaryPlaybackGroups.flatMap(group => group.map(([id]) => id));
-const fullscreenIds = [...primaryPlaybackGroups.flatMap(group => group.map(([id]) => id)), 'collection', ...secondaryIds];
+const fullscreenIds = ['seekBack', 'playPause', 'seekForward', 'captions', 'goLive', 'moreActions'];
 // These custom media controls are fullscreen-only; windowed playback uses YouTube's strip.
 export const windowedPlayerControlIds: readonly string[] = ['seekBack', 'playPause', 'seekForward', 'mute', 'captions', 'settings', 'goLive'];
 const windowedIds = [...primaryPlaybackGroups[0].map(([id]) => id), ...secondaryIds.filter(id => !windowedPlayerControlIds.includes(id))];

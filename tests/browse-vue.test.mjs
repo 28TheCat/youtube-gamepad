@@ -5,6 +5,7 @@ import { mainFixture } from './helpers/main-bundle.mjs';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { modernVideo } from './helpers/modern-video.mjs';
 import { guideData } from './helpers/sidebar-data.mjs';
+import { openBrowseMenu } from './helpers/header-menu.mjs';
 
 test('channel page renders API profile inside the scrollable video feed', { timeout: 30000 }, async t => {
   const page = await browserPage(t);
@@ -629,7 +630,18 @@ for (const count of [12, 70]) test(`Shorts shelf with ${count} cards scrolls and
   await page.evaluate(() => { window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined }; });
   await mainBundle(page);
   await page.locator('[data-browse-id="short:cycle0"]').waitFor();
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.evaluate(() => { document.documentElement.dataset.ytgInputMode = 'gamepad'; });
   await page.evaluate(() => window.YTGamepad.focus(window.__pageDOM.querySelector('[data-browse-id="short:cycle0"]')));
+  const assertRingVisible = async () => page.waitForFunction(() => {
+    const card = window.__pageDOM.activeElement, cover = card.querySelector('.card-cover');
+    const box = cover.getBoundingClientRect(), row = card.closest('.shorts-row').getBoundingClientRect();
+    const grid = card.closest('[data-ytg-browse-grid]').getBoundingClientRect();
+    const style = getComputedStyle(cover), ring = (parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset)) * 1.04;
+    return getComputedStyle(card).scale === '1.04' && box.left - ring >= Math.max(row.left, grid.left) &&
+      box.right + ring <= Math.min(row.right, grid.right) && box.top - ring >= row.top && box.bottom + ring <= row.bottom;
+  });
+  await assertRingVisible();
   const move = async (direction, index) => {
     await page.evaluate(direction => window.YTGamepad.act(direction), direction);
     await page.waitForFunction(id => {
@@ -642,9 +654,17 @@ for (const count of [12, 70]) test(`Shorts shelf with ${count} cards scrolls and
   // Cross the visible edge, then wrap at each logical end (including unmounted ends).
   for (let index = 1; index <= 8; index++) await move('right', index);
   assert.ok(await page.locator('.shorts-row').evaluate(node => node.scrollLeft) > 0);
+  await page.waitForFunction(() => {
+    const card = window.__pageDOM.activeElement, cover = card.querySelector('.card-cover');
+    const box = cover.getBoundingClientRect(), row = card.closest('.shorts-row').getBoundingClientRect();
+    const style = getComputedStyle(cover), ring = (parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset)) * 1.04;
+    return getComputedStyle(card).scale === '1.04' && box.top - ring >= row.top && box.bottom + ring <= row.bottom;
+  });
   for (let index = 7; index >= 0; index--) await move('left', index);
   await move('left', count - 1);
+  await assertRingVisible();
   await move('right', 0);
+  await assertRingVisible();
   await page.waitForFunction(() => window.__pageDOM.querySelector('.shorts-row').scrollLeft === 0);
   assert.equal(await page.locator('.shorts-row').evaluate(node => node.scrollLeft), 0);
   const next = page.locator('[data-shorts-scroll="next"]'), previous = page.locator('[data-shorts-scroll="previous"]');
@@ -859,11 +879,66 @@ test('native feed churn does not rescan shell regions or measure hidden cards', 
   await page.locator('.client-account').waitFor();
 });
 
+for (const tail of [0, 140]) test(`separate Shorts shelves follow complete video rows (${tail ? 'virtual' : 'regular'})`, { timeout: 30000 }, async t => {
+  const video = videoId => ({ videoRenderer: { videoId, title: { simpleText: videoId } } });
+  const short = videoId => ({ reelItemRenderer: { videoId, headline: { simpleText: videoId } } });
+  const feedFixture = { contents: [video('before-a'), video('before-b'), short('first-a'), short('first-b'),
+    ...['a', 'b', 'c', 'd', 'e', 'f'].map(id => video(`middle-${id}`)), short('second-a'), short('second-b'),
+    ...['a', 'b', 'c', 'd'].map(id => video(`after-${id}`)), ...Array.from({ length: tail }, (_, i) => video(`tail-${i}`))] };
+  const page = await browserPage(t);
+  await page.setViewportSize({ width: 1440, height: 2400 });
+  await page.route('https://i.ytimg.com/**', route => route.fulfill({ contentType: 'image/svg+xml', body:
+    '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#367"/></svg>' }));
+  await page.route('https://www.youtube.com/**', route => route.request().url().includes('/youtubei/v1/browse')
+    ? route.fulfill({ json: feedFixture })
+    : route.fulfill({ contentType: 'text/html', body: '<html><body></body></html>' }));
+  await page.goto('https://www.youtube.com/');
+  await page.evaluate(() => { window.ytcfg = { get: key => key === 'INNERTUBE_CONTEXT' ? { client: { clientVersion: 'test' } } : undefined }; });
+  await mainBundle(page);
+  await page.locator('[data-browse-id="video:after-a"]').waitFor();
+  const shelves = page.locator('.shorts-shelf');
+  assert.equal(await shelves.count(), 2);
+  assert.deepEqual(await shelves.evaluateAll(nodes => nodes.map(node => [...node.querySelectorAll('[data-browse-id]')].map(card => card.dataset.browseId))),
+    [['short:first-a', 'short:first-b'], ['short:second-a', 'short:second-b']]);
+  const assertOrder = async () => {
+    const boxes = await page.evaluate(() => {
+      const nodes = ['[data-browse-id="video:before-b"]', '.shorts-shelf', '[data-browse-id="video:middle-c"]',
+        '.shorts-shelf:last-of-type', '[data-browse-id="video:after-a"]'];
+      const shelves = window.__pageDOM.querySelectorAll('.shorts-shelf');
+      return nodes.map((selector, index) => {
+        const node = index === 1 ? shelves[0] : index === 3 ? shelves[1] : window.__pageDOM.querySelector(selector);
+        const box = node.getBoundingClientRect(); return { top: box.top, bottom: box.bottom };
+      });
+    });
+    for (let i = 1; i < boxes.length; i++) assert.ok(boxes[i].top >= boxes[i - 1].bottom - 1, JSON.stringify(boxes));
+    const normalRows = await page.locator('[data-ytg-browse-grid] .cards').evaluate(cards => {
+      const rows = new Map();
+      for (const card of cards.querySelectorAll('a[data-browse-id^="video:"]')) {
+        const key = card.closest('.virtual-row')?.dataset.rowId || card.offsetTop;
+        rows.set(key, (rows.get(key) || 0) + 1);
+      }
+      return { columns: getComputedStyle(cards).gridTemplateColumns.split(' ').length, counts: [...rows.values()] };
+    });
+    assert.ok(normalRows.counts.every(count => count === normalRows.columns), JSON.stringify(normalRows));
+  };
+  await assertOrder();
+  if (!tail) {
+    for (const width of [800, 390]) {
+      await page.setViewportSize({ width, height: 2400 });
+      await page.waitForTimeout(150);
+      await assertOrder();
+    }
+    await page.setViewportSize({ width: 1440, height: 2400 });
+    mkdirSync('output/playwright', { recursive: true });
+    await page.screenshot({ path: 'output/playwright/feed-section-order.png' });
+  }
+});
+
 test('Shorts occupy their own row across the feed bridge and open the Shorts route', { timeout: 30000 }, async t => {
   const feedFixture = { contents: [
       { reelItemRenderer: { videoId: 'short-one', headline: { simpleText: 'A portrait short' }, shortBylineText: { simpleText: 'Creator' }, viewCountText: { simpleText: '12K views' } } },
-      { videoRenderer: { videoId: 'normal', title: { simpleText: 'A normal video' } } },
-      { reelItemRenderer: { videoId: 'short-two', headline: { simpleText: 'Another short' } } }
+      { reelItemRenderer: { videoId: 'short-two', headline: { simpleText: 'Another short' } } },
+      { videoRenderer: { videoId: 'normal', title: { simpleText: 'A normal video' } } }
     ] };
 
 
@@ -1488,28 +1563,15 @@ test('header and sidebar icons preserve theme and current-page variants', { time
     window.ytcfg = { get: () => ({ client: { clientName: 'WEB', clientVersion: 'test' } }) };
 
   });
-  await mainBundle(page);
+  await mainBundle(page, guideData());
   await page.locator('.client-account').waitFor();
   const homeIcon = page.locator('[data-sidebar-id="home"] svg');
   assert.equal(await homeIcon.getAttribute('data-icon'), 'mingcute:home-fill');
   assert.equal(await page.locator('[data-sidebar-id="subscriptions"] svg').getAttribute('data-icon'), 'material:subscriptions-line');
   assert.ok(await homeIcon.locator('path').count() > 0);
-  const badge = page.locator('[data-ytg-page-mode] [data-ytg-icon="true"]');
-  const prompt = await badge.evaluate(node => ({
-    background: getComputedStyle(node).backgroundColor,
-    image: getComputedStyle(node).backgroundImage,
-  }));
-  assert.equal(prompt.background, 'rgba(0, 0, 0, 0)');
-  // Face buttons use their own artwork; they do not use the monochrome mask.
-  assert.notEqual(prompt.image, 'none', 'the controller prompt has button artwork');
-  const promptLoaded = await badge.evaluate(async node => {
-    const image = new Image();
-    image.src = getComputedStyle(node).backgroundImage.match(/^url\(["']?(.*?)["']?\)$/)?.[1] || '';
-    try { await image.decode(); return image.naturalWidth > 0 && image.naturalHeight > 0; }
-    catch { return false; }
-  });
-  assert.ok(promptLoaded, 'the controller prompt artwork can be decoded');
-  assert.equal(await badge.isVisible(), true);
+  const menuIcon = page.locator('.client-menu svg');
+  assert.equal(await menuIcon.getAttribute('data-icon'), 'material:more-line');
+  assert.ok(await menuIcon.locator('path,circle').count() > 0);
   const accountIcon = page.locator('.client-account svg');
   assert.equal(await accountIcon.getAttribute('data-icon'), 'mingcute:person-line');
   async function checkIcons() {
@@ -2343,13 +2405,10 @@ test('Home sidebar and YouTube brand each request a fresh recommendation batch',
   });
   await page.locator('.client-brand').click();
   await page.locator('.home-loading-line').waitFor();
-  const refreshMotion = await page.locator('.client-refresh svg').evaluate(svg => {
-    const animation = svg.getAnimations()[0];
-    return { duration: animation?.effect.getTiming().duration,
-      end: animation?.effect.getKeyframes().at(-1).transform };
-  });
-  assert.deepEqual(refreshMotion, { duration: 600, end: 'rotate(720deg)' });
-  await page.locator('.client-refresh').evaluate(button => button.click());
+  const { menu } = await openBrowseMenu(page);
+  const refresh = menu.locator('[data-menu-action="refreshHome"]');
+  assert.equal(await refresh.isDisabled(), true);
+  await refresh.evaluate(button => button.click());
   assert.equal(batches, 3, 'refresh while loading does not start another request');
   await page.waitForTimeout(200);
   assert.equal(await page.evaluate(() => window.__pageDOM.querySelector('[data-browse-id="video:batch2"]') === window.__retainedHomeCard), true);
@@ -2362,11 +2421,13 @@ test('Home sidebar and YouTube brand each request a fresh recommendation batch',
   assert.ok(frames.every(frame => frame.count > 0 && frame.opacity === '1' && !frame.hidden), JSON.stringify(frames));
   assert.equal(batches, 3);
   assert.equal(await page.locator('[data-browse-id="video:batch2"]').count(), 0);
+  await menu.getByRole('button', { name: /^(Back|返回)$/ }).click();
+  await menu.waitFor({ state: 'hidden' });
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.locator('.client-refresh svg').evaluate(svg => svg.getAnimations().forEach(animation => animation.cancel()));
-  await page.locator('.client-refresh').click();
+  await openBrowseMenu(page);
+  await refresh.click();
   await page.locator('[data-browse-id="video:batch4"]').waitFor();
-  assert.equal(await page.locator('.client-refresh svg').evaluate(svg => svg.getAnimations().length), 0);
+  await menu.waitFor({ state: 'hidden' });
 });
 
 for (const source of ['/', '/results?search_query=music&sp=original']) test(`B returns to the saved card and scroll on ${source}`, { timeout: 30000 }, async t => {

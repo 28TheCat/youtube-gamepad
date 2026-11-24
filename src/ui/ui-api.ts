@@ -1,11 +1,24 @@
 import type { PlaybackLayout } from '../shared/playback-layout';
 export type UiTheme = 'light' | 'dark';
 export type UiLayout = PlaybackLayout;
-export type UiPanel = 'notifications' | 'account' | 'settings' | 'search' | 'description' | 'comments' | 'playlists' | 'subscription';
+export type UiPanel = 'menu' | 'notifications' | 'account' | 'settings' | 'search' | 'description' | 'comments' | 'playlists' | 'subscription';
+export interface BrowseUiState {
+  mode: 'gamepad' | 'youtube'; busy: boolean; error: string; home: boolean; canRefreshHome: boolean;
+}
+interface BrowsePort {
+  read(): BrowseUiState;
+  refresh(): Result | Promise<Result>;
+  change(mode: BrowseUiState['mode']): Result | Promise<Result>;
+}
+export type SecondaryWatchAction = 'channel' | 'subscribe' | 'description' | 'like' | 'dislike' | 'comments' | 'save' | 'mute' | 'settings' | 'collection';
+export interface WatchMenuItem { id: SecondaryWatchAction; label: string; pressed?: boolean }
+interface WatchActionsPort { read(): readonly WatchMenuItem[]; activate(action: SecondaryWatchAction): Result }
 export interface UiSnapshot {
   readonly theme: UiTheme | undefined;
   readonly layout: UiLayout | undefined;
   readonly openPanels: readonly UiPanel[];
+  readonly browse: BrowseUiState | undefined;
+  readonly watchActions: readonly WatchMenuItem[];
 }
 type Result = boolean | void;
 interface ValuePort<T> { read(): T; write(value: T): Result | Promise<Result> }
@@ -15,9 +28,11 @@ interface Entry<T> { value: T; order: number }
 /** Local ISOLATED API. Owners keep their state and DOM; registrations only
  * delegate commands to the current owner, and must be released on teardown. */
 export function createUiApi() {
-  const panels: readonly UiPanel[] = ['notifications', 'account', 'settings', 'search', 'description', 'comments', 'playlists', 'subscription'];
+  const panels: readonly UiPanel[] = ['menu', 'notifications', 'account', 'settings', 'search', 'description', 'comments', 'playlists', 'subscription'];
   let destroyed = false, order = 0;
   const themes: Entry<ValuePort<UiTheme>>[] = [], layouts: Entry<ValuePort<UiLayout>>[] = [];
+  const browseTargets: Entry<BrowsePort>[] = [];
+  const watchTargets: Entry<WatchActionsPort>[] = [];
   const focusTargets = new Map<string, Entry<() => boolean>[]>();
   const panelTargets = new Map<UiPanel, Entry<PanelPort>[]>();
   let themeQueue = Promise.resolve(false), layoutQueue = Promise.resolve(false);
@@ -38,8 +53,18 @@ export function createUiApi() {
     try { const result = await entry.value.write(value); return current(entries) === entry && result !== false; }
     catch { return false; }
   }
-  function read<T>(entries: Entry<ValuePort<T>>[]) {
+  function read<T>(entries: Entry<{ read(): T }>[]) {
     try { return current(entries)?.value.read(); } catch { return undefined; }
+  }
+  async function browseCommand(command: 'refresh' | BrowseUiState['mode']) {
+    const entry = current(browseTargets);
+    if (!entry) return false;
+    try {
+      const state = entry.value.read();
+      if (state.busy || command === 'refresh' && !state.canRefreshHome) return false;
+      const result = command === 'refresh' ? await entry.value.refresh() : await entry.value.change(command);
+      return current(browseTargets) === entry && result !== false;
+    } catch { return false; }
   }
   function openEntries() {
     if (destroyed) return [];
@@ -47,14 +72,25 @@ export function createUiApi() {
       const entry = current(entries);
       try { return entry?.value.isOpen() ? [{ id, entry }] : []; } catch { return []; }
     }).sort((a, b) => {
-      const priority = (id: UiPanel) => id === 'settings' || id === 'search' ? 100 : id === 'account' || id === 'notifications' ? 50 : 0;
+      const priority = (id: UiPanel) => id === 'menu' || id === 'settings' || id === 'search' ? 100 : id === 'account' || id === 'notifications' ? 50 : 0;
       return priority(a.id) - priority(b.id) || a.entry.order - b.entry.order;
     });
   }
   return {
-    get state(): UiSnapshot { return { theme: read(themes), layout: read(layouts), openPanels: openEntries().map(item => item.id) }; },
+    get state(): UiSnapshot { return { theme: read(themes), layout: read(layouts), browse: read(browseTargets), watchActions: read(watchTargets) || [], openPanels: openEntries().map(item => item.id) }; },
     registerTheme: (port: ValuePort<UiTheme>) => register(themes, port),
     registerLayout: (port: ValuePort<UiLayout>) => register(layouts, port),
+    registerBrowse: (port: BrowsePort) => register(browseTargets, port),
+    registerWatchActions: (port: WatchActionsPort) => register(watchTargets, port),
+    performWatchAction(action: string): boolean {
+      const entry = current(watchTargets);
+      try {
+        const item = entry?.value.read().find(item => item.id === action);
+        return !!entry && !!item && entry.value.activate(item.id) !== false;
+      } catch { return false; }
+    },
+    refreshHome: () => browseCommand('refresh'),
+    setBrowseMode: (mode: BrowseUiState['mode']) => ['gamepad', 'youtube'].includes(mode) ? browseCommand(mode) : Promise.resolve(false),
     registerFocus: (id: string, focus: () => boolean) => bind(focusTargets, id, focus),
     registerPanel: (id: UiPanel, port: PanelPort) => bind(panelTargets, id, port),
     setTheme(value: UiTheme): Promise<boolean> {
@@ -86,7 +122,7 @@ export function createUiApi() {
       try { if (!entry.value.isOpen()) return false; return entry.value.close() !== false && !entry.value.isOpen(); }
       catch { return false; }
     },
-    destroy() { destroyed = true; themes.length = 0; layouts.length = 0; focusTargets.clear(); panelTargets.clear(); }
+    destroy() { destroyed = true; themes.length = 0; layouts.length = 0; browseTargets.length = 0; watchTargets.length = 0; focusTargets.clear(); panelTargets.clear(); }
   };
 }
 

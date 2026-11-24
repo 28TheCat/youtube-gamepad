@@ -6,7 +6,7 @@ html[dark] #ytg-browse-grid a[data-browse-id].playlist-card{--ytg-playlist-stack
 /* Keep the entire stack inside the stable focus frame, preserving the image ratio. */
 #ytg-browse-grid .playlist-card .card-cover{position:relative;aspect-ratio:auto;padding:16px 8px 8px;background:transparent}
 #ytg-browse-grid a[data-browse-id].playlist-card.ytg-selected img{scale:1}
-#ytg-browse-grid .playlist-badge{position:absolute;right:16px;bottom:16px;display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:4px;background:#000b;color:#fff;font-size:12px;font-weight:500;line-height:16px;pointer-events:none}
+#ytg-browse-grid .playlist-badge{position:absolute;right:16px;bottom:16px;display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:4px;background:var(--ytg-badge-background);color:#fff;font-size:var(--ytg-font-caption);font-weight:500;line-height:16px;pointer-events:none}
 #ytg-browse-grid .playlist-badge svg{width:14px;height:14px;flex:none}
 #ytg-browse-grid .cards[data-horizontal=true] .playlist-card .card-cover{flex:none;width:calc((100% - 20px) * var(--ytg-cover-flex,40) / 100)}
 #ytg-browse-grid .cards[data-horizontal=true] a[data-browse-id].playlist-card::before{right:auto;width:calc((100% - 20px) * var(--ytg-cover-flex,40) / 100 - 32px)}

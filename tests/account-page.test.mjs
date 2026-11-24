@@ -79,6 +79,37 @@ test('API profile and account list render without a native avatar or menu, trap 
   await page.waitForURL('**/channel_switcher');
 });
 
+test('account dialog covers playback and uses a subtle back-button focus in both input modes', async t => {
+  const { page } = await fixture(t);
+  await page.evaluate(() => {
+    const watch = document.createElement('div'); watch.id = 'playback-layer-fixture';
+    watch.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:red';
+    document.body.append(watch);
+    document.documentElement.dataset.ytgPlaybackLayout = 'fullscreen';
+    window.__testUi.openPanel('account');
+  });
+  const back = page.locator('[data-account-close]');
+  await back.waitFor();
+  for (const mode of ['keyboard', 'mouse']) {
+    await page.evaluate(mode => { document.documentElement.dataset.ytgInputMode = mode; }, mode);
+    await back.focus();
+    const style = await back.evaluate(node => {
+      const css = getComputedStyle(node);
+      return { width: parseFloat(css.outlineWidth), color: css.outlineColor };
+    });
+    assert.ok(style.width <= 2, `${mode}: no thick focus ring`);
+    if (style.width) assert.notEqual(style.color, 'rgb(0, 0, 0)');
+  }
+  const foreground = await page.evaluate(() => {
+    const host = document.querySelector('#ytg-browse-root');
+    return [[innerWidth - 20, 100], [100, innerHeight - 20]].every(([x, y]) => document.elementFromPoint(x, y) === host);
+  });
+  assert.equal(foreground, true, 'account page covers recommendations and bottom playback toolbar');
+  await back.click();
+  assert.equal(await page.evaluate(() => document.documentElement.classList.contains('ytg-account-open')), false);
+  assert.equal(await page.evaluate(() => document.elementFromPoint(100, innerHeight - 20)?.id), 'playback-layer-fixture');
+});
+
 test('API account errors offer a retry and a late response cannot reopen a closed account page', { timeout: 45000 }, async t => {
   const { page, state } = await fixture(t, { failing: true });
   await page.locator('.client-account').click();

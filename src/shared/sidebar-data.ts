@@ -20,7 +20,7 @@ export function sidebarSnapshot(raw: unknown): SidebarSnapshot | undefined {
   if (!raw || typeof raw !== 'object') return;
   const value = raw as SidebarSnapshot;
   if (!Array.isArray(value.sections)) return;
-  const icons = new Set(['home', 'shorts', 'subscriptions', 'person', 'history', 'playlists', 'later', 'like', 'videos', 'downloads', 'explore', 'settings', 'live', 'search', 'more']);
+  const icons = new Set(['home', 'shorts', 'subscriptions', 'person', 'history', 'playlists', 'later', 'like', 'videos', 'downloads', 'explore', 'settings', 'live', 'search', 'more', 'music', 'movies', 'gaming', 'news', 'sports', 'report', 'youtube-premium', 'youtube-music', 'youtube-kids', 'youtube-labs', 'youtube-studio']);
   let budget = 2000;
   const entries = (items: SidebarEntry[], depth = 0): SidebarEntry[] => depth > 8 ? [] : items.slice(0, 1000).flatMap(item => {
     if (--budget < 0 || !item || typeof item !== 'object') return [];

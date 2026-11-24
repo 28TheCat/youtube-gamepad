@@ -14,17 +14,75 @@ import { sidebarBrowseEndpoint } from '../shared/explore-pages';
 import { createWatchInfoService } from '../sites/youtube-watch-info';
 import { createShortsService } from '../sites/youtube-shorts';
 
-function navigateWatchVideo(href: unknown, allowEventFallback: boolean): boolean {
+function navigateWatchVideo(href: unknown, allowEventFallback: boolean, ownPlayback: (cancel: () => void) => void): boolean {
   const target = parseWatchLink(href);
   if (!target || target.href !== href) return false;
   try {
-    const app = document.querySelector('ytd-app') as (HTMLElement & { navigate_?: (endpoint: object) => void }) | null;
+    const app = document.querySelector('ytd-app') as (HTMLElement & {
+      navigate_?: (endpoint: object) => void;
+      handleNavigate?: (request: { type: number; command: object; form: { reload: boolean } }) => void;
+    }) | null;
     if (!app) return false;
-    const endpoint = { commandMetadata: { webCommandMetadata: { url: target.href, webPageType: 'WEB_PAGE_TYPE_WATCH' } },
+    // YouTube's native watch command uses rootVe 3832. Without it the router
+    // can update the URL and page data without loading the destination player.
+    const endpoint = { commandMetadata: { webCommandMetadata: { url: target.href, webPageType: 'WEB_PAGE_TYPE_WATCH', rootVe: 3832 } },
       watchEndpoint: target.watchEndpoint };
-    if (typeof app.navigate_ === 'function') app.navigate_(endpoint);
-    else if (allowEventFallback) app.dispatchEvent(new CustomEvent('yt-navigate', { bubbles: true, composed: true, detail: { endpoint } }));
-    else return false;
+    if (typeof app.handleNavigate !== 'function' && typeof app.navigate_ !== 'function' && !allowEventFallback) return false;
+    // The internal router can open the watch page without starting its player.
+    // Make one attempt for this destination, unless the user interacts first.
+    let timer: ReturnType<typeof setTimeout>, retry: ReturnType<typeof setTimeout> | undefined;
+    let active = true;
+    let observer: MutationObserver | undefined;
+    const readyEvents = ['yt-navigate-finish', 'yt-page-data-updated', 'loadedmetadata', 'loadeddata', 'canplay'];
+    const cleanup = () => {
+      active = false;
+      clearTimeout(timer);
+      clearTimeout(retry);
+      observer?.disconnect();
+      for (const event of readyEvents) document.removeEventListener(event, attempt, true);
+      document.removeEventListener('pointerdown', cleanup, true);
+      document.removeEventListener('keydown', cleanup, true);
+    };
+    const attempt = () => {
+      if (!active || location.pathname !== '/watch' || new URLSearchParams(location.search).get('v') !== target.videoId) return;
+      const player = document.querySelector<YouTubePlayer>('#movie_player');
+      const video = player?.querySelector<HTMLVideoElement>('video.html5-main-video');
+      let current: unknown;
+      try { current = player?.getVideoData?.()?.video_id || player?.getPlayerResponse?.()?.videoDetails?.videoId; } catch { return; }
+      // An unstarted player may expose its title but no video_id or response.
+      // Only use the watch page identity when there is no outgoing media source
+      // and the native player explicitly remains unstarted.
+      const unstartedTarget = !current && player?.classList.contains('unstarted-mode') &&
+        !video?.currentSrc && document.querySelector('ytd-watch-flexy')?.getAttribute('video-id') === target.videoId;
+      if (current !== target.videoId && !unstartedTarget || typeof player?.playVideo !== 'function') return;
+      cleanup();
+      if (!video || video.paused && !video.ended) {
+        try { player.playVideo(); } catch { /* Playback remains user-controlled. */ }
+      }
+    };
+    const poll = () => {
+      if (!active) return;
+      attempt();
+      if (active) retry = setTimeout(poll, 250);
+    };
+    for (const event of readyEvents) document.addEventListener(event, attempt, true);
+    if (typeof MutationObserver !== 'undefined' && document.documentElement) {
+      observer = new MutationObserver(attempt);
+      observer.observe(document.querySelector('ytd-watch-flexy') || document.documentElement,
+        { childList: true, subtree: true, attributes: true, attributeFilter: ['video-id', 'class', 'src'] });
+    }
+    document.addEventListener('pointerdown', cleanup, true);
+    document.addEventListener('keydown', cleanup, true);
+    timer = setTimeout(cleanup, 8000);
+    ownPlayback(cleanup);
+    try {
+      if (typeof app.handleNavigate === 'function') app.handleNavigate({ type: 0, command: endpoint, form: { reload: false } });
+      else if (typeof app.navigate_ === 'function') app.navigate_(endpoint);
+      else app.dispatchEvent(new CustomEvent('yt-navigate', { bubbles: true, composed: true, detail: { endpoint } }));
+    } catch (error) { cleanup(); throw error; }
+    // Router completion can precede player creation or be absent entirely.
+    // Identity checks keep this bounded wait away from the outgoing player.
+    poll();
     return true;
   } catch { return false; }
 }
@@ -36,6 +94,9 @@ export function startPageServer() {
   let destroyed = false;
   let serving = false;
   const cleanups: (() => void)[] = [];
+  let cancelWatchPlayback = () => {};
+  const ownWatchPlayback = (cancel: () => void) => { cancelWatchPlayback(); cancelWatchPlayback = cancel; };
+  cleanups.push(() => cancelWatchPlayback());
   const account = createAccountService();
   const notifications = createNotificationService();
   cleanups.push(notifications.destroy);
@@ -58,7 +119,7 @@ export function startPageServer() {
     if (destroyed || serving) return;
     const request = parsePageMessage((event as CustomEvent).detail);
     if (!request || typeof request.id !== 'string' || request.id.length > 100 ||
-        !['readNotifications', 'shortsRecommendations', 'playShorts', 'readShortsSettings', 'shortsSetting', 'readSidebar', 'readAccount', 'ping', 'readPlayerVideoId', 'readVideoDetails', 'readWatchInfo', 'watchAction', 'watchPlaylists', 'watchPlaylistToggle', 'showControls', 'hideControls', 'readBrowseCategories', 'requestBrowse', 'cancelBrowse', 'openBrowseVideo', 'openWatchVideo', 'openBrowseRoute', 'readWatchNext', 'moreWatchNext', 'selectRecommendationFilter', 'readComments', 'moreComments', 'commentReplies', 'commentTranslate', 'commentPost', 'commentSort'].includes(request.operation as string)) return;
+        !['readNotifications', 'shortsRecommendations', 'playShorts', 'readShortsSettings', 'shortsSetting', 'readSidebar', 'readAccount', 'ping', 'readPlayerVideoId', 'readVideoDetails', 'readWatchInfo', 'watchAction', 'watchPlaylists', 'watchPlaylistToggle', 'showControls', 'hideControls', 'readBrowseCategories', 'requestBrowse', 'cancelBrowse', 'openBrowseVideo', 'openWatchVideo', 'openBrowseRoute', 'readWatchNext', 'moreWatchNext', 'selectRecommendationFilter', 'readComments', 'moreComments', 'commentReplies', 'commentTranslate', 'commentLike', 'commentPost', 'commentSort'].includes(request.operation as string)) return;
     const reply = (ok: boolean, value?: unknown) => {
       if (!destroyed) document.dispatchEvent(new CustomEvent(PAGE_RESPONSE, { detail: JSON.stringify({ version: 1,
         id: request.id, operation: request.operation, ok, value }) }));
@@ -144,6 +205,10 @@ export function startPageServer() {
       if (typeof request.key !== 'string' || request.key.length > 200) return;
       reply(true, comments.replies(request.key)); return;
     }
+    if (request.operation === 'commentLike') {
+      if (request.route !== location.pathname + location.search || typeof request.key !== 'string' || !request.key || request.key.length > 200) { reply(false); return; }
+      void comments.like(request.key).then(value => reply(true, value), () => reply(false)); return;
+    }
     if (request.operation === 'commentPost') {
       if (typeof request.text !== 'string' || !request.text.trim() || request.text.length > 4000 ||
           request.key !== undefined && (typeof request.key !== 'string' || !request.key || request.key.length > 200)) { reply(false); return; }
@@ -167,7 +232,7 @@ export function startPageServer() {
       return;
     }
     if (request.operation === 'openWatchVideo') {
-      const opened = navigateWatchVideo(request.href, true);
+      const opened = navigateWatchVideo(request.href, true, ownWatchPlayback);
       reply(opened, opened ? true : undefined);
       return;
     }
@@ -201,7 +266,7 @@ export function startPageServer() {
         }
         return;
       }
-      const opened = navigateWatchVideo(request.href, false);
+      const opened = navigateWatchVideo(request.href, false, ownWatchPlayback);
       reply(opened, opened ? true : undefined);
       return;
     }

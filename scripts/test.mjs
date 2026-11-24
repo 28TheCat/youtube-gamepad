@@ -37,6 +37,8 @@ const groups = {
   'comment-actions.test.mjs': 'browser',
   'comment-actions-extension.test.mjs': 'extension',
   'search-bar.test.mjs': 'browser',
+  'header-menu.test.mjs': 'browser',
+  'tv-playback.test.mjs': 'browser',
   'extension-e2e.test.mjs': 'extension', 'video-grid-extension.test.mjs': 'extension', 'settings-pages.test.mjs': 'extension',
   'inline-settings-vue.test.mjs': 'extension', 'quick-menu-vue.test.mjs': 'extension', 'search-vue.test.mjs': 'extension',
   'playback-vue.test.mjs': 'browser', 'watch-panels-vue.test.mjs': 'browser', 'watch-surface.test.mjs': 'browser',

@@ -14,7 +14,7 @@ const result = await build({ configFile: false, publicDir: false, logLevel: 'sil
     formats: ['iife'], name: 'WatchSurfaceFixture' } }
 });
 const code = (Array.isArray(result) ? result[0] : result).output.find(item => item.type === 'chunk').code;
-const styles = readFileSync(new URL('../src/ui/watch.css', import.meta.url), 'utf8');
+const styles = ['watch.css', 'watch-recommendations.css', 'watch-collection.css', 'comments.css'].map(file => readFileSync(new URL(`../src/ui/${file}`, import.meta.url), 'utf8')).join('\n');
 
 test('collection tabs expose only their visible playable entries to controller focus', async t => {
   const page = await browserPage(t);
@@ -69,13 +69,23 @@ for (const layout of ['windowed', 'fullscreen']) for (const dark of [false, true
       window.descriptionPanels = api.YTGamepadWatchPanels.create({ ...view, controllerStyle,
         watchState: () => state, send(event) { if (event.type === 'WATCH_PANEL') state.panel = event.panel; },
         focus() { view.close.focus({ preventScroll: true }); }, controller: { readRoute: () => ({ key: location.pathname + location.search }) },
-        descriptionText: '视频简介\n这是一段需要清晰阅读的中文简介。\n\n'.repeat(80)
+        descriptionText: '网址 https://example.com/video，话题 #游戏 #YouTube\n' + '视频简介\n这是一段需要清晰阅读的中文简介。\n\n'.repeat(80),
+        descriptionRuns: [{ text: '网址 ' }, { text: 'https://example.com/video', href: 'https://example.com/video' }, { text: '，话题 ' },
+          { text: '#游戏', href: '/hashtag/%E6%B8%B8%E6%88%8F' }, { text: ' ' }, { text: '#YouTube', href: '/hashtag/YouTube' },
+          { text: '\n' + '视频简介\n这是一段需要清晰阅读的中文简介。\n\n'.repeat(80) }]
       });
       window.descriptionPanels.open('description');
     }, styles);
     const dialog = page.locator('#ytg-watch .description-panel'), sheet = dialog.locator('.sheet');
     const close = dialog.getByRole('button', { name: 'Close', exact: true });
     await close.waitFor();
+    const links = dialog.locator('[data-vue-description] a');
+    assert.equal(await links.count(), 3);
+    assert.equal(await links.nth(0).getAttribute('href'), 'https://example.com/video');
+    assert.equal(await links.nth(1).getAttribute('href'), '/hashtag/%E6%B8%B8%E6%88%8F');
+    assert.equal(await links.nth(2).getAttribute('href'), '/hashtag/YouTube');
+    assert.equal(await links.first().evaluate(node => getComputedStyle(node).color), dark ? 'rgb(62, 166, 255)' : 'rgb(6, 95, 212)');
+    assert.equal(await page.evaluate(() => window.descriptionPanels.items.length), 4, 'close and links participate in controller focus');
     const contrast = await dialog.locator('.description').evaluate(node => {
       const rgb = color => color.match(/[\d.]+/g).slice(0, 3).map(Number);
       const luminance = color => rgb(color).map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)

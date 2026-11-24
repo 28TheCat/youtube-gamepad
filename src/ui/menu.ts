@@ -1,6 +1,7 @@
 import type { Direction, Dispose, InteractionEvent, MenuDependencies, MenuModule, MenuPort, ModuleFactory } from '../../types/ports';
 
 import { YTGamepadActions } from '../shared/actions.ts';
+import { dialogHints } from './context-hints';
 import { ui } from './ui-api';
 import { createInterfaceIcon } from './icon-shapes';
 import { createStickScroller } from '../navigation/stick-scroll';
@@ -63,9 +64,16 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
   lifecycle.listen(window, 'scroll', positionSearch, true);
   lifecycle.listen(host, 'click', event => { if (event.composedPath()[0] === host) close(); });
   function buttons() { return Array.from(root.querySelectorAll<HTMLButtonElement>('button')).filter(button => !button.hidden && !button.disabled && !button.closest?.<HTMLElement>('[hidden]') && (!button.getClientRects || button.getClientRects().length > 0)); }
+  function updateHints() {
+    if (menuState().view === 'search') return;
+    const instructions = root.querySelector<HTMLElement>('#shortcuts');
+    if (instructions) controllerStyle.hint(instructions, dialogHints(root.activeElement as HTMLElement | null, true));
+  }
+  lifecycle.listen(root, 'focusin', updateHints);
   function focus() {
     const list = buttons(); selected = Math.max(0, Math.min(selected, list.length - 1));
     list[selected]?.focus({ preventScroll: true });
+    updateHints();
     list[selected]?.scrollIntoView({ block: 'nearest', inline: 'nearest',
       behavior: window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches ? 'smooth' : 'instant' });
   }
@@ -110,6 +118,16 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
     search.initializeQuery();
     positionSearch(); controller.interactionChanged?.();
   }
+  function openMain() {
+    if (lifecycle.destroyed || !controller) return false;
+    if (!menuState().opened) focusManager?.open(host, undefined, 100);
+    stopSettings(); search.setTarget(null); send({ type: 'MENU_OPEN' });
+    host.style.display = 'flex'; render(); controller.interactionChanged?.();
+  }
+  lifecycle.cleanup(ui.registerPanel('menu', {
+    isOpen: () => menuState().opened && menuState().view === 'main' && !settingsOpened,
+    open: openMain, close
+  }));
   lifecycle.cleanup(ui.registerPanel('settings', {
     isOpen: () => menuState().opened && settingsOpened,
     open: () => { if (!controller) return false; openSettings(); }, close
@@ -123,6 +141,26 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
     if (action === 'search') ui.openPanel('search');
     else if (action === 'extensionSettings') ui.openPanel('settings');
     else if (action === 'close') close();
+    else if (action.startsWith('watch:')) {
+      close(); ui.performWatchAction(action.slice('watch:'.length));
+    }
+    else if (action === 'refreshHome') void ui.refreshHome().then(ok => {
+      if (lifecycle.destroyed || !menuState().opened) return;
+      if (ok) close(); else feedback('Videos could not load. Try again.');
+    });
+    else if (action === 'pageMode') {
+      const mode = ui.state.browse?.mode === 'youtube' ? 'gamepad' : 'youtube';
+      void ui.setBrowseMode(mode).then(ok => {
+        if (lifecycle.destroyed || !menuState().opened || !button.isConnected) return;
+        if (!mountQuickMenu) render();
+        lifecycle.frame(() => {
+          if (!menuState().opened || settingsOpened || menuState().view !== 'main') return;
+          const target = root.querySelector<HTMLButtonElement>('[data-ytg-page-mode]');
+          if (target) { selected = buttons().indexOf(target); target.focus({ preventScroll: true }); }
+          feedback(ok ? 'Done' : ui.state.browse?.error || 'Could not save page mode. Try again.');
+        });
+      });
+    }
     else Promise.resolve(controller.perform(action as import('../../types/ports').Action)).then(ok => {
       if (!lifecycle.destroyed && menuState().opened && button.isConnected)
         feedback(ok ? 'Done' : 'No video or captions available on this page');
@@ -138,7 +176,10 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
     const main: [string,string][] = ['search', 'playPause', 'captions', 'volumeDown', 'volumeUp'].map(id => {
       const action = YTGamepadActions.get(id)!;
       return [id, action.menuLabel || action.label] as [string,string];
-    }).concat([['extensionSettings', 'All settings'], ['close', 'Back']]);
+    });
+    main.push(...ui.state.watchActions.map(item => [`watch:${item.id}`, item.label] as [string, string]));
+    if (ui.state.browse) main.push(['refreshHome', 'Refresh recommendations'], ['pageMode', ui.state.browse.mode === 'youtube' ? 'Switch to Gamepad' : 'Switch to YouTube']);
+    main.push(['extensionSettings', 'All settings'], ['close', 'Back']);
     const sheet = document.createElement('style');
     sheet.textContent = styles.menu;
     host.toggleAttribute?.('data-search', menuState().view === 'search');
@@ -188,13 +229,20 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
       const back = document.createElement('button'); controllerStyle.bind(back, 'Back to quick menu');
       back.addEventListener('click', () => {
         stopSettings();
-        render(); selected = 5; focus();
+        render(); selected = Math.max(0, buttons().findIndex(button => button.dataset.menuAction === 'extensionSettings')); focus();
       });
       root.querySelector<HTMLElement>('#items')!.append(back);
       publish({ source: 'yt-gamepad-open-settings' });
     } else {
       for (const [action, label] of main) {
+        const browse = ui.state.browse;
+        if (action === 'refreshHome' && (!browse?.home || browse.mode !== 'gamepad')) continue;
         const button = document.createElement('button'); controllerStyle.bind(button, label);
+        button.dataset.menuAction = action;
+        if (action === 'pageMode') {
+          button.setAttribute('data-ytg-page-mode', ''); button.setAttribute('role', 'switch');
+          button.setAttribute('aria-checked', String(browse?.mode === 'gamepad')); button.disabled = !!browse?.busy;
+        } else if (action === 'refreshHome') button.disabled = !browse?.canRefreshHome;
         button.addEventListener('click', () => activate(action, button)); root.querySelector<HTMLElement>('#items')!.append(button);
       }
     }
@@ -248,9 +296,7 @@ export let YTGamepadMenuModule!: ModuleFactory<MenuDependencies,MenuModule>, YTG
         switch (effect.type) {
           case 'openSearch': openSearch(); break;
           case 'openMenu':
-            settingsOpened = false;
-            focusManager?.open(host, undefined, 100);
-            search.setTarget(null); send({ type: 'MENU_OPEN' }); host.style.display = 'flex'; render(); controller.interactionChanged?.(); break;
+            openMain(); break;
           case 'closeMenu':
             // MENU_BACK already committed a closed state; help uses the close command.
             if (menuState().opened) close(); else finishClose(); break;

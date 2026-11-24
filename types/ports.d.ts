@@ -37,7 +37,11 @@ export interface RecommendationSnapshot {
   readonly thumbnail: string; readonly thumbnailFallback: string;
   readonly isPlaylist?: boolean;
 }
+export type WatchLoadStatus = 'loading' | 'ready' | 'failed';
 export interface WatchPageSnapshot extends RouteSnapshot {
+  readonly commentCount?: string;
+  readonly metadataStatus?: WatchLoadStatus;
+  readonly recommendationsStatus?: WatchLoadStatus;
   readonly recommendationFilters?: readonly RecommendationFilter[];
   readonly recommendationsLoading?: boolean;
   readonly metadataFailed?: boolean;
@@ -45,7 +49,7 @@ export interface WatchPageSnapshot extends RouteSnapshot {
   readonly queue?: readonly RecommendationSnapshot[];
   readonly playlistTitle?: string;
   readonly playlistTotal?: number;
-  readonly title: string; readonly channel: string; readonly description: string;
+  readonly title: string; readonly channel: string; readonly description: string; readonly descriptionRuns?: readonly import('./core').DescriptionRun[];
   readonly recommendations: readonly RecommendationSnapshot[];
   // Optional because the existing degraded read returns a minimal page snapshot.
   readonly notificationPreference?: NotificationPreference;
@@ -54,7 +58,8 @@ export interface WatchPageSnapshot extends RouteSnapshot {
   readonly likeCount?: number;
 }
 export interface CommentReplySnapshot {
-  readonly replyTo?: string;
+  readonly publishedTime?: string; readonly likeCount?: string; readonly liked?: boolean; readonly canLike?: boolean;
+  readonly replyTo?: string; readonly parentId?: string; readonly hasChildReplies?: boolean;
   readonly key: string; readonly author: string; readonly text: string;
   readonly avatar?: string;
   readonly translationTarget?: string;
@@ -69,14 +74,15 @@ export interface CommentSnapshot extends CommentReplySnapshot {
 export type WatchFeatures = Readonly<Partial<Record<'metadata' | 'recommendations' | 'comments'
   | 'channel' | 'captions' | 'settings' | 'subscribe' | 'like' | 'dislike' | 'save' | 'nativeLayers', Capability>>>;
 export interface AdaptationSnapshot { readonly status: 'inactive' | 'waiting' | 'ready' | 'fallback'; readonly reason: string; readonly route?: string }
-export interface CoordinatorSnapshot { readonly mode: Mode; readonly enabled: boolean; readonly surfaceReady: boolean; readonly shellVisible?: boolean; readonly transitioning?: boolean; readonly navigating: boolean }
+export interface CoordinatorSnapshot { readonly mode: Mode; readonly enabled: boolean; readonly surfaceReady: boolean; readonly playerStatus?: WatchLoadStatus; readonly shellVisible?: boolean; readonly transitioning?: boolean; readonly navigating: boolean }
 export interface Settings extends Partial<HomeFilterSettings> { seekStep?: number; shortsSeekStep?: number; volumeStep?: number; playbackLayout?: 'fullscreen' | 'windowed'; rightHandMode?: boolean; enabled: boolean; theater: boolean; deadzone: number; repeatDelay: number; repeatInterval: number; bindings?: Record<string, number>; bindingLayouts?: Record<string, Record<string, number>>; shortcutLayouts?: Record<string, Record<string, string>> }
 export type SearchTarget = HTMLInputElement | null;
 export type OperationResult = boolean | void;
 export type RecommendationResult = 'opened' | 'blocked' | 'missing' | 'failed';
 export interface CommentsStatus {
+  commentCount?: string;
   route?: string; loading: boolean; failed: boolean; hasMore: boolean;
-  interaction?: { signedIn: boolean; canPost: boolean; sort: 'TOP_COMMENTS' | 'NEWEST_FIRST'; sortAvailable: boolean; posting: boolean };
+  interaction?: { avatar?: string; placeholder?: string; signedIn: boolean; canPost: boolean; sort: 'TOP_COMMENTS' | 'NEWEST_FIRST'; sortAvailable: boolean; posting: boolean };
 }
 export interface WatchDataPort {
   readCommentsStatus?(): CommentsStatus | undefined;
@@ -87,6 +93,7 @@ export interface WatchDataPort {
   readWatchFeatures?(): WatchFeatures;
 }
 export interface WatchRequest {
+  (type: 'commentLike', value: string): Promise<boolean> | boolean;
   (type: 'commentPost', value: { text: string; key?: string }): OperationResult | Promise<OperationResult>;
   (type: 'commentSort', value: 'TOP_COMMENTS' | 'NEWEST_FIRST'): OperationResult;
   (type: 'fullscreen'): OperationResult | Promise<OperationResult>;
@@ -338,6 +345,7 @@ export interface SitePort extends WatchDataPort, SearchDataPort {
   openChannel(beforeNavigate: () => void): boolean;
   expandReplies(key: string): boolean; loadComments(start?: boolean): OperationResult;
   translateComment(key: string): boolean;
+  likeComment?(key: string): Promise<boolean>;
   postComment?(text: string, key?: string): Promise<boolean>;
   sortComments?(sort: 'TOP_COMMENTS' | 'NEWEST_FIRST'): boolean;
   loadRecommendations(kind?: 'queue' | 'recommendations'): OperationResult;
@@ -370,7 +378,7 @@ export interface WatchViewDependencies {
 export interface WatchPanelsPort {
   make: MakeNode; dialog: HTMLElement; sheet: HTMLElement; panelTitle: HTMLElement;
   description: HTMLElement; close: HTMLElement; surface: HTMLElement;
-  readonly controller: WatchPort; readonly descriptionText: string;
+  readonly controller: WatchPort; readonly descriptionText: string; readonly descriptionRuns?: readonly import('./core').DescriptionRun[];
   watchState(): WatchSnapshot; send(event: InteractionEvent): TransitionResult; focus(): void;
   focusManager?: FocusManager; controllerStyle: ControllerStyle;
 }

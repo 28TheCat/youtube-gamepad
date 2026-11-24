@@ -1,5 +1,6 @@
 import { sidebarHref, sidebarSnapshot, type SidebarSnapshot, type SidebarEntry } from '../shared/sidebar-data';
 import { createYouTubeHeaders, requestYouTube } from './youtube-request';
+import { resolveExplorePage } from '../shared/explore-pages';
 
 // Guide endpoints are parsed in MAIN. Only display data and validated links
 // cross the bridge; neither DOM guide renderers nor arbitrary commands are used.
@@ -39,7 +40,12 @@ export function createSidebarService() {
       const icons: Record<string, string> = { WHAT_TO_WATCH: 'home', SUBSCRIPTIONS: 'subscriptions', ACCOUNT_BOX: 'person',
         WATCH_HISTORY: 'history', PLAYLISTS: 'playlists', WATCH_LATER: 'later', LIKES: 'like', MY_VIDEOS: 'videos',
         CREATOR_STUDIO: 'videos', LIVE: 'live', SETTINGS: 'settings', SEARCH: 'search',
-        SHORTS: 'shorts', YOUTUBE_SHORTS_BRAND_24: 'shorts', DOWNLOADS: 'downloads', MY_CHANNEL: 'person' };
+        SHORTS: 'shorts', YOUTUBE_SHORTS_BRAND_24: 'shorts', DOWNLOADS: 'downloads', MY_CHANNEL: 'person',
+        MUSIC: 'music', MOVIES: 'movies', MOVIE: 'movies', GAMING: 'gaming', NEWS: 'news', SPORTS: 'sports',
+        YOUTUBE_PREMIUM: 'youtube-premium', YOUTUBE_MUSIC: 'youtube-music', YOUTUBE_KIDS: 'youtube-kids',
+        YOUTUBE_STUDIO: 'youtube-studio', CREATOR_STUDIO_RED_LOGO: 'youtube-studio',
+        YOUTUBE_PREMIUM_LOGO: 'youtube-premium', YOUTUBE_RED_LOGO: 'youtube-premium',
+        YOUTUBE_KIDS_ROUND: 'youtube-kids', YOUTUBE_LABS_RED_LOGO: 'youtube-labs', FLAG: 'report' };
       const destinations = new Map<string, { id?: string; icon: string }>([
         ['/', { id: 'home', icon: 'home' }],
         ['/feed/subscriptions', { id: 'subscriptions', icon: 'subscriptions' }],
@@ -55,8 +61,16 @@ export function createSidebarService() {
       function destination(href: string, personal: boolean): { id?: string; icon: string } | undefined {
         const url = new URL(href, 'https://www.youtube.com');
         const path = url.pathname.replace(/\/$/, '') || '/';
+        if (url.hostname === 'music.youtube.com') return { icon: 'youtube-music' };
+        if (url.hostname === 'kids.youtube.com' || url.hostname === 'www.youtubekids.com') return { icon: 'youtube-kids' };
         if (url.hostname === 'studio.youtube.com' && /^\/channel\/[^/]+\/videos(?:\/|$)/.test(path)) return { icon: 'videos' };
+        if (url.hostname === 'studio.youtube.com') return { icon: 'youtube-studio' };
         if (url.hostname !== 'www.youtube.com') return;
+        if (path === '/premium') return { icon: 'youtube-premium' };
+        if (path === '/new') return { icon: 'youtube-labs' };
+        if (path === '/feed/report_history') return { icon: 'report' };
+        const explore = resolveExplorePage(href);
+        if (explore) return { icon: explore.id };
         if (path === '/shorts' || path.startsWith('/shorts/')) return { icon: 'shorts' };
         if (personal && /^\/(?:channel\/UC[\w-]+|@[^/]+)$/.test(path)) return { icon: 'person' };
         const key = path === '/playlist' ? `${path}?list=${url.searchParams.get('list')}` : path;

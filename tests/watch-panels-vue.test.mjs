@@ -24,7 +24,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
   await page.evaluate(({ layout, styles }) => {
     document.documentElement.dataset.ytgPlaybackLayout = layout;
     document.documentElement.dataset.ytgInputMode = 'mouse';
-    const host = document.createElement('div'); host.id = 'panels'; document.body.append(host);
+    const host = document.createElement('div'); host.id = 'ytg-watch'; document.body.append(host);
     const root = host.attachShadow({ mode: 'open' });
     const make = (tag, className = '') => { const node = document.createElement(tag); node.className = className; return node; };
     const style = make('style'); style.textContent = styles;
@@ -32,7 +32,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
     dialog.hidden = true; dialog.append(sheet); root.append(style, surface, dialog);
     window.sheet = sheet; window.video = document.querySelector('video'); window.requests = []; window.routeKey = 'first';
     window.commentStatus = { loading: false, failed: false, hasMore: true };
-    window.records = Array.from({ length: 20 }, (_, index) => ({ key: `parent-${index}`, author: `Author ${index}`,
+    window.records = Array.from({ length: 20 }, (_, index) => ({ key: `parent-${index}`, author: index === 0 ? '@very-long-author-name-that-must-be-truncated-' .repeat(4) : `Author ${index}`, publishedTime: '2 years ago', likeCount: '166',
       text: `Parent comment ${index} with some text for reading.`, translationTarget: 'ja', hasReplies: true, replyCount: 20, repliesLabel: 'Load replies',
       replies: Array.from({ length: 12 }, (_, reply) => ({ key: `reply-${index}-${reply}`, author: `Reply author ${reply}`, text: `Reply ${reply} to parent ${index}`, translationTarget: 'ja' })) }));
     delete window.records[0].translationTarget; window.records[0].text = '这是一条中文评论';
@@ -67,8 +67,34 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
     });
     close.addEventListener('click', () => { if (!window.panels.back()) window.panels.close(); });
     window.panels.open('comments');
-  }, { layout, styles: readFileSync(new URL('../src/ui/watch.css', import.meta.url), 'utf8') });
-  const host = page.locator('#panels'), detail = host.locator('[data-comment-detail]');
+  }, { layout, styles: ['watch.css', 'watch-recommendations.css', 'watch-collection.css', 'comments.css'].map(file => readFileSync(new URL(`../src/ui/${file}`, import.meta.url), 'utf8')).join('\n') });
+  const host = page.locator('#ytg-watch'), detail = host.locator('[data-comment-detail]');
+  await host.locator('.comment-heading').waitFor({ state: 'visible' });
+  const authorLayout = await host.locator('.comment-author').first().evaluate(node => ({
+    truncated: node.scrollWidth > node.clientWidth, ellipsis: getComputedStyle(node).textOverflow,
+    nowrap: getComputedStyle(node).whiteSpace, title: node.title
+  }));
+  assert.equal(authorLayout.truncated, true);
+  assert.equal(authorLayout.ellipsis, 'ellipsis');
+  assert.equal(authorLayout.nowrap, 'nowrap');
+  assert.ok(authorLayout.title.startsWith('@very-long'));
+  assert.equal(await host.locator('.comment-published').first().textContent(), '· 2 years ago');
+  assert.equal(await host.locator('.comment-likes').first().textContent(), '166');
+
+  await page.screenshot({ path: `output/playwright/comment-heading-${layout}.png` });
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement?.dataset.focusId), 'comment:parent-0',
+    'opening comments starts on the first comment body');
+  await page.evaluate(() => { window.commentStatus.loading = true; window.panels.refresh(); });
+  assert.equal(await host.locator('.comment-skeleton').count(), 3);
+  assert.equal(await host.locator('.comment-thread').count(), 20, 'loading more retains existing comments');
+  assert.equal(await host.locator('[data-vue-comments]').evaluate(node => {
+    const skeleton = node.querySelector('.comment-skeletons');
+    return [...node.querySelectorAll('.comment-thread')].every(comment =>
+      !!(comment.compareDocumentPosition(skeleton) & Node.DOCUMENT_POSITION_FOLLOWING));
+  }), true, 'all placeholders follow existing comments');
+  assert.equal(await host.locator('.comment-skeletons :is(button,a,input,[tabindex],[data-focus-id])').count(), 0);
+  await page.evaluate(() => { window.commentStatus.loading = false; window.panels.refresh(); });
+  assert.equal(await host.locator('.comment-skeleton').count(), 0);
   assert.equal(await host.getByRole('button', { name: 'Back', exact: true }).count(), layout === 'windowed' ? 0 : 1);
   assert.equal(await host.locator('button.comment-header, .comment-header[tabindex], .comment-author[data-focus-id]').count(), 0,
     'commenter names do not create navigation stops');
@@ -84,17 +110,19 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
   await page.evaluate(() => { document.documentElement.dataset.ytgInputMode = 'gamepad'; });
   assert.equal(await original.locator('.comment-expand-hint').isVisible(), true, 'gamepad mode identifies the expand action');
   await page.evaluate(() => { document.documentElement.dataset.ytgInputMode = 'mouse'; });
-  assert.equal(await original.locator('.comment-replies-label').textContent(), 'View 20 replies');
+  assert.equal(await original.locator('.comment-replies-label').textContent(), '20');
   await original.scrollIntoViewIfNeeded(); await original.focus();
   const scrollBefore = await page.evaluate(() => window.sheet.scrollTop);
   await original.click();
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement?.dataset.focusId), 'comment:parent-10',
+    'expanding replies starts on the top parent comment rather than sorting controls');
   assert.equal(await detail.locator('.detail-parent .comment-text').textContent(), 'Parent comment 10 with some text for reading.');
   assert.equal(await host.locator('.comment-reply').count(), 5);
-  const branches = detail.locator('.detail-replies > .detail-branch');
-  assert.equal(await branches.first().locator('.reply-connection').evaluate(node => getComputedStyle(node).borderBottomLeftRadius), '16px');
-  assert.equal(await branches.first().locator('.reply-connection').evaluate(node => getComputedStyle(node).borderLeftWidth), '1px');
-  assert.equal(await branches.first().locator('.reply-continuation').isVisible(), true);
-  assert.equal(await branches.last().locator('.reply-continuation').isVisible(), false, 'the last reply terminates at its curved connection');
+  const guide = detail.locator('.detail-children > .detail-replies > .comment-tree-guides path');
+  await guide.waitFor();
+  assert.match(await guide.getAttribute('d'), /A 16 16/, 'BewlyCat geometry connects avatars with quarter-circle arcs');
+  assert.equal(await guide.evaluate(node => getComputedStyle(node).strokeWidth), '1px');
+  assert.equal(await detail.locator('.reply-connection, .reply-continuation').count(), 0, 'no overlapping CSS borders remain');
   assert.equal(await page.evaluate(() => window.sheet.scrollTop), 0);
   for (const dark of [false, true]) {
     await page.evaluate(dark => document.documentElement.toggleAttribute('dark', dark), dark);
@@ -116,9 +144,11 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
     }));
     for (const { kind, ...label } of labels) {
       const expected = kind === 'body' ? { fontSize: '16px', lineHeight: '24px', fontWeight: '400' }
-        : kind === 'author' ? { fontSize: '13px', lineHeight: '18px', fontWeight: '500' }
+        : kind === 'author' ? { fontSize: '14px', lineHeight: '20px', fontWeight: '600' }
         : { fontSize: '14px', lineHeight: '20px', fontWeight: '400' };
-      assert.deepEqual(label, { color: typography.panelColor, ...expected });
+      const { color, ...font } = label;
+      assert.deepEqual(font, expected);
+      if (kind !== 'author') assert.equal(color, typography.panelColor);
     }
   }
   await page.evaluate(() => document.documentElement.removeAttribute('dark'));
@@ -128,7 +158,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
   assert.equal(await detail.getByText('Parent comment 11 with some text for reading.', { exact: true }).count(), 0);
   await host.locator('[data-focus-id="replies:more"]').click();
   assert.equal(await host.locator('.comment-reply').count(), 10);
-  assert.equal(await page.evaluate(() => document.querySelector('#panels').shadowRoot.activeElement.dataset.focusId), 'comment:reply:["parent-10","reply-10-5"]');
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement.dataset.focusId), 'comment:reply:["parent-10","reply-10-5"]');
   assert.deepEqual(await page.evaluate(() => window.requests), [['comments', true]], 'cached batches do not issue network requests');
   await host.locator('[data-focus-id="replies:more"]').click();
   assert.equal(await host.locator('.comment-reply').count(), 12);
@@ -139,10 +169,31 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
   assert.equal(await detail.count(), 0);
   assert.equal(await host.getByRole('button', { name: 'Back', exact: true }).count(), layout === 'windowed' ? 0 : 1);
   assert.equal(await page.evaluate(() => window.sheet.scrollTop), scrollBefore);
-  assert.equal(await page.evaluate(() => document.querySelector('#panels').shadowRoot.activeElement.dataset.focusId), 'replies:parent-10');
+  assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement.dataset.focusId), 'replies:parent-10');
   assert.equal(await host.locator('.comment-reply').count(), 0);
   await original.click();
   assert.equal(await host.locator('.comment-reply').count(), 5, 'reentering starts with a small batch again');
+  await page.evaluate(() => {
+    window.records[10].replies.push(
+      { key: 'single-grandchild', parentId: 'reply-10-0', author: 'Single', text: 'One nested reply' },
+      { key: 'multi-one', parentId: 'reply-10-1', author: 'First', text: 'First nested reply' },
+      { key: 'multi-two', parentId: 'reply-10-1', author: 'Second', text: 'Second nested reply' });
+    window.panels.refresh();
+  });
+  assert.equal(await detail.getByText('One nested reply', { exact: true }).count(), 1, 'a single grandchild is shown automatically');
+  assert.equal(await detail.locator('[data-focus-id="branch:reply-10-0"]').count(), 0);
+  assert.equal(await detail.getByText('First nested reply', { exact: true }).count(), 0, 'multiple grandchildren start collapsed');
+  const toggle = detail.locator('[data-focus-id="branch:reply-10-1"]');
+  await toggle.click();
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(await detail.locator('.nested-replies .detail-branch').count(), 3);
+  const nestedGuides = detail.locator('.nested-replies > .comment-tree-guides path');
+  await nestedGuides.last().waitFor();
+  assert.equal(await nestedGuides.count(), 2, 'each parent draws its own children in one path');
+  await page.screenshot({ path: `output/playwright/comment-tree-${layout}.png` });
+  await toggle.click();
+  assert.equal(await detail.getByText('First nested reply', { exact: true }).count(), 0);
+  await page.evaluate(() => { window.records[10].replies = window.records[10].replies.filter(item => !item.parentId); window.panels.refresh(); });
   assert.equal(await page.evaluate(() => window.video === document.querySelector('#playing-video')), true);
   for (const language of ['ja', 'de', 'zh-Hans', 'en']) {
     await page.evaluate(language => {
@@ -230,7 +281,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`comments use independent 
   await page.evaluate(code);
   await page.evaluate(({ layout, styles }) => {
     document.documentElement.dataset.ytgPlaybackLayout = layout;
-    const host = document.createElement('div'); host.id = 'panels'; document.body.append(host);
+    const host = document.createElement('div'); host.id = 'ytg-watch'; document.body.append(host);
     const root = host.attachShadow({ mode: 'open' });
     const make = (tag, className = '') => { const node = document.createElement(tag); node.className = className; return node; };
     const style = make('style'); style.textContent = styles;
@@ -245,7 +296,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`comments use independent 
       controller: { readRoute: () => ({ key: 'fixture' }), readComments: () => [], request() {} }, descriptionText: 'Description'
     });
     window.panels.open('comments');
-  }, { layout, styles: readFileSync(new URL('../src/ui/watch.css', import.meta.url), 'utf8') });
+  }, { layout, styles: ['watch.css', 'watch-recommendations.css', 'watch-collection.css', 'comments.css'].map(file => readFileSync(new URL(`../src/ui/${file}`, import.meta.url), 'utf8')).join('\n') });
   const result = await page.evaluate(async () => {
     const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
     const opening = [];
@@ -303,7 +354,7 @@ for (const trustedTypes of [false, true]) {
     await page.goto('https://www.youtube.com/watch?v=fixture');
     await page.evaluate(code);
     await page.evaluate(() => {
-      const host = document.createElement('div'); host.id = 'panels'; document.body.append(host);
+      const host = document.createElement('div'); host.id = 'ytg-watch'; document.body.append(host);
       const root = host.attachShadow({ mode: 'open' });
       const make = (tag, className = '') => { const node = document.createElement(tag); node.className = className; return node; };
       const dialog = make('div'), sheet = make('section'), description = make('div'), panelTitle = make('h2'), close = make('button'), surface = make('div');
@@ -330,7 +381,7 @@ for (const trustedTypes of [false, true]) {
       close.addEventListener('click', () => { if (!window.panels.back()) window.panels.close(); });
       window.panels.open('description');
     });
-    const host = page.locator('#panels');
+    const host = page.locator('#ytg-watch');
     assert.equal(await host.locator('[data-vue-description]').textContent(), '<b>Description</b>\nSecond line');
     assert.equal(await host.locator('b').count(), 0);
     await page.evaluate(() => { window.descriptionText = 'Updated description'; window.panels.refresh(); });
@@ -355,7 +406,7 @@ for (const trustedTypes of [false, true]) {
       window.panels.refresh();
     });
     assert.equal(await host.locator('.comment-avatar img').count(), 2);
-    await page.waitForFunction(() => [...document.querySelector('#panels').shadowRoot.querySelectorAll('.comment-avatar img')]
+    await page.waitForFunction(() => [...document.querySelector('#ytg-watch').shadowRoot.querySelectorAll('.comment-avatar img')]
       .every(image => image.complete && image.naturalWidth > 0));
     await host.locator('.comment-reply .comment-avatar img').dispatchEvent('error');
     assert.equal(await host.locator('.comment-reply .comment-avatar img').count(), 0);
@@ -363,7 +414,7 @@ for (const trustedTypes of [false, true]) {
     // Prepending a native comment must preserve focus on the reply action by ID.
     await host.locator('[data-focus-id="replies:more"]').focus();
     await page.evaluate(() => { window.records.unshift({ key: 'zero', author: 'New', text: 'New comment', hasReplies: false, repliesLabel: '', replies: [] }); window.panels.refresh(); });
-    assert.equal(await page.evaluate(() => document.querySelector('#panels').shadowRoot.activeElement.dataset.focusId), 'replies:more');
+    assert.equal(await page.evaluate(() => document.querySelector('#ytg-watch').shadowRoot.activeElement.dataset.focusId), 'replies:more');
     await page.evaluate(() => window.panels.back());
     assert.equal(await host.locator('[data-comment-detail]').count(), 0);
     await host.getByRole('button', { name: 'Load more comments' }).click();
@@ -393,14 +444,14 @@ for (const trustedTypes of [false, true]) {
     assert.equal(await host.locator('img').count(), 0);
     await page.evaluate(() => { window.failSave = true; });
     await playlist.click();
-    await page.waitForFunction(() => document.querySelector('#panels').shadowRoot.querySelector('[role="status"]')?.textContent.includes('Could not update playlists'));
+    await page.waitForFunction(() => document.querySelector('#ytg-watch').shadowRoot.querySelector('[role="status"]')?.textContent.includes('Could not update playlists'));
     assert.equal(await playlist.getAttribute('aria-pressed'), 'false');
     await host.getByRole('button', { name: 'Retry', exact: true }).click();
-    await page.waitForFunction(() => !document.querySelector('#panels').shadowRoot.querySelector('[data-focus-id="playlist:0"]').disabled);
+    await page.waitForFunction(() => !document.querySelector('#ytg-watch').shadowRoot.querySelector('[data-focus-id="playlist:0"]').disabled);
     assert.equal(await page.evaluate(() => window.requests.at(-1)[0]), 'playlists');
     await page.evaluate(() => { window.failSave = false; });
     await playlist.click();
-    await page.waitForFunction(() => document.querySelector('#panels').shadowRoot.querySelector('[data-focus-id="playlist:0"]').getAttribute('aria-pressed') === 'true');
+    await page.waitForFunction(() => document.querySelector('#ytg-watch').shadowRoot.querySelector('[data-focus-id="playlist:0"]').getAttribute('aria-pressed') === 'true');
     assert.deepEqual(await page.evaluate(() => window.requests.at(-1)), ['savePlaylist', '0']);
     await host.getByRole('button', { name: 'Back', exact: true }).click();
     assert.equal(await host.locator('[data-vue-playlists]').count(), 0);
@@ -450,7 +501,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`subscription menu persist
         } }, descriptionText: '' });
     close.addEventListener('click', () => window.subscriptionPanels.close());
     window.subscriptionPanels.open('subscription');
-  }, { layout, styles: readFileSync(new URL('../src/ui/watch.css', import.meta.url), 'utf8') });
+  }, { layout, styles: ['watch.css', 'watch-recommendations.css', 'watch-collection.css', 'comments.css'].map(file => readFileSync(new URL(`../src/ui/${file}`, import.meta.url), 'utf8')).join('\n') });
   const host = page.locator('#subscription-fixture');
   assert.equal(await host.locator('[data-focus-id="notificationsPersonalized"]').getAttribute('aria-pressed'), 'true');
   assert.deepEqual(await page.evaluate(() => window.subscriptionCalls), [], 'opening the menu cannot unsubscribe');
