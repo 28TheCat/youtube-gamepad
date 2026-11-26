@@ -4,7 +4,7 @@ import CommentThread from './CommentThread.vue';
 import CommentSkeleton from './CommentSkeleton.vue';
 import CommentActions from './CommentActions.vue';
 import SubscriptionOptions from './SubscriptionOptions.vue';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import CommentBranch from './CommentBranch.vue';
 import CommentTreeGuides from './CommentTreeGuides.vue';
 const commentActions = ref<InstanceType<typeof CommentActions>>();
@@ -36,6 +36,21 @@ const rootReplies = computed(() => {
   const keys = new Set(items.map(item => item.key));
   return items.filter(item => !item.parentId || item.parentId === props.thread?.key || !keys.has(item.parentId));
 });
+const moreComments = ref<HTMLButtonElement | null>(null);
+const canAutoLoadComments = computed(() => props.commentsStatus?.hasMore &&
+  !props.commentsStatus.loading && !props.commentsStatus.failed);
+watch([moreComments, canAutoLoadComments, () => props.commentRoute, () => props.records.length],
+  ([button, canLoad], _, onCleanup) => {
+    if (!button || !canLoad || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(entries => {
+      if (moreComments.value !== button || !canAutoLoadComments.value ||
+        !entries.some(entry => entry.isIntersecting && entry.intersectionRatio > 0)) return;
+      observer.disconnect();
+      props.load();
+    });
+    observer.observe(button);
+    onCleanup(() => observer.disconnect());
+  }, { flush: 'post' });
 const vHint: Directive<HTMLElement, [ControllerStyle, string]> = {
   mounted(el, binding) { binding.value[0].hint(el, binding.value[1]); },
   updated(el, binding) {
@@ -94,6 +109,6 @@ const vHint: Directive<HTMLElement, [ControllerStyle, string]> = {
       </template>
     </LoadStatus>
     <button v-if="!commentsStatus?.failed && records.length && (!commentsStatus || commentsStatus.hasMore)"
-      class="control" data-focus-id="comments:more" :disabled="commentsStatus?.loading" @click="load">{{ t('Load more comments') }}</button>
+      ref="moreComments" class="control" data-focus-id="comments:more" :disabled="commentsStatus?.loading" @click="load">{{ t('Load more comments') }}</button>
   </div>
 </template>

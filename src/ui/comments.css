@@ -17,6 +17,33 @@
 @media(max-width:1050px){:host-context(html:not([data-ytg-playback-layout="fullscreen"])):host(:where(#ytg-watch)) .comments .sheet{padding:16px}}
 :host-context(html:not([data-ytg-playback-layout="fullscreen"])):host(:where(#ytg-watch)) .dialog.comments,:host-context(html:not([data-ytg-playback-layout="fullscreen"])):host(:where(#ytg-watch)) .comments .sheet{background:var(--watch-banner-background);box-shadow:inset 1px 0 0 var(--ytg-border)}
 
+/* Fullscreen reading shares the native player's reserved width. */
+:host-context(html[data-ytg-playback-layout="fullscreen"].ytg-watch-reading) .surface{display:none}
+:host-context(html[data-ytg-playback-layout="fullscreen"]):host(:where(#ytg-watch)) .dialog:is(.comments,.description-panel){
+  inset:0 0 0 auto;width:var(--ytg-reading-side,clamp(320px,34vw,640px));padding:0;background:transparent
+}
+:host-context(html[data-ytg-playback-layout="windowed"]):host(:where(#ytg-watch)) .dialog.description-panel{
+  inset:0 0 0 auto;width:var(--watch-side);padding:0;background:transparent
+}
+:host(:where(#ytg-watch)) .dialog:is(.comments,.description-panel)[hidden]{transition:none}
+:host(:where(#ytg-watch)) .dialog.description-panel .sheet,
+:host-context(html[data-ytg-playback-layout="fullscreen"]):host(:where(#ytg-watch)) .dialog.comments .sheet{
+  width:100%;height:100%;max-height:100%;border-radius:0;box-shadow:none;overscroll-behavior:contain
+}
+:host-context(html[data-ytg-playback-layout="fullscreen"]):host(:where(#ytg-watch)) .description-panel :is(.sheet,.panel-heading){
+  background:var(--ytg-comments-background);color:var(--ytg-overlay-text);border-color:var(--ytg-overlay-border)
+}
+:host-context(html[data-ytg-playback-layout="fullscreen"]):host(:where(#ytg-watch)) .description-panel [data-vue-description] a{color:#a8c7fa}
+:host-context(html[data-ytg-playback-layout="fullscreen"]):host(:where(#ytg-watch)) .description-panel .description,
+:host-context(html[data-ytg-playback-layout="fullscreen"]):host(:where(#ytg-watch)) .comments .comment-text{
+  font-size:max(var(--ytg-font-body),clamp(17px,1.15vw,22px));line-height:1.5
+}
+@media(max-width:640px){
+  :host-context(html[data-ytg-playback-layout="fullscreen"]):host(:where(#ytg-watch)) .dialog:is(.comments,.description-panel){
+    inset:var(--ytg-reading-stack,min(42dvh,56.25vw)) 0 0;width:auto
+  }
+}
+
 /* Shared by watch and Shorts panels; only their outer shells differ. */
 .comments{--comment-accent-color:color-mix(in srgb,var(--ytg-brand-color,#ff0033) 70%,#fff)}
 :host-context(html:not([dark]):not([data-ytg-playback-layout="fullscreen"])) .dialog.comments{--comment-accent-color:color-mix(in srgb,var(--ytg-brand-color,#ff0033) 85%,#000)}

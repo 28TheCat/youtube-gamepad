@@ -441,7 +441,9 @@ test('Shorts drawers use real comments, reactions and playlists and isolate dire
       const style = getComputedStyle(node);
       return { fontSize: style.fontSize, lineHeight: style.lineHeight, fontWeight: style.fontWeight, color: style.color };
     });
-    assert.deepEqual(typography, { ...(selector === '.comment-author' ? { fontSize: '13px', lineHeight: '18px', fontWeight: '500' } : { fontSize: '16px', lineHeight: '24px', fontWeight: '400' }), color: 'rgb(15, 15, 15)' });
+    assert.deepEqual(typography, selector === '.comment-author'
+      ? { fontSize: '14px', lineHeight: '20px', fontWeight: '600', color: 'color(srgb 0.0588235 0.0588235 0.0588235 / 0.78)' }
+      : { fontSize: '16px', lineHeight: '24px', fontWeight: '400', color: 'rgb(15, 15, 15)' });
   }
   await page.waitForTimeout(250);
   const after = await page.locator('#shorts-player').boundingBox();
@@ -454,8 +456,10 @@ test('Shorts drawers use real comments, reactions and playlists and isolate dire
   const press = button => pressPad(page, button);
   await player.locator('[data-focus-id="replies:short-comment"]').click();
   await player.locator('[data-comment-detail] .detail-replies .comment-text').filter({ hasText: 'A reply on this Short.' }).waitFor();
-  assert.equal(await player.locator('.reply-connection').last().evaluate(node => getComputedStyle(node).borderBottomLeftRadius), '16px');
-  assert.equal(await player.locator('.detail-replies .reply-continuation').last().isVisible(), false);
+  const guide = player.locator('[data-comment-detail] .detail-children > .detail-replies > .comment-tree-guides path');
+  await guide.waitFor({ state: 'attached' });
+  assert.match(await guide.getAttribute('d'), /A 16 16/, 'the reply guide draws a rounded connection between avatars');
+  assert.equal(await player.locator('[data-focus-id="replies:more"]').count(), 0, 'a completed reply thread has no pagination control');
   await press(1);
   assert.equal(await player.locator('.drawer').isVisible(), true, 'B returns from replies to comments before closing');
   assert.equal(await player.locator('[data-comment-detail]').count(), 0);
@@ -556,6 +560,12 @@ test('Shorts More offers captions, available quality and subscription management
   await page.waitForFunction(() => document.querySelector('#ytg-shorts-controls').shadowRoot.querySelector('[data-shorts-action=subscribe]')?.getAttribute('aria-label') === 'Subscribed, manage subscription');
   await subscribe.click();
   assert.equal(await controls.locator('[data-vue-subscription] button').count(), 4);
+  assert.equal(await subscribe.count(), 0, 'the More actions are removed while Notifications owns the drawer');
+  await press(1);
+  assert.equal(await controls.getAttribute('data-panel'), 'actions');
+  assert.equal(await controls.evaluate(host => host.shadowRoot.activeElement?.dataset.shortsAction), 'subscribe');
+  await press(0);
+  assert.equal(await controls.getAttribute('data-panel'), 'subscription');
   const preferences = () => controls.locator('[data-vue-subscription] [aria-pressed]').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-pressed')));
   const originalPreferences = await preferences();
   rejectPreference = true;

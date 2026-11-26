@@ -198,11 +198,12 @@ export function createInlineSettingsModel(root: ShadowRoot, container: HTMLEleme
     let url: string | undefined;
     try {
       const interactionReplay = interactionTrace?.snapshot();
+      const playbackSwitches = interactionTrace?.playbackSwitchSnapshot?.();
       const saved = await chrome.storage.local.get(diagnostics.key);
       if (disposed) return;
       const entries = diagnostics.bounded(saved[diagnostics.key]);
       const report = { formatVersion: 1, extensionVersion: chrome.runtime.getManifest().version,
-        exportedAt: new Date().toISOString(), entries, interactionReplay };
+        exportedAt: new Date().toISOString(), entries, interactionReplay, playbackSwitches };
       url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
       const link = document.createElement('a');
       link.href = url;

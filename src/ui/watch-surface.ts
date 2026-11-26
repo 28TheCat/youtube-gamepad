@@ -300,7 +300,7 @@ export function createWatchSurface(dependencies: WatchSurfaceDependencies, callb
       unregisterPanels();
       panels.destroy(); presentation.destroy(); host.hidden = true; host.remove(); root.replaceChildren(); recommendations = []; recommendationTargetsCache = [];
       recommendationTargetMap.clear();
-      document.documentElement.classList.remove('ytg-watch-active', 'ytg-recommendations', 'ytg-comments', 'ytg-settings-open');
+      document.documentElement.classList.remove('ytg-watch-active', 'ytg-recommendations', 'ytg-comments', 'ytg-watch-reading', 'ytg-settings-open');
     }
   };
 }

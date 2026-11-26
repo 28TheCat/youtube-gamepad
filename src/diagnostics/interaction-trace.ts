@@ -17,6 +17,7 @@ export interface InteractionReplay {
 export interface InteractionTrace {
   snapshot(): InteractionReplay | undefined;
   clear(): void;
+  playbackSwitchSnapshot?(): unknown;
 }
 
 const maxSteps = 48;

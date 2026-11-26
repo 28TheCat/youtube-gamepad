@@ -52,6 +52,7 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
       controller: { readRoute: () => ({ key: window.routeKey }), readComments: () => structuredClone(window.records), readCommentsStatus: () => window.commentStatus,
         request(type, key) {
           window.requests.push([type, key]);
+          if (type === 'comments' && !key) window.commentStatus = { loading: true, failed: false, hasMore: true };
           if (type === 'translateComment') {
             const item = window.records.find(item => item.key === key) || window.records.flatMap(item => item.replies).find(item => item.key === key);
             item.translation = { language: item.translationTarget, text: `Translated ${key} to ${item.translationTarget}`, loading: false, failed: false };
@@ -104,13 +105,15 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
   assert.equal(await host.locator('[data-focus-id="translate:parent-1"]').count(), 0, 'English without a native entry also has no button');
   assert.match(await host.locator('[data-focus-id="translate:parent-2"]').textContent(), /English/, 'a native target is authoritative regardless of source script');
   assert.equal(await host.locator('.comment-reply').count(), 0, 'even cached replies are not expanded in the parent list');
+  await host.locator('[data-focus-id="comment:parent-10"]').click();
+  assert.equal(await detail.count(), 0, 'selecting the comment body does not open replies');
   const original = host.locator('[data-focus-id="replies:parent-10"]');
   assert.equal(await original.locator('.comment-expand-hint [data-ytg-key]').getAttribute('data-ytg-key'), 'A');
   assert.equal(await original.locator('.comment-expand-hint').isVisible(), false, 'mouse mode hides the controller prompt');
   await page.evaluate(() => { document.documentElement.dataset.ytgInputMode = 'gamepad'; });
   assert.equal(await original.locator('.comment-expand-hint').isVisible(), true, 'gamepad mode identifies the expand action');
   await page.evaluate(() => { document.documentElement.dataset.ytgInputMode = 'mouse'; });
-  assert.equal(await original.locator('.comment-replies-label').textContent(), '20');
+  assert.equal(await original.locator('.comment-replies-label').textContent(), 'View 20 replies');
   await original.scrollIntoViewIfNeeded(); await original.focus();
   const scrollBefore = await page.evaluate(() => window.sheet.scrollTop);
   await original.click();
@@ -236,6 +239,12 @@ for (const layout of ['windowed', 'fullscreen']) test(`thread details isolate on
   });
   assert.equal(await detail.count(), 0, 'a late reply response cannot reopen a thread after Back');
   assert.equal(await host.locator('.comment-reply').count(), 0);
+  assert.equal(await page.evaluate(() => window.requests.filter(([type]) => type === 'comments').length), 1);
+  await page.evaluate(() => { window.sheet.scrollTop = window.sheet.scrollHeight; });
+  await page.waitForFunction(() => window.requests.some(([type, start]) => type === 'comments' && !start));
+  assert.equal(await host.locator('.comment-thread').count(), 20, 'automatic paging keeps earlier comments visible');
+  assert.equal(await host.locator('[data-focus-id="comments:more"]').isDisabled(), true);
+  assert.equal(await page.evaluate(() => window.requests.filter(([type]) => type === 'comments').length), 2);
   await page.evaluate(() => { window.panels.hide(); window.routeKey = 'second'; window.records = []; window.panels.open('comments'); });
   assert.equal(await detail.count(), 0, 'route changes clear thread history');
   assert.equal(await page.evaluate(() => window.panels.back()), false);

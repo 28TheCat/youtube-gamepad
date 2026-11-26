@@ -377,6 +377,7 @@ export let YTGamepadShortsModule = {
       mount(); panelDrawer.open();
       clearPanelActions();
       panelView?.dispose(); panelView = undefined; comments.reset(); playlist.reset();
+      body.replaceChildren();
       drawer.classList.toggle('comments', value === 'comments');
       panel = value; panelKey = '';
       host!.dataset.panel = value; document.documentElement.classList.add('ytg-shorts-panel-open');
@@ -429,7 +430,8 @@ export let YTGamepadShortsModule = {
       if (switching()) return;
       if (panel !== 'actions') { openPanel('actions'); }
       panelDrawer.enterDetail(() => { openPanel('actions'); });
-      clearPanelActions(); extraActions.clear(); panel = value; panelKey = ''; optionFocus = '';
+      clearPanelActions(); extraActions.clear(); body.replaceChildren();
+      panel = value; panelKey = ''; optionFocus = '';
       host!.dataset.panel = value; paintOptions(); panelDrawer.focus();
     }
     function paintOptions() {

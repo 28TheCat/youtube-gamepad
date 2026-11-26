@@ -11,6 +11,64 @@ const result = await build({ configFile: false, publicDir: false, logLevel: 'sil
   build: { write: false, minify: false, lib: { entry: fileURLToPath(new URL('./helpers/tv-playback-fixture.ts', import.meta.url)), formats: ['iife'], name: 'TvPlaybackFixture' } } });
 const code = (Array.isArray(result) ? result[0] : result).output.find(item => item.type === 'chunk').code;
 
+test('fullscreen reading leaves room for captions and returns to the opening control', async t => {
+  const page = await browserPage(t);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setContent(`<html class="ytg-watch-layout ytg-controls ytg-gamepad-input" data-ytg-playback-layout="fullscreen"><body>
+    <div id="movie_player"><video class="html5-main-video" muted></video>
+    <div class="caption-window ytp-caption-window-bottom" style="position:absolute;left:20%;top:auto;color:white">Test captions</div></div>
+    </body></html>`);
+  for (const path of ['../src/ui/theme.css', '../src/app/theater.css'])
+    await page.addStyleTag({ content: readFileSync(new URL(path, import.meta.url), 'utf8') });
+  await page.addScriptTag({ content: code + ';window.fixture = TvPlaybackFixture.setup("A line of the long comment.\\n".repeat(80) + "End of comment.");' });
+  await page.evaluate(async () => {
+    const video = document.querySelector('video');
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    let frame = 0;
+    video.srcObject = canvas.captureStream(30);
+    setInterval(() => { context.fillRect(frame++ % canvas.width, 0, 1, canvas.height); }, 33);
+    await video.play();
+  });
+  const host = page.locator('#ytg-watch'), menu = page.locator('#yt-gamepad-menu');
+  const player = page.locator('#movie_player'), caption = player.locator('.caption-window');
+  const expanded = await player.boundingBox();
+  const press = action => page.evaluate(action => window.fixture.press(action), action);
+  for (const name of ['comments', 'description']) {
+    await host.locator('[data-action="moreActions"]').click();
+    await menu.locator(`[data-menu-action="watch:${name}"]`).click();
+    const dialog = host.locator('.dialog:not([hidden])');
+    const panel = await dialog.boundingBox(), media = await player.boundingBox(), subtitles = await caption.boundingBox();
+    assert.ok(media.width < expanded.width);
+    assert.ok(media.x + media.width <= panel.x + 1);
+    assert.ok(subtitles.y >= media.y && subtitles.y + subtitles.height <= media.y + media.height);
+    const time = await player.locator('video').evaluate(video => video.currentTime);
+    await page.waitForFunction(time => document.querySelector('video').currentTime > time, time);
+    if (name === 'comments') {
+      const sheet = dialog.locator('.sheet');
+      const text = sheet.locator('[data-focus-id="comment:long"]');
+      await text.waitFor();
+      for (let i = 0; i < 25; i++) await press('down');
+      assert.ok(await sheet.evaluate(node => {
+        const comment = node.querySelector('.comment-text');
+        return node.scrollTop > 0 && comment.getBoundingClientRect().bottom <= node.getBoundingClientRect().bottom;
+      }));
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    const stackedPanel = await dialog.boundingBox(), stackedMedia = await player.boundingBox(), stackedCaption = await caption.boundingBox();
+    assert.ok(stackedMedia.y + stackedMedia.height <= stackedPanel.y + 1);
+    assert.ok(stackedCaption.x >= stackedMedia.x && stackedCaption.x + stackedCaption.width <= stackedMedia.x + stackedMedia.width);
+    assert.ok(stackedCaption.y >= stackedMedia.y && stackedCaption.y + stackedCaption.height <= stackedPanel.y);
+    assert.ok(await dialog.locator('.sheet').evaluate(node => node.scrollWidth <= node.clientWidth));
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await press('back');
+    await dialog.waitFor({ state: 'hidden' });
+    assert.equal(await host.evaluate(node => node.shadowRoot.activeElement?.dataset.focusId), 'moreActions');
+    assert.equal((await player.boundingBox()).width, expanded.width);
+  }
+});
+
 test('fullscreen keeps media controls primary and returns from secondary actions without leaving playback', { timeout: 30000 }, async t => {
   const page = await browserPage(t);
   await page.setViewportSize({ width: 1920, height: 1080 });

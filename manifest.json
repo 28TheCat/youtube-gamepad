@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Gamepad",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Browse YouTube and control video playback with a gamepad.",
   "icons": {
     "128": "assets/icons/gamepad-128.png"

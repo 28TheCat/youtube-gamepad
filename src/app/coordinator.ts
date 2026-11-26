@@ -30,7 +30,7 @@ import { playbackParameterDefaults, normalizePlaybackParameters, type PlaybackPa
 export let YTGamepadCoordinator: CoordinatorModule | undefined;
 // Application policy: mode transitions, route history and module coordination.
 /** @param {{ interaction: import('../../types/ports.js').InteractionStore, mountQuickMenu?: import('../../types/ports.js').MenuDependencies['mountQuickMenu'] }} dependencies */
-export function startCoordinator({ interaction, mountQuickMenu, createWatchView, mountBrowseOverlay, mountBrowseGrid, pageAccess, localChannel, remoteHistory }: { pageAccess?: import("../bridge/page-protocol").PageAccess, localChannel?: import("../../types/ports").ApplicationChannel, remoteHistory?: boolean, interaction: import('../../types/ports.js').InteractionStore, mountQuickMenu?: import('../../types/ports.js').MenuDependencies['mountQuickMenu'], createWatchView: (port: import('../../types/ports').WatchViewDependencies) => import('../../types/ports').WatchView, mountBrowseOverlay?: import('../../types/ports').CoreDependencies['mountOverlay'], mountBrowseGrid?: import('../../types/ports').BrowseDependencies['mountGrid'] }) {
+export function startCoordinator({ interaction, mountQuickMenu, createWatchView, mountBrowseOverlay, mountBrowseGrid, pageAccess, localChannel, remoteHistory, playbackSwitch }: { playbackSwitch?: ReturnType<typeof import('../diagnostics/playback-switch-trace').createPlaybackSwitchTrace>, pageAccess?: import("../bridge/page-protocol").PageAccess, localChannel?: import("../../types/ports").ApplicationChannel, remoteHistory?: boolean, interaction: import('../../types/ports.js').InteractionStore, mountQuickMenu?: import('../../types/ports.js').MenuDependencies['mountQuickMenu'], createWatchView: (port: import('../../types/ports').WatchViewDependencies) => import('../../types/ports').WatchView, mountBrowseOverlay?: import('../../types/ports').CoreDependencies['mountOverlay'], mountBrowseGrid?: import('../../types/ports').BrowseDependencies['mountGrid'] }) {
   // The composition root assembles imported factories and their dependencies.
   const runtime = YTGamepadRuntime;
   const focusManager = YTGamepadFocus;
@@ -460,12 +460,18 @@ export function startCoordinator({ interaction, mountQuickMenu, createWatchView,
       case 'channel': return site.openChannel(() => setMode('browse'));
       case 'recommendation': {
         let id: number | false = false;
+          let tracing = false;
         try {
-          const result = site.openRecommendation(value, href => !!(id = routes.prepareVideo(href)));
+            const result = site.openRecommendation(value, href => {
+              try { tracing = playbackSwitch?.start(href) || false; } catch { /* Diagnostics are optional. */ }
+              return !!(id = routes.prepareVideo(href));
+            });
           if (result !== 'opened' && id) routes.cancelRequest(id);
+            if (result !== 'opened' && tracing) playbackSwitch?.finish(result);
           return result;
         } catch (error) {
           if (id) routes.cancelRequest(id);
+            if (tracing) playbackSwitch?.finish('error');
           throw error;
         }
       }

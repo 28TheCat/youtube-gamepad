@@ -60,9 +60,8 @@ const replyLabel = computed(() => 'replyCount' in props.item && props.item.reply
         <span v-if="item.replyTo" class="comment-reply-target">{{ t('Replying to {author}', { author: item.replyTo }) }}</span>
       </div>
       <div class="comment-body">
-        <component :is="canOpen ? 'button' : 'p'" class="comment-text" :data-focus-id="`comment:${key}`"
-          :tabindex="canOpen ? undefined : 0" :lang="translated ? target : undefined"
-          @click="canOpen && openThread?.(item.key)">{{ translated ? translation?.text : item.text }}</component>
+        <p class="comment-text" :data-focus-id="`comment:${key}`" tabindex="0"
+          :lang="translated ? target : undefined">{{ translated ? translation?.text : item.text }}</p>
         <button v-if="translate && target" class="comment-translate" :data-focus-id="`translate:${key}`" :disabled="translation?.loading"
           :aria-pressed="translated" @click="toggleTranslation">{{ translation?.loading ? t('Translating…') : translated ? t('Show original') : translation?.failed ? t('Retry translation') : t('Translate to {language}', { language: targetName }) }}</button>
         <LoadStatus class="translation-error" :failed="translation?.failed" error-role="status"
@@ -73,7 +72,7 @@ const replyLabel = computed(() => 'replyCount' in props.item && props.item.reply
         <span v-if="likeFailed" role="status">{{ t('Could not update like. Try again.') }}</span>
         <button v-if="canOpen" class="comment-replies" :data-focus-id="`replies:${item.key}`" :aria-label="replyLabel" @click="openThread?.(item.key)">
           <span class="comment-expand-hint key-controller-badge" aria-hidden="true"><span v-badge></span></span>
-          <InterfaceIcon name="comments" /><span class="comment-replies-label">{{ 'replyCount' in item && item.replyCount !== undefined ? item.replyCount : t('View replies') }}</span>
+          <InterfaceIcon name="comments" /><span class="comment-replies-label">{{ replyLabel }}</span>
         </button>
         <button v-if="reply && 'canReply' in item && item.canReply" class="comment-reply-action" :data-focus-id="`reply:${item.key}`" @click="reply(item.key)">{{ t('Reply') }}</button>
       </div>

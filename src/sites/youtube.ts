@@ -247,7 +247,7 @@ export let YTGamepadSite: SitePort | undefined, YTGamepadSiteModule!: ModuleFact
     } catch (error) { diagnoseSite('inspectWatchCapabilities', error); return { ready: false, failed: true, missing: ['player interface'] }; }
   }
   function restoreNativeInterface() {
-    for (const name of ['ytg-playback', 'ytg-controls', 'ytg-watch-active', 'ytg-recommendations', 'ytg-comments', 'ytg-settings-open']) {
+    for (const name of ['ytg-playback', 'ytg-controls', 'ytg-watch-active', 'ytg-recommendations', 'ytg-comments', 'ytg-watch-reading', 'ytg-settings-open']) {
       document.documentElement.classList.remove?.(name);
       document.documentElement.classList.toggle(name, false);
     }

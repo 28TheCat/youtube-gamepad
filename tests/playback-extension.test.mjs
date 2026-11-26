@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { launchExtension, virtualPad } from './helpers/extension.mjs';
 
 // Sample neutral/pressed states in browser frames, independently of runner delays.
@@ -156,6 +157,48 @@ for (const input of ['mouse', 'gamepad']) test(`InnerTube recommendations and pl
     await setPad({ connected: true, button: 0 });
   }
   await page.waitForURL('**/watch?v=queued&list=PLtest&index=2');
+});
+
+test('recommendation selection appears in the exported diagnostic report', { timeout: 60000 }, async t => {
+  const { context, worker } = await launchExtension(t);
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, language: 'en' }));
+  const body = fixture.replace(/<ytd-watch-next-secondary-results-renderer>[\s\S]*?<\/ytd-watch-next-secondary-results-renderer>/, '');
+  const queue = { playlistId: 'PLtest', contents: [
+    { playlistPanelVideoRenderer: { videoId: 'fixture', title: { simpleText: 'Current' }, selected: true, navigationEndpoint: { watchEndpoint: { videoId: 'fixture', playlistId: 'PLtest', index: 0 } } } },
+    { playlistPanelVideoRenderer: { videoId: 'queued', title: { simpleText: 'Queued video' }, navigationEndpoint: { watchEndpoint: { videoId: 'queued', playlistId: 'PLtest', index: 1 } } } }
+  ] };
+  await context.route('https://www.youtube.com/**', route => route.request().url().includes('/youtubei/v1/next')
+    ? route.fulfill({ json: { contents: { twoColumnWatchNextResults: { ...nextFixture.contents.twoColumnWatchNextResults, playlist: { playlist: queue } } } } })
+    : route.fulfill({ contentType: 'text/html', body }));
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/watch?v=fixture&list=PLtest&index=1');
+  await page.evaluate(() => {
+    const app = document.createElement('ytd-app');
+    app.handleNavigate = request => {
+      document.dispatchEvent(new Event('yt-navigate-start'));
+      history.pushState({}, '', request.command.commandMetadata.webCommandMetadata.url);
+      document.dispatchEvent(new Event('yt-navigate-finish'));
+    };
+    document.body.append(app);
+  });
+  const setPad = await virtualPad(context, page);
+  await page.bringToFront(); await setPad({ connected: true });
+  await page.waitForFunction(() => document.documentElement.classList.contains('ytg-theater'));
+  await pressPad(page, 13);
+  await page.locator('#ytg-watch .card').filter({ hasText: 'Queued video' }).click();
+  await page.waitForURL('**/watch?v=queued&list=PLtest&index=2');
+  await page.waitForTimeout(350);
+  await page.keyboard.press('F1');
+  const menu = page.locator('#yt-gamepad-menu');
+  await menu.getByRole('button', { name: 'All settings', exact: true }).click();
+  await menu.getByRole('button', { name: 'Help & diagnostics', exact: true }).click();
+  const pendingDownload = page.waitForEvent('download');
+  await menu.locator('[data-setting="exportDiagnostics"]').click();
+  const report = JSON.parse(await readFile(await (await pendingDownload).path(), 'utf8'));
+  assert.equal(report.playbackSwitches.length, 1);
+  assert.equal(report.playbackSwitches[0].milestones.addressTarget, true);
+  assert.ok(report.playbackSwitches[0].steps.some(step => step.event === 'selected'));
+  assert.doesNotMatch(JSON.stringify(report.playbackSwitches), /queued|fixture|PLtest/);
 });
 
 test('both gamepad layouts reach the real content bridge and disabling restores native controls', { timeout: 60000 }, async t => {

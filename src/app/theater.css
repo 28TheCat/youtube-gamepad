@@ -23,14 +23,24 @@ html.ytg-gamepad-input .ytg-selected :is(a#video-title,a#video-title-link,a#thum
 /* Both gamepad layouts retain their geometry through loading and recovery. */
 html.ytg-watch-layout,html.ytg-watch-layout body{overflow:hidden!important}
 html.ytg-watch-layout :is(ytd-masthead,#secondary,#below,ytd-guide-renderer,ytd-mini-guide-renderer){display:none!important}
-/* The selected layout has one geometry from PREPARE_VIDEO through playback.
-   Readiness controls the interface, never the size of the media frame. */
+/* Keep the selected geometry through loading and playback. */
 /* Stable detail-page regions; contain the media inside the remaining stage. */
 html:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-top:0px;--ytg-watch-info-height:177px;--ytg-watch-side:460px;--ytg-watch-width:calc(100vw - var(--ytg-watch-side));--ytg-watch-height:max(80px,calc(100dvh - var(--ytg-watch-top) - var(--ytg-watch-info-height)))}
 @media(max-width:1050px){html:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-side:340px}}
 @media(max-width:700px){html:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-side:min(240px,40vw)}}
 html[data-ytg-playback-layout="windowed"]:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-top:56px}
 html[data-ytg-playback-layout="fullscreen"]:is(.ytg-watch-layout,.ytg-player-primed){--ytg-watch-width:100vw;--ytg-watch-height:100vh}
+html.ytg-watch-reading{--ytg-reading-side:clamp(320px,34vw,640px);--ytg-reading-stack:min(42dvh,56.25vw)}
+html[data-ytg-playback-layout="fullscreen"].ytg-watch-layout.ytg-watch-reading:not([data-ytg-native]){
+  --ytg-watch-width:calc(100vw - var(--ytg-reading-side));
+  --ytg-watch-height:min(100dvh,calc(var(--ytg-watch-width) * 9 / 16));
+  --ytg-watch-top:calc((100dvh - var(--ytg-watch-height)) / 2)
+}
+@media(max-width:640px){
+  html[data-ytg-playback-layout="fullscreen"].ytg-watch-layout.ytg-watch-reading:not([data-ytg-native]){
+    --ytg-watch-width:100vw;--ytg-watch-height:var(--ytg-reading-stack);--ytg-watch-top:0px
+  }
+}
 html:is(.ytg-watch-layout,.ytg-player-primed) #movie_player{position:fixed!important;inset:var(--ytg-watch-top) auto auto 0!important;width:var(--ytg-watch-width)!important;height:var(--ytg-watch-height)!important;max-width:none!important;max-height:none!important;z-index:2147483645!important;background:#000!important}
 html:is(.ytg-watch-layout,.ytg-player-primed) #movie_player .html5-video-container{width:100%!important;height:100%!important}
 html:is(.ytg-watch-layout,.ytg-player-primed) #movie_player video.html5-main-video{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:contain!important}
@@ -57,12 +67,13 @@ html.ytg-watch-active:not([data-ytg-native]) #movie_player .ytp-panel-header{fon
 html.ytg-settings-open #yt-gamepad-overlay{--ytg-focus-color:#fff}
 /* Windowed panels remain visible beside/below the player while its menu owns input. */
 html[data-ytg-playback-layout="windowed"].ytg-watch-active:not([data-ytg-native]).ytg-settings-open #ytg-watch{z-index:2147483644!important}
-html[data-ytg-playback-layout="fullscreen"].ytg-watch-active:not([data-ytg-native]).ytg-settings-open #ytg-watch{visibility:hidden}
+html[data-ytg-playback-layout="fullscreen"].ytg-watch-active:not([data-ytg-native]).ytg-settings-open:not(.ytg-watch-reading) #ytg-watch{visibility:hidden}
+html[data-ytg-playback-layout="fullscreen"].ytg-watch-active:not([data-ytg-native]).ytg-settings-open.ytg-watch-reading #ytg-watch{z-index:2147483644!important}
 /* Account prompts, subscription menus and playlist choosers stay interactive. */
 html.ytg-watch-active:not([data-ytg-native]) ytd-popup-container{position:relative;z-index:2147483647!important}
 html.ytg-watch-active:not([data-ytg-native]) :is(tp-yt-paper-dialog,ytd-menu-popup-renderer){z-index:2147483647!important}
-html[data-ytg-playback-layout="fullscreen"].ytg-watch-active:not([data-ytg-native]).ytg-controls:not(.ytg-comments) #movie_player .caption-window.ytp-caption-window-bottom{bottom:46vh!important}
-html[data-ytg-playback-layout="fullscreen"].ytg-watch-active:not([data-ytg-native]).ytg-recommendations:not(.ytg-comments) #movie_player .caption-window.ytp-caption-window-bottom{bottom:68vh!important}
+html[data-ytg-playback-layout="fullscreen"].ytg-watch-active:not([data-ytg-native]).ytg-controls:not(.ytg-watch-reading) #movie_player .caption-window.ytp-caption-window-bottom{bottom:46vh!important}
+html[data-ytg-playback-layout="fullscreen"].ytg-watch-active:not([data-ytg-native]).ytg-recommendations:not(.ytg-watch-reading) #movie_player .caption-window.ytp-caption-window-bottom{bottom:68vh!important}
 
 /* A coordinator safety gate also protects against partially failed renders. */
 html[data-ytg-native] #ytg-watch{display:none!important}
@@ -70,6 +81,7 @@ html[data-ytg-native] #ytg-watch{display:none!important}
 /* Reserve the right panel and the metadata area without scrolling the watch page. */
 html.ytg-watch-layout body{background:var(--ytg-background)!important}
 html.ytg-watch-layout #movie_player .caption-window.ytp-caption-window-bottom{bottom:10%!important}
+html[data-ytg-playback-layout="fullscreen"].ytg-watch-layout.ytg-watch-reading:not([data-ytg-native]) body{background:#000!important}
 
 
 /* Adaptation errors keep the client surface until the user explicitly exits. */

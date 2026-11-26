@@ -127,7 +127,8 @@ test('exported interaction events replay browser focus and history decisions', {
   const download = await pendingDownload;
   const report = await readFile(await download.path(), 'utf8');
   assert.doesNotMatch(report, /private-trace-query/);
-  const { interactionReplay } = JSON.parse(report);
+  const { interactionReplay, playbackSwitches } = JSON.parse(report);
+  assert.deepEqual(playbackSwitches, []);
   assert.ok(interactionReplay.steps.some(step => step.effects.some(effect => effect.type === 'navigate' && effect.value === 'down')));
   assert.ok(interactionReplay.steps.some(step => step.effects.some(effect => effect.type === 'historyBack')));
   assertInteractionReplay(interactionReplay);

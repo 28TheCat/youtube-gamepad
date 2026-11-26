@@ -10,7 +10,7 @@ import { YTGamepadMenuModule } from '../../src/ui/menu';
 import { mountQuickMenu } from '../../src/ui/quick-menu';
 import { YTGamepadStyles as styles } from '../../src/ui/styles';
 
-export function setup() {
+export function setup(commentText = '') {
   const pinia = createPinia(), interaction = useInteractionStore(pinia);
   const commands: unknown[][] = [];
   const controllerStyle = { register: () => () => {}, badge() {}, bind(node: HTMLElement, text: string, attribute?: string) {
@@ -31,7 +31,8 @@ export function setup() {
   });
   const port = { state: { enabled: true, shellVisible: true, surfaceReady: true, navigating: false, get mode() { return mode; } }, navigating: false,
     readRoute: () => ({ key: page.key, isWatch: true }), readWatchPage: () => ({ ...page }), readPlayback: () => ({ ...playback, video: { ...playback.video } }),
-    readWatchFeatures: () => ({}), readComments: () => [], observePlayback() {},
+    readWatchFeatures: () => ({}), readComments: () => commentText ? [{ key: 'long', author: 'Viewer', text: commentText,
+      hasReplies: false, replies: [] }] : [], observePlayback() {},
     hasTemporaryLayer: () => menu.opened || !!interaction.state.watch.panel,
     dispatchAction: (action: any) => menu.opened ? menu.handle(action) : watch.handleInput(action),
     requestRefresh: () => watch.sync(),

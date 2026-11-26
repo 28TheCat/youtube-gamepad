@@ -126,7 +126,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     // Keep the panel geometry through the discrete display/opacity exit transition.
     // Removing "comments" here turns the fading sidebar into a full-screen backdrop.
     unmount(); send({ type: 'WATCH_PANEL', panel: '' }); surface.classList.remove('comments-open');
-    document.documentElement.classList.remove('ytg-comments');
+    document.documentElement.classList.remove('ytg-comments', 'ytg-watch-reading');
   }
   function closePanel() {
     drawer.close();
@@ -222,6 +222,7 @@ export let YTGamepadWatchPanels!: ModuleFactory<WatchPanelsPort,WatchPanels>;
     sheet.scrollTop = 0;
     const title = action === 'description' ? 'Video description' : action === 'playlists' ? 'Save to playlist' : action === 'subscription' ? 'Notifications' : 'Comments';
     drawer.open(action !== 'comments');
+    document.documentElement.classList.toggle('ytg-watch-reading', action === 'comments' || action === 'description');
     send({ type: 'WATCH_PANEL', panel: action });
     controllerStyle.bind(panelTitle, title); controllerStyle.bind(dialog, title, 'aria-label');
     dialog.setAttribute('aria-modal', String(action !== 'comments'));

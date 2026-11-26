@@ -16,6 +16,7 @@ import { waitForPageServer } from '../bridge/page-ready';
 import { configureDiagnosticsChannel } from '../diagnostics/diagnostics';
 import { mountBrowseCategorySettings } from '../sites/browse-category-settings';
 import { createAppShell } from '../ui/app-shell';
+import { createPlaybackSwitchTrace } from '../diagnostics/playback-switch-trace';
 export const localChannel = createApplicationChannel();
 const startup = new AbortController();
 const startupScope = YTGamepadRuntime.scope('startup');
@@ -37,16 +38,19 @@ if (startup.signal.aborted) return;
 const pinia = createPinia();
 YTGamepadRuntime.scope('interaction').cleanup(() => disposePinia(pinia));
 const interaction = useInteractionStore(pinia);
+const playbackSwitch = createPlaybackSwitchTrace(pageAccess);
+startupScope.cleanup(playbackSwitch.destroy);
 const shell = createAppShell();
 startupScope.cleanup(shell.destroy);
-startCoordinator({ interaction, pageAccess, localChannel, remoteHistory: true, createWatchView: port => createVueWatchView(port, shell.mountContent), mountBrowseOverlay,
+startCoordinator({ interaction, pageAccess, localChannel, playbackSwitch, remoteHistory: true, createWatchView: port => createVueWatchView(port, shell.mountContent), mountBrowseOverlay,
   mountBrowseGrid: dependencies => mountBrowseSurface(pinia, dependencies, localChannel, shell.mountChrome),
   mountQuickMenu: (container, _interaction, items, onAction) => mountQuickMenu(pinia, container, items, onAction)
 });
 let settingsApplied!: () => void;
 const initialSettings = new Promise<void>(resolve => { settingsApplied = resolve; });
 const disposeContent = startContent(localChannel, () => YTGamepadRuntime.destroy(), settingsApplied,
-  { snapshot: interaction.snapshotTrace, clear: interaction.clearTrace });
+  { snapshot: interaction.snapshotTrace, playbackSwitchSnapshot: playbackSwitch.snapshot,
+    clear: () => { interaction.clearTrace(); playbackSwitch.clear(); } });
 if (startup.signal.aborted) return;
 const extensionServices = YTGamepadRuntime.scope('extension-services');
 extensionServices.cleanup(disposeContent);
