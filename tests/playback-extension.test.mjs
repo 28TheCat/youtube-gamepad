@@ -119,7 +119,7 @@ function nextOrPage(route, options) {
 
 for (const input of ['mouse', 'gamepad']) test(`InnerTube recommendations and playlist queue retain queue navigation (${input})`, { timeout: 60000 }, async t => {
   const { context, worker } = await launchExtension(t);
-  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, language: 'en' }));
+  await worker.evaluate(() => chrome.storage.local.set({ enabled: true, autoFullscreen: false, playbackLayout: 'windowed', language: 'en' }));
   const body = fixture.replace(/<ytd-watch-next-secondary-results-renderer>[\s\S]*?<\/ytd-watch-next-secondary-results-renderer>/, '');
   const calls = [];
   const queue = { playlistId: 'PLtest', contents: [
@@ -142,17 +142,27 @@ for (const input of ['mouse', 'gamepad']) test(`InnerTube recommendations and pl
   assert.equal(calls[0].videoId, 'fixture');
   assert.equal(calls[0].playlistId, 'PLtest');
   assert.equal(calls[0].index, 0);
-  assert.equal(await host.locator('.card').count(), 7);
+  assert.equal(await host.locator('.collection-panel .card').count(), 2);
+  await page.evaluate(() => {
+    const app = document.createElement('ytd-app');
+    app.handleNavigate = request => {
+      document.dispatchEvent(new Event('yt-navigate-start'));
+      history.pushState({}, '', request.command.commandMetadata.webCommandMetadata.url);
+      document.dispatchEvent(new Event('yt-navigate-finish'));
+    };
+    document.body.append(app);
+  });
   const setPad = await virtualPad(context, page);
   await page.bringToFront(); await setPad({ connected: true });
   await page.waitForFunction(() => document.documentElement.classList.contains('ytg-theater'));
   await pressPad(page, 13);
   const queued = host.locator('.card').filter({ hasText: 'Queued video' });
   await queued.waitFor({ state: 'visible' });
-  assert.match(await queued.innerText(), /Playlists/);
-  assert.equal(await page.evaluate(() => document.documentElement.dataset.ytgPlaybackLayout), 'fullscreen');
+  assert.match(await queued.innerText(), /2\s+Queued video/);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.ytgPlaybackLayout), 'windowed');
   if (input === 'mouse') await queued.click();
   else {
+    await queued.focus();
     assert.equal(await host.evaluate(node => node.shadowRoot.activeElement?.dataset.videoId), await queued.getAttribute('data-video-id'));
     await setPad({ connected: true, button: 0 });
   }
